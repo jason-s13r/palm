@@ -19,6 +19,7 @@ import {
 import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 import { authorizePage, codePage } from "./oauth-page.ts";
+import { peopleRoutes } from "./people.ts";
 import { accountStats, statusRoutes } from "./statuses.ts";
 import { account, credentialAccount, instanceV1, instanceV2, MASTODON_VERSION } from "./views.ts";
 
@@ -289,32 +290,7 @@ app.get("/api/v1/accounts/verify_credentials", async (c) => {
   return c.json(credentialAccount(c.env, acct, await accountStats(c.env, acct)));
 });
 
-app.get("/api/v1/accounts/relationships", (c) => c.json([]));
-app.get("/api/v1/accounts/lookup", async (c) => {
-  const name = (c.req.query("acct") ?? "").replace(/^@/, "").replace(new RegExp(`@${c.env.domain.domain}$`, "i"), "");
-  const found = name.includes("@") ? null : await accountForLogin(c.env.bindings.DB, c.env.domain.domain, name);
-  return found ? c.json(account(c.env, found.account, await accountStats(c.env, found.account))) : fail(c, "Record not found", 404);
-});
-
-// Several accounts at once, by ID; unknown ones are left out.
-app.get("/api/v1/accounts", async (c) => {
-  const ids = [...(c.req.queries("id[]") ?? []), ...(c.req.queries("id") ?? [])].filter((id) => /^\d+$/.test(id)).slice(0, 40);
-  const found = await Promise.all(ids.map((id) => accountById(c.env.bindings.DB, Number(id))));
-  const local = found.filter((a): a is Account => a !== null && a.domain === c.env.domain.domain);
-  return c.json(await Promise.all(local.map(async (a) => account(c.env, a, await accountStats(c.env, a)))));
-});
-
-// Followers of an account that the signed-in account also follows: none yet.
-app.get("/api/v1/accounts/familiar_followers", (c) =>
-  c.json(c.req.queries("id[]")?.concat(c.req.queries("id") ?? []).map((id) => ({ id, accounts: [] })) ?? []),
-);
-
-app.get("/api/v1/accounts/:id{[0-9]+}", async (c) => {
-  const found = await accountById(c.env.bindings.DB, Number(c.req.param("id")));
-  return found && found.domain === c.env.domain.domain
-    ? c.json(account(c.env, found, await accountStats(c.env, found)))
-    : fail(c, "Record not found", 404);
-});
+app.route("/", peopleRoutes);
 
 app.get("/api/v1/preferences", (c) =>
   c.json({
@@ -336,9 +312,6 @@ const empty = (c: C) => c.json([]);
 for (const path of [
   "/api/v1/timelines/tag/:tag",
   "/api/v1/timelines/list/:id",
-  "/api/v1/notifications",
-  "/api/v1/accounts/:id/followers",
-  "/api/v1/accounts/:id/following",
   "/api/v1/accounts/:id/endorsements",
   "/api/v1/accounts/:id/featured_tags",
   "/api/v1/accounts/:id/lists",
@@ -355,8 +328,6 @@ for (const path of [
   "/api/v1/blocks",
   "/api/v1/mutes",
   "/api/v1/domain_blocks",
-  "/api/v1/bookmarks",
-  "/api/v1/favourites",
   "/api/v1/scheduled_statuses",
   "/api/v1/trends",
   "/api/v1/trends/tags",
@@ -368,12 +339,6 @@ for (const path of [
   app.get(path, empty);
 }
 
-app.get("/api/v1/markers", (c) => c.json({}));
-app.post("/api/v1/markers", (c) => c.json({}));
-app.get("/api/v2/notifications", (c) => c.json({ accounts: [], statuses: [], notification_groups: [] }));
-app.get("/api/v2/notifications/unread_count", (c) => c.json({ count: 0 }));
-app.get("/api/v1/notifications/unread_count", (c) => c.json({ count: 0 }));
-app.get("/api/v2/search", (c) => c.json({ accounts: [], statuses: [], hashtags: [] }));
 app.get("/api/v1/instance/translation_languages", (c) => c.json({}));
 app.get("/api/v2/notifications/policy", (c) =>
   c.json({

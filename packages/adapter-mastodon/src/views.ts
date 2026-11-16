@@ -25,6 +25,7 @@ export const avatarUrl = (host: string) => `https://${host}/palm/avatar.png`;
 export interface AccountStats {
   statuses: number;
   followers: number;
+  following: number;
   lastStatusAt: number | null;
 }
 
@@ -36,26 +37,31 @@ export interface AccountStats {
 export const profileUrl = (ctx: RequestContext, username: string) => `https://${ctx.host}/@${encodeURIComponent(username)}`;
 
 export function account(ctx: RequestContext, a: Account, stats?: AccountStats) {
+  const local = a.apId === null;
+  const avatar = a.avatarUrl ?? avatarUrl(ctx.host);
+  const header = a.headerUrl ?? avatarUrl(ctx.host);
   return {
     id: String(a.id),
     username: a.username,
-    acct: a.username,
+    // Mastodon writes local accounts by name alone, remote ones with their host.
+    acct: local ? a.username : `${a.username}@${a.domain}`,
     display_name: a.displayName ?? a.username,
     locked: false,
-    bot: false,
+    bot: a.actorType === "Service",
     discoverable: true,
     indexable: false,
     group: false,
     created_at: day(a.createdAt),
-    note: a.bio ? `<p>${escapeHtml(a.bio)}</p>` : "",
-    url: profileUrl(ctx, a.username),
-    uri: urls.user(ctx.domain.domain, a.username),
-    avatar: avatarUrl(ctx.host),
-    avatar_static: avatarUrl(ctx.host),
-    header: avatarUrl(ctx.host),
-    header_static: avatarUrl(ctx.host),
+    // Local bios are plain text; remote ones arrive as (sanitised) HTML.
+    note: a.bio ? (local ? `<p>${escapeHtml(a.bio)}</p>` : a.bio) : "",
+    url: local ? profileUrl(ctx, a.username) : (a.profileUrl ?? a.apId!),
+    uri: a.apId ?? urls.user(a.domain, a.username),
+    avatar,
+    avatar_static: avatar,
+    header,
+    header_static: header,
     followers_count: stats?.followers ?? 0,
-    following_count: 0,
+    following_count: stats?.following ?? 0,
     statuses_count: stats?.statuses ?? 0,
     last_status_at: stats?.lastStatusAt ? iso(stats.lastStatusAt).slice(0, 10) : null,
     hide_collections: false,
