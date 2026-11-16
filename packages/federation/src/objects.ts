@@ -1,4 +1,4 @@
-import { Create, Document, Hashtag, Link, Mention, Note, Page, PUBLIC_COLLECTION, Source, Tombstone, type Object as APObject } from "@fedify/fedify/vocab";
+import { ChatMessage, Create, Document, Hashtag, Link, Mention, Note, Page, PUBLIC_COLLECTION, Source, Tombstone, type Object as APObject } from "@fedify/fedify/vocab";
 import { urls } from "@palm/core";
 import {
   accountById,
@@ -96,7 +96,10 @@ export function addressing(parts: PostParts): { tos: URL[]; ccs: URL[] } {
  * A post as an ActivityPub object: a Lemmy post is a Page with a title, a
  * comment or a status is a Note.
  */
-export function objectFor(parts: PostParts): Note | Page {
+/** Lemmy people live at /u/name. */
+const isLemmyPerson = (a: Account) => a.apId !== null && /\/u\/[^/]+$/.test(a.apId);
+
+export function objectFor(parts: PostParts): Note | Page | ChatMessage {
   const { post, author, community, parent, media, mentions } = parts;
   const id = postUri(post, author);
   const attachments: (Document | Link)[] = media.map(
@@ -125,7 +128,13 @@ export function objectFor(parts: PostParts): Note | Page {
       ...parts.tags.map((t) => new Hashtag({ href: new URL(urls.tag(author.domain, t)), name: `#${t}` })),
     ],
   };
-  return post.title && post.rootId === null ? new Page({ ...values, name: post.title }) : new Note(values);
+  if (post.title && post.rootId === null) return new Page({ ...values, name: post.title });
+  // A direct message to one person on Lemmy is a Lemmy private message.
+  const [only] = mentions;
+  if (post.visibility === "direct" && !parent && !post.inReplyTo && mentions.length === 1 && only && isLemmyPerson(only)) {
+    return new ChatMessage({ ...values, tags: [], source: new Source({ content: post.contentSource, mediaType: "text/markdown" }) });
+  }
+  return new Note(values);
 }
 
 export function createFor(parts: PostParts): Create {

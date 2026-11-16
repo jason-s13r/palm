@@ -175,3 +175,5 @@ export {
 export type { BlockKind, Hidden } from "./blocks.ts";
 export { cardsFor, hasCard, saveCard } from "./cards.ts";
 export type { LinkCard } from "./cards.ts";
+export { countUnreadMessages, directMessages, markMessagesRead } from "./messages.ts";
+export type { DirectMessage } from "./messages.ts";

@@ -339,7 +339,6 @@ for (const path of [
   "/api/v1/accounts/:id/featured_tags",
   "/api/v1/accounts/:id/lists",
   "/api/v1/endorsements",
-  "/api/v1/conversations",
   "/api/v1/lists",
   "/api/v1/filters",
   "/api/v2/filters",

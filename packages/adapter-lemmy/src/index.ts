@@ -19,6 +19,7 @@ import {
   setBlockedDomains,
   admins,
   countAccounts,
+  countUnreadMessages,
   createSession,
   instanceSecret,
   setPasswordHash,
@@ -52,6 +53,7 @@ import type {
   SuccessResponse,
 } from "lemmy-js-client";
 import { blockRoutes, blocksOf } from "./blocks.ts";
+import { messageRoutes } from "./messages.ts";
 import { followedPeople, inboxItems, lemmyInboxCounts, personThreads, resolveObject, searchThreads, threadRoutes } from "./threads.ts";
 import { LEMMY_VERSION, myUserInfo, personView, siteView } from "./views.ts";
 
@@ -352,6 +354,7 @@ async function personNamed(c: C, name: string): Promise<Account | null> {
 }
 
 app.route("/", blockRoutes);
+app.route("/", messageRoutes);
 app.route("/", threadRoutes);
 
 // --- the inbox: replies to and mentions of the signed-in account -------------
@@ -359,8 +362,11 @@ app.route("/", threadRoutes);
 app.get("/api/v3/user/unread_count", async (c) => {
   const auth = c.get("auth");
   if (!auth) return fail(c, "not_logged_in", 401);
-  const counts = await lemmyInboxCounts(c.env.bindings.DB, auth.account.id);
-  return c.json({ ...counts, private_messages: 0 } satisfies GetUnreadCountResponse);
+  const [counts, privateMessages] = await Promise.all([
+    lemmyInboxCounts(c.env.bindings.DB, auth.account.id),
+    countUnreadMessages(c.env.bindings.DB, auth.account.id),
+  ]);
+  return c.json({ ...counts, private_messages: privateMessages } satisfies GetUnreadCountResponse);
 });
 
 app.get("/api/v3/user/replies", async (c) => {
@@ -429,7 +435,6 @@ app.get("/api/v3/modlog", (c) =>
     hidden_communities: [],
   }),
 );
-app.get("/api/v3/private_message/list", (c) => c.json({ private_messages: [] } satisfies PrivateMessagesResponse));
 app.get("/api/v3/federated_instances", async (c) => {
   const db = c.env.bindings.DB;
   const [linked, blocked] = await Promise.all([knownDomains(db), blockedDomains(db)]);

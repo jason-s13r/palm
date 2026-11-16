@@ -1,5 +1,8 @@
 import { escapeHtml, hashtagsIn, mentionsIn, previewLink, textToHtml, urls, type RequestContext } from "@palm/core";
 import {
+  directMessages,
+  markMessagesRead,
+  type DirectMessage,
   cardsFor,
   type LinkCard,
   hiddenFor,
@@ -717,4 +720,68 @@ statusRoutes.put("/api/v1/media/:id", async (c) => {
   const description = text((await body(c)).description).trim() || null;
   await describeMedia(c.env.bindings.DB, media.id, description);
   return c.json(mediaAttachment(c.env, { ...media, description }));
+});
+
+// --- conversations: direct messages, grouped by who's in them ---------------
+
+/** A viewer's direct messages, grouped by the people in them, newest first. */
+async function conversations(c: C, me: Account) {
+  const messages = await directMessages(c.env.bindings.DB, me.id, { limit: 200 });
+  const groups = new Map<string, DirectMessage[]>();
+  for (const m of messages) {
+    const others = [...new Set([m.post.accountId, ...m.recipientIds])].filter((id) => id !== me.id).sort((a, b) => a - b);
+    const key = others.join(",");
+    groups.set(key, [...(groups.get(key) ?? []), m]);
+  }
+  // A conversation's ID is its first message's: stable as long as that message is.
+  return [...groups.entries()].map(([key, list]) => ({
+    id: Math.min(...list.map((m) => m.post.id)),
+    others: key ? key.split(",").map(Number) : [],
+    messages: list,
+  }));
+}
+
+statusRoutes.get("/api/v1/conversations", async (c) => {
+  const me = c.get("account");
+  if (!me) return fail(c, "The access token is invalid", 401);
+  const limit = Math.min(Math.max(Number(c.req.query("limit")) || 20, 1), 40);
+  const maxId = Number(c.req.query("max_id")) || Infinity;
+  const all = (await conversations(c, me)).filter((g) => g.messages[0]!.post.id < maxId).slice(0, limit);
+  const people = await accountsByIds(c.env.bindings.DB, all.flatMap((g) => g.others));
+  const latest = await statuses(c.env, all.map((g) => g.messages[0]!.post), me);
+  const byId = new Map(latest.map((s) => [s.id, s]));
+  return c.json(
+    all.flatMap((g) => {
+      const last = byId.get(String(g.messages[0]!.post.id));
+      if (!last) return [];
+      return [
+        {
+          id: String(g.id),
+          unread: g.messages.some((m) => !m.read),
+          accounts: g.others.flatMap((id) => (people.has(id) ? [account(c.env, people.get(id)!)] : [])),
+          last_status: last,
+        },
+      ];
+    }),
+  );
+});
+
+statusRoutes.post("/api/v1/conversations/:id{[0-9]+}/read", async (c) => {
+  const me = c.get("account");
+  if (!me) return fail(c, "The access token is invalid", 401);
+  const group = (await conversations(c, me)).find((g) => g.id === Number(c.req.param("id")));
+  if (!group) return fail(c, "Record not found", 404);
+  await markMessagesRead(c.env.bindings.DB, me.id, group.messages.map((m) => m.post.id));
+  const people = await accountsByIds(c.env.bindings.DB, group.others);
+  const [last] = await statuses(c.env, [group.messages[0]!.post], me);
+  return c.json({ id: String(group.id), unread: false, accounts: group.others.flatMap((id) => (people.has(id) ? [account(c.env, people.get(id)!)] : [])), last_status: last ?? null });
+});
+
+// Removing a conversation only hides it in Mastodon; palm marks it read.
+statusRoutes.delete("/api/v1/conversations/:id{[0-9]+}", async (c) => {
+  const me = c.get("account");
+  if (!me) return fail(c, "The access token is invalid", 401);
+  const group = (await conversations(c, me)).find((g) => g.id === Number(c.req.param("id")));
+  if (group) await markMessagesRead(c.env.bindings.DB, me.id, group.messages.map((m) => m.post.id));
+  return c.json({});
 });

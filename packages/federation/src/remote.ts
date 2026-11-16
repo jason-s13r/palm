@@ -2,6 +2,7 @@ import type { Context } from "@fedify/fedify";
 import {
   Application,
   Article,
+  ChatMessage,
   Create,
   traverseCollection,
   Document,
@@ -272,6 +273,14 @@ export async function storeRemotePost(
       if (found && found.apId === null) localMentions.push(found);
     }
   }
+  // A Lemmy private message names its recipient in `to` alone, with no Mention.
+  if (object instanceof ChatMessage) {
+    for (const id of object.toIds) {
+      if (!localDomains(fctx.data).includes(id.host.toLowerCase())) continue;
+      const found = await accountByApIdOrLocal(db, id);
+      if (found && !localMentions.some((m) => m.id === found.id)) localMentions.push(found);
+    }
+  }
 
   const wanted =
     reason.required ||
@@ -344,6 +353,14 @@ export async function storeRemotePost(
 }
 
 /** A post's author's ID if the author is local, else null. */
+/** A local person by their actor URL (https://domain/users/name). */
+async function accountByApIdOrLocal(db: D1Database, id: URL): Promise<Account | null> {
+  const name = id.pathname.match(/^\/users\/([^/]+)$/)?.[1];
+  if (!name) return null;
+  const found = await accountByHandle(db, decodeURIComponent(name), id.host.toLowerCase());
+  return found && found.apId === null ? found : null;
+}
+
 async function accountByIdLocal(db: D1Database, id: number): Promise<number | null> {
   const row = await db.prepare("SELECT id FROM accounts WHERE id = ? AND ap_id IS NULL").bind(id).first<{ id: number }>();
   return row?.id ?? null;
