@@ -113,6 +113,14 @@ describe("Mastodon API", () => {
     ).toBe(401);
   });
 
+  it("answers the profile screen's extra lists", async () => {
+    const familiar = await worker.fetch(`${MASTODON}/api/v1/accounts/familiar_followers?id[]=1&id[]=2`);
+    expect(await familiar.json()).toEqual([{ id: "1", accounts: [] }, { id: "2", accounts: [] }]);
+    for (const path of ["/api/v1/accounts/1/endorsements", "/api/v1/accounts/1/featured_tags"]) {
+      expect(await (await worker.fetch(`${MASTODON}${path}`)).json()).toEqual([]);
+    }
+  });
+
   it("needs a signed-in account for the home timeline", async () => {
     expect((await worker.fetch(`${MASTODON}/api/v1/timelines/home`)).status).toBe(401);
   });
