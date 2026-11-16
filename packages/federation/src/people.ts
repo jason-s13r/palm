@@ -1,7 +1,9 @@
 import { importJwk, type Context } from "@fedify/fedify";
-import { Endpoints, Image, Object as APObject, Person } from "@fedify/fedify/vocab";
-import { nodeinfoVersion, type RequestContext } from "@palm/core";
+import { Endpoints, Hashtag, Image, Object as APObject, Person } from "@fedify/fedify/vocab";
+import { nodeinfoVersion, urls, type RequestContext } from "@palm/core";
 import {
+  featuredTags,
+  pinnedPosts,
   accountForLogin,
   actorKeys,
   countAccounts,
@@ -51,7 +53,9 @@ export async function personFor(ctx: Context<RequestContext>, account: Account):
     followers: ctx.getFollowersUri(identifier),
     // Lemmy refuses actors without an outbox.
     outbox: ctx.getOutboxUri(identifier),
-    manuallyApprovesFollowers: false,
+    manuallyApprovesFollowers: account.locked,
+    featured: ctx.getFeaturedUri(identifier),
+    featuredTags: ctx.getFeaturedTagsUri(identifier),
     discoverable: true,
     icon: new Image({
       url: new URL(account.avatarUrl ?? `https://${ctx.data.domain.domain}/palm/avatar.png`),
@@ -82,6 +86,26 @@ builder
       })),
     );
   });
+
+// Pinned posts and featured hashtags, which Mastodon shows on profiles.
+builder.setFeaturedDispatcher("/users/{identifier}/featured", async (ctx, identifier) => {
+  const account = await accountFor(ctx.data, identifier);
+  if (!account) return null;
+  const items = [];
+  for (const post of await pinnedPosts(ctx.data.bindings.DB, account.id)) {
+    if (post.visibility !== "public" && post.visibility !== "unlisted") continue;
+    const parts = await postParts(ctx.data.bindings.DB, post.id);
+    if (parts) items.push(objectFor(parts));
+  }
+  return { items };
+});
+
+builder.setFeaturedTagsDispatcher("/users/{identifier}/collections/tags", async (ctx, identifier) => {
+  const account = await accountFor(ctx.data, identifier);
+  if (!account) return null;
+  const tags = await featuredTags(ctx.data.bindings.DB, account.id);
+  return { items: tags.map((t) => new Hashtag({ href: new URL(urls.tag(account.domain, t.tag)), name: `#${t.tag}` })) };
+});
 
 builder
   .setFollowersDispatcher("/users/{identifier}/followers", async (ctx, identifier) => {

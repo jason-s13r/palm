@@ -455,6 +455,30 @@ CREATE TABLE IF NOT EXISTS link_cards (
 )
 `,
   },
+  {
+    version: 16,
+    name: "locked accounts, pins and featured tags",
+    sql: `
+ALTER TABLE accounts ADD COLUMN locked INTEGER NOT NULL DEFAULT 0
+;
+ALTER TABLE followers ADD COLUMN pending INTEGER NOT NULL DEFAULT 0
+;
+CREATE TABLE IF NOT EXISTS pinned_posts (
+  account_id INTEGER NOT NULL REFERENCES accounts (id),
+  post_id INTEGER NOT NULL REFERENCES posts (id),
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (account_id, post_id)
+)
+;
+CREATE TABLE IF NOT EXISTS featured_tags (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  account_id INTEGER NOT NULL REFERENCES accounts (id),
+  tag TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  UNIQUE (account_id, tag)
+)
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

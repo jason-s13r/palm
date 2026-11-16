@@ -1,4 +1,5 @@
 import {
+  Accept,
   Activity,
   Announce,
   Create,
@@ -7,6 +8,7 @@ import {
   Block,
   Follow,
   Like,
+  Reject,
   PUBLIC_COLLECTION,
   traverseCollection,
   Undo,
@@ -15,6 +17,7 @@ import {
 } from "@fedify/fedify/vocab";
 import type { ActivitySink, FederationTask, RequestContext, Resolved } from "@palm/core";
 import {
+  followState,
   accountById,
   blockedDomains,
   communityById,
@@ -200,13 +203,24 @@ export async function runTask(ctx: RequestContext, task: FederationTask): Promis
       const [account, target] = await Promise.all([accountById(db, task.accountId), accountById(db, task.targetId)]);
       if (!account || !target || !isLocal(account)) return;
       if (isLocal(target)) {
-        if (!task.undo) await notify(db, { accountId: target.id, kind: "follow", fromAccountId: account.id });
+        if (!task.undo) {
+          const state = await followState(db, account.id, target.id);
+          await notify(db, { accountId: target.id, kind: state?.state === "pending" ? "follow_request" : "follow", fromAccountId: account.id });
+        }
         return;
       }
       const follow = new Follow({ id: new URL(task.followApId), actor: actorUri(account), object: actorUri(target) });
       const activity = task.undo ? new Undo({ id: new URL(`${task.followApId}/undo`), actor: actorUri(account), object: follow }) : follow;
       const to = recipientOf(target);
       if (to) await send(people, await personKeys(people, account), to, activity);
+      return;
+    }
+    case "follow_answered": {
+      const [account, follower] = await Promise.all([accountById(db, task.accountId), accountById(db, task.followerId)]);
+      if (!account || !follower || !isLocal(account) || isLocal(follower)) return;
+      const values = { id: new URL(`${actorUri(account).href}#${task.accept ? "accepts" : "rejects"}/${crypto.randomUUID()}`), actor: actorUri(account), object: new URL(task.followId) };
+      const to = recipientOf(follower);
+      if (to) await send(people, await personKeys(people, account), to, task.accept ? new Accept(values) : new Reject(values));
       return;
     }
     case "blocked": {

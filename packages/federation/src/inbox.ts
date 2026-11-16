@@ -81,9 +81,12 @@ async function onFollow(ctx: Ctx, follow: Follow): Promise<void> {
   const row = { actorId: follower.id.href, inbox: follower.inboxId.href, sharedInbox: follower.endpoints?.sharedInbox?.href ?? null, followId: follow.id.href };
   const { people, communities } = await contextsFor(ctx.data);
   if ("account" in target && target.account.apId === null) {
-    await addFollower(db, target.account.id, row);
+    // A locked account approves its followers: no Accept until it does.
+    const locked = target.account.locked;
+    await addFollower(db, target.account.id, row, locked);
     const from = await ensureAccount(ctx, follower);
-    if (from) await notify(db, { accountId: target.account.id, kind: "follow", fromAccountId: from.id });
+    if (from) await notify(db, { accountId: target.account.id, kind: locked ? "follow_request" : "follow", fromAccountId: from.id });
+    if (locked) return;
     await send(people, 
       await personKeys(people, target.account),
       follower,

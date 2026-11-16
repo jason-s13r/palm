@@ -33,6 +33,8 @@ export type { CodeGrant, OAuthApp, TokenGrant } from "./sessions.ts";
 export {
   actorKeys,
   addFollower,
+  answerFollower,
+  pendingFollowers,
   countFollowers,
   followers,
   kvDelete,
@@ -177,3 +179,5 @@ export { cardsFor, hasCard, saveCard } from "./cards.ts";
 export type { LinkCard } from "./cards.ts";
 export { countUnreadMessages, directMessages, markMessagesRead } from "./messages.ts";
 export type { DirectMessage } from "./messages.ts";
+export { featuredTags, featureTag, MAX_PINS, pinnedIds, pinnedPosts, pinPost, unfeatureTag, unpinPost, usedTags } from "./featured.ts";
+export type { FeaturedTag } from "./featured.ts";

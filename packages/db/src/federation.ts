@@ -39,14 +39,40 @@ export async function addFollower(
   db: D1Database,
   accountId: number,
   follower: Follower & { followId: string | null },
+  pending = false,
 ): Promise<void> {
+  // A follower already accepted stays accepted when they follow again.
   await db
     .prepare(
-      `INSERT INTO followers (account_id, actor_id, inbox, shared_inbox, follow_id, created_at) VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT (account_id, actor_id) DO UPDATE SET inbox = excluded.inbox, shared_inbox = excluded.shared_inbox, follow_id = excluded.follow_id`,
+      `INSERT INTO followers (account_id, actor_id, inbox, shared_inbox, follow_id, created_at, pending) VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (account_id, actor_id) DO UPDATE SET inbox = excluded.inbox, shared_inbox = excluded.shared_inbox, follow_id = excluded.follow_id,
+         pending = MIN(pending, excluded.pending)`,
     )
-    .bind(accountId, follower.actorId, follower.inbox, follower.sharedInbox, follower.followId, now())
+    .bind(accountId, follower.actorId, follower.inbox, follower.sharedInbox, follower.followId, now(), pending ? 1 : 0)
     .run();
+}
+
+/** Remote people waiting for a locked account to approve them. */
+export async function pendingFollowers(db: D1Database, accountId: number): Promise<{ actorId: string; followId: string | null }[]> {
+  const { results } = await db
+    .prepare("SELECT actor_id, follow_id FROM followers WHERE account_id = ? AND pending = 1 ORDER BY created_at DESC")
+    .bind(accountId)
+    .all<{ actor_id: string; follow_id: string | null }>();
+  return results.map((r) => ({ actorId: r.actor_id, followId: r.follow_id }));
+}
+
+/** Approves (or with `accept` false, drops) a waiting follower; returns their Follow's ID. */
+export async function answerFollower(db: D1Database, accountId: number, actorId: string, accept: boolean): Promise<{ followId: string | null } | null> {
+  const row = accept
+    ? await db
+        .prepare("UPDATE followers SET pending = 0 WHERE account_id = ? AND actor_id = ? AND pending = 1 RETURNING follow_id")
+        .bind(accountId, actorId)
+        .first<{ follow_id: string | null }>()
+    : await db
+        .prepare("DELETE FROM followers WHERE account_id = ? AND actor_id = ? AND pending = 1 RETURNING follow_id")
+        .bind(accountId, actorId)
+        .first<{ follow_id: string | null }>();
+  return row ? { followId: row.follow_id } : null;
 }
 
 export async function removeFollower(db: D1Database, accountId: number, actorId: string): Promise<void> {
@@ -55,14 +81,14 @@ export async function removeFollower(db: D1Database, accountId: number, actorId:
 
 export async function followers(db: D1Database, accountId: number): Promise<Follower[]> {
   const { results } = await db
-    .prepare("SELECT actor_id, inbox, shared_inbox FROM followers WHERE account_id = ? ORDER BY created_at")
+    .prepare("SELECT actor_id, inbox, shared_inbox FROM followers WHERE account_id = ? AND pending = 0 ORDER BY created_at")
     .bind(accountId)
     .all<{ actor_id: string; inbox: string; shared_inbox: string | null }>();
   return results.map((r) => ({ actorId: r.actor_id, inbox: r.inbox, sharedInbox: r.shared_inbox }));
 }
 
 export async function countFollowers(db: D1Database, accountId: number): Promise<number> {
-  const row = await db.prepare("SELECT COUNT(*) AS n FROM followers WHERE account_id = ?").bind(accountId).first<{ n: number }>();
+  const row = await db.prepare("SELECT COUNT(*) AS n FROM followers WHERE account_id = ? AND pending = 0").bind(accountId).first<{ n: number }>();
   return row?.n ?? 0;
 }
 

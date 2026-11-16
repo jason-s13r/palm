@@ -30,6 +30,8 @@ export interface Account {
   remoteCounts: { followers: number | null; following: number | null; statuses: number | null };
   /** When palm last read a remote account's outbox for its profile. */
   outboxFetchedAt: number | null;
+  /** Followers need approving (Mastodon's locked account). */
+  locked: boolean;
 }
 
 interface AccountRow {
@@ -55,10 +57,11 @@ interface AccountRow {
   following_count?: number | null;
   statuses_count?: number | null;
   outbox_fetched_at?: number | null;
+  locked?: number | null;
 }
 
 const COLUMNS =
-  "id, domain, username, display_name, bio, password_hash, role, created_at, ap_id, inbox, shared_inbox, profile_url, avatar_url, header_url, actor_type, fetched_at, banned_at, outbox_url, followers_count, following_count, statuses_count, outbox_fetched_at";
+  "id, domain, username, display_name, bio, password_hash, role, created_at, ap_id, inbox, shared_inbox, profile_url, avatar_url, header_url, actor_type, fetched_at, banned_at, outbox_url, followers_count, following_count, statuses_count, outbox_fetched_at, locked";
 
 export function toAccount(row: AccountRow): Account {
   return {
@@ -81,6 +84,7 @@ export function toAccount(row: AccountRow): Account {
     outboxUrl: row.outbox_url ?? null,
     remoteCounts: { followers: row.followers_count ?? null, following: row.following_count ?? null, statuses: row.statuses_count ?? null },
     outboxFetchedAt: row.outbox_fetched_at ?? null,
+    locked: row.locked === 1,
   };
 }
 
@@ -184,10 +188,15 @@ export async function updateProfile(
     bio?: string | null | undefined;
     avatarUrl?: string | null | undefined;
     headerUrl?: string | null | undefined;
+    locked?: boolean | undefined;
   },
 ): Promise<void> {
   const sets: string[] = [];
-  const params: (string | null)[] = [];
+  const params: (string | number | null)[] = [];
+  if (profile.locked !== undefined) {
+    sets.push("locked = ?");
+    params.push(profile.locked ? 1 : 0);
+  }
   const set = (column: string, value: string | null | undefined) => {
     if (value === undefined) return;
     sets.push(`${column} = ?`);

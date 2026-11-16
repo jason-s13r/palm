@@ -11,6 +11,15 @@ import {
   followingIds,
   followState,
   listNotifications,
+  acceptFollow,
+  answerFollower,
+  featuredTags,
+  featureTag,
+  notify,
+  pendingFollowers,
+  unfeatureTag,
+  usedTags,
+  type FeaturedTag,
   blockAccount,
   blockedAccountIds,
   blockStates,
@@ -147,8 +156,8 @@ peopleRoutes.post("/api/v1/accounts/:id{[0-9]+}/follow", async (c) => {
   if (!target || target.id === me.id) return fail(c, "Record not found", 404);
   if (!(await followState(db, me.id, target.id))) {
     const followApId = `${urls.user(me.domain, me.username)}#follows/${target.id}-${Date.now()}`;
-    // A remote account says yes or no; a local one follows straight away.
-    await follow(db, me.id, target.id, target.apId ? { followApId } : undefined);
+    // A remote account says yes or no; a local one follows straight away, unless it's locked.
+    await follow(db, me.id, target.id, target.apId || target.locked ? { followApId } : undefined);
     c.env.activities.enqueue({ kind: "followed", accountId: me.id, targetId: target.id, followApId, undo: false });
   }
   const [relationship] = await relationshipViews(c, me, [target.id]);
@@ -302,7 +311,10 @@ peopleRoutes.patch("/api/v1/accounts/update_credentials", async (c) => {
   };
   const displayName = textOf("display_name");
   const note = textOf("note");
+  const lockedValue = get("locked");
+  const locked = lockedValue === undefined ? undefined : lockedValue === true || lockedValue === "true" || lockedValue === "1";
   await updateProfile(db, me.id, {
+    ...(locked !== undefined ? { locked } : {}),
     ...(displayName !== undefined ? { displayName: displayName || null } : {}),
     ...(note !== undefined ? { bio: note || null } : {}),
     avatarUrl: await imageOf("avatar"),
@@ -311,6 +323,97 @@ peopleRoutes.patch("/api/v1/accounts/update_credentials", async (c) => {
   c.env.activities.enqueue({ kind: "profile_updated", accountId: me.id });
   const updated = (await accountById(db, me.id))!;
   return c.json(credentialAccount(c.env, updated, await accountStats(c.env, updated)));
+});
+
+// --- follow requests, for locked accounts ---------------------------------------
+
+/** People waiting for approval: local ones in account_follows, remote ones in followers. */
+async function followRequesters(c: C, me: Account): Promise<Account[]> {
+  const db = c.env.bindings.DB;
+  const { results } = await db
+    .prepare("SELECT account_id FROM account_follows WHERE target_id = ? AND state = 'pending' ORDER BY created_at DESC")
+    .bind(me.id)
+    .all<{ account_id: number }>();
+  const local = await accountsByIds(db, results.map((r) => r.account_id));
+  const remote = await Promise.all((await pendingFollowers(db, me.id)).map((f) => accountByApId(db, f.actorId)));
+  return [...local.values(), ...remote.filter((a): a is Account => a !== null)];
+}
+
+peopleRoutes.get("/api/v1/follow_requests", async (c) => {
+  const me = c.get("account");
+  if (!me) return fail(c, "The access token is invalid", 401);
+  const people = await followRequesters(c, me);
+  return c.json(await Promise.all(people.slice(0, 80).map((a) => accountView(c, a))));
+});
+
+for (const [action, accept] of [["authorize", true], ["reject", false]] as const) {
+  peopleRoutes.post(`/api/v1/follow_requests/:id{[0-9]+}/${action}`, async (c) => {
+    const me = c.get("account");
+    if (!me) return fail(c, "The access token is invalid", 401);
+    const db = c.env.bindings.DB;
+    const requester = await accountById(db, Number(c.req.param("id")));
+    if (!requester) return fail(c, "Record not found", 404);
+    if (requester.apId) {
+      const answered = await answerFollower(db, me.id, requester.apId, accept);
+      if (answered?.followId) {
+        c.env.activities.enqueue({ kind: "follow_answered", accountId: me.id, followerId: requester.id, followId: answered.followId, accept });
+      }
+    } else if (accept) {
+      await acceptFollow(db, requester.id, me.id);
+      await notify(db, { accountId: me.id, kind: "follow", fromAccountId: requester.id });
+    } else {
+      await unfollow(db, requester.id, me.id);
+    }
+    const [relationship] = await relationshipViews(c, me, [requester.id]);
+    return c.json(relationship);
+  });
+}
+
+// --- featured hashtags ----------------------------------------------------------
+
+const featuredTagView = (c: C, account: Account, t: FeaturedTag) => ({
+  id: String(t.id),
+  name: t.tag,
+  url: `${urls.tag(account.domain, t.tag)}`,
+  statuses_count: String(t.statuses),
+  last_status_at: t.lastStatusAt ? new Date(t.lastStatusAt * 1000).toISOString().slice(0, 10) : null,
+});
+
+peopleRoutes.get("/api/v1/featured_tags", async (c) => {
+  const me = c.get("account");
+  if (!me) return fail(c, "The access token is invalid", 401);
+  return c.json((await featuredTags(c.env.bindings.DB, me.id)).map((t) => featuredTagView(c, me, t)));
+});
+
+peopleRoutes.get("/api/v1/accounts/:id{[0-9]+}/featured_tags", async (c) => {
+  const account = showable(c, await accountById(c.env.bindings.DB, Number(c.req.param("id"))));
+  if (!account || account.apId) return c.json([]);
+  return c.json((await featuredTags(c.env.bindings.DB, account.id)).map((t) => featuredTagView(c, account, t)));
+});
+
+peopleRoutes.post("/api/v1/featured_tags", async (c) => {
+  const me = c.get("account");
+  if (!me) return fail(c, "The access token is invalid", 401);
+  const type = c.req.header("content-type") ?? "";
+  const params = type.includes("json") ? await c.req.json<{ name?: string }>().catch(() => ({}) as { name?: string }) : ((await c.req.parseBody().catch(() => ({}))) as { name?: string });
+  const name = String(params.name ?? c.req.query("name") ?? "").replace(/^#/, "").trim().toLowerCase();
+  if (!/^[\p{L}\p{N}_]+$/u.test(name)) return fail(c, "Validation failed: Tag is invalid", 422);
+  await featureTag(c.env.bindings.DB, me.id, name);
+  const tag = (await featuredTags(c.env.bindings.DB, me.id)).find((t) => t.tag === name)!;
+  return c.json(featuredTagView(c, me, tag));
+});
+
+peopleRoutes.delete("/api/v1/featured_tags/:id{[0-9]+}", async (c) => {
+  const me = c.get("account");
+  if (!me) return fail(c, "The access token is invalid", 401);
+  await unfeatureTag(c.env.bindings.DB, me.id, Number(c.req.param("id")));
+  return c.json({});
+});
+
+peopleRoutes.get("/api/v1/featured_tags/suggestions", async (c) => {
+  const me = c.get("account");
+  if (!me) return fail(c, "The access token is invalid", 401);
+  return c.json((await usedTags(c.env.bindings.DB, me.id)).map((t) => ({ name: t, url: urls.tag(me.domain, t), history: [], following: false })));
 });
 
 // --- search ------------------------------------------------------------------------

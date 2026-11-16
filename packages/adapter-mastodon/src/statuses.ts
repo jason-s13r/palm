@@ -1,5 +1,9 @@
 import { escapeHtml, hashtagsIn, mentionsIn, previewLink, textToHtml, urls, type RequestContext } from "@palm/core";
 import {
+  pinnedIds,
+  pinnedPosts,
+  pinPost,
+  unpinPost,
   directMessages,
   markMessagesRead,
   type DirectMessage,
@@ -230,6 +234,7 @@ async function renderStatuses(ctx: RequestContext, posts: Post[], viewer: Accoun
     ...[...mentioned.values()].flat(),
     ...[...parents.values()].map((p) => p.accountId),
   ]);
+  const pins = await pinnedIds(db, posts.map((p) => p.id));
   const links = new Map(posts.map((p) => [p.id, previewLink(p)]));
   const cards = await cardsFor(db, [...links.values()].filter((l): l is string => l !== null));
   const statsFor = new Map<number, AccountStats>();
@@ -266,7 +271,7 @@ async function renderStatuses(ctx: RequestContext, posts: Post[], viewer: Accoun
         reblogged: n?.boosted ?? false,
         muted: false,
         bookmarked: n?.bookmarked ?? false,
-        pinned: false,
+        pinned: pins.has(post.id),
         content: statusHtml(
           post,
           !!post.linkUrl &&
@@ -646,14 +651,23 @@ statusRoutes.get("/api/v1/accounts/:id/statuses", async (c) => {
   const db = c.env.bindings.DB;
   const author = /^\d+$/.test(id) ? await accountById(db, Number(id)) : null;
   if (!author || (author.apId === null && author.domain !== c.env.domain.domain)) return fail(c, "Record not found", 404);
-  // Pinned posts and media filters have nothing to show yet.
-  if (truthy(c.req.query("pinned")) || truthy(c.req.query("only_media"))) return c.json([]);
   const me = c.get("account");
+  // Pinned posts: the five on the profile, not paged.
+  if (truthy(c.req.query("pinned"))) {
+    if (c.req.query("max_id")) return c.json([]);
+    const pins = (await pinnedPosts(db, author.id)).filter((p) => me?.id === author.id || p.visibility === "public" || p.visibility === "unlisted");
+    return c.json(await statuses(c.env, pins, me));
+  }
   // A remote person's profile, opened from here: fetch their recent posts the first time.
   if (author.apId && !c.req.query("max_id")) await c.env.activities.backfillProfile(author.id);
   const visibilities: Visibility[] = me?.id === author.id ? ["public", "unlisted", "private", "direct"] : ["public", "unlisted"];
   let posts = await postsByAccount(db, author.id, visibilities, page(c));
   if (truthy(c.req.query("exclude_replies"))) posts = posts.filter((p) => !p.inReplyTo);
+  if (truthy(c.req.query("exclude_reblogs"))) posts = posts.filter((p) => p.reblogOf === null);
+  if (truthy(c.req.query("only_media"))) {
+    const media = await mediaForPosts(db, posts.map((p) => p.id));
+    posts = posts.filter((p) => p.attachments.length > 0 || (media.get(p.id)?.length ?? 0) > 0);
+  }
   return statusList(c, posts);
 });
 
@@ -785,3 +799,21 @@ statusRoutes.delete("/api/v1/conversations/:id{[0-9]+}", async (c) => {
   if (group) await markMessagesRead(c.env.bindings.DB, me.id, group.messages.map((m) => m.post.id));
   return c.json({});
 });
+
+// --- pinning: up to five of your own public posts on your profile ----------
+
+for (const [action, on] of [["pin", true], ["unpin", false]] as const) {
+  statusRoutes.post(`/api/v1/statuses/:id{[0-9]+}/${action}`, async (c) => {
+    const me = c.get("account");
+    if (!me) return fail(c, "The access token is invalid", 401);
+    const post = await visiblePost(c);
+    if (!post || post.accountId !== me.id) return fail(c, "Record not found", 404);
+    if (on) {
+      if (post.visibility === "direct" || post.reblogOf !== null) return fail(c, "Validation failed: Only your own public posts can be pinned", 422);
+      if (!(await pinPost(c.env.bindings.DB, me.id, post.id))) return fail(c, "Validation failed: You have already pinned the maximum number of posts", 422);
+    } else {
+      await unpinPost(c.env.bindings.DB, me.id, post.id);
+    }
+    return statusResponse(c, post.id);
+  });
+}

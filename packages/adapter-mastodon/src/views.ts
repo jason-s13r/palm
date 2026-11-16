@@ -48,7 +48,7 @@ export function account(ctx: RequestContext, a: Account, stats?: AccountStats) {
     // Mastodon writes local accounts by name alone, remote ones with their host.
     acct: local ? a.username : `${a.username}@${a.domain}`,
     display_name: a.displayName ?? a.username,
-    locked: false,
+    locked: a.locked,
     bot: a.actorType === "Service",
     discoverable: true,
     indexable: false,

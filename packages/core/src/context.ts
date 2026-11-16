@@ -75,6 +75,8 @@ export type FederationTask =
   /** Following a person. `followApId` names the Follow, so it can be undone or accepted. */
   | { kind: "followed"; accountId: number; targetId: number; followApId: string; undo: boolean }
   | { kind: "blocked"; accountId: number; targetId: number; blockApId: string; undo: boolean }
+  /** A locked account answering a follow request from another server. */
+  | { kind: "follow_answered"; accountId: number; followerId: number; followId: string; accept: boolean }
   | { kind: "subscribed"; accountId: number; communityId: number; followApId: string; undo: boolean }
   | { kind: "profile_updated"; accountId: number }
   /** Fetches a remote community's recent posts after the first local subscription. */
