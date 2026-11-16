@@ -222,3 +222,18 @@ export {
   updateList,
 } from "./curation.ts";
 export type { Filter, List } from "./curation.ts";
+export {
+  addRemotePollVote,
+  cancelScheduled,
+  pollChoices,
+  pollsFor,
+  postVersions,
+  rescheduleStatus,
+  savePoll,
+  scheduledStatuses,
+  scheduleStatus,
+  setQuote,
+  takeDueStatuses,
+  votePoll,
+} from "./extras.ts";
+export type { Poll, PostVersion, ScheduledStatus } from "./extras.ts";

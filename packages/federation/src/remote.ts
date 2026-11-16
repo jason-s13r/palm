@@ -26,6 +26,8 @@ import {
   accountByApId,
   accountByHandle,
   accountById,
+  savePoll,
+  setQuote,
   accountForLogin,
   claimThreadRefresh,
   markOutboxFetched,
@@ -338,6 +340,9 @@ export async function storeRemotePost(
 
   // Lemmy counts an author's own post or comment as upvoted, without sending a vote for it.
   if (post.communityId) await vote(db, post.id, author.id, 1);
+  if (object instanceof Question) await savePollFrom(db, post.id, object).catch(() => undefined);
+  const quote = (object as { quoteUrl?: URL | null }).quoteUrl;
+  if (quote) await setQuote(db, post.id, quote.href);
   if (localMentions.length) await addMentions(db, post.id, localMentions.map((m) => m.id));
   if (hashtags.length) await addTags(db, post.id, hashtags);
   for (const m of localMentions) await notify(db, { accountId: m.id, kind: "mention", fromAccountId: author.id, postId: post.id });
@@ -353,6 +358,26 @@ export async function storeRemotePost(
 }
 
 /** A post's author's ID if the author is local, else null. */
+/** A remote Question's options and counts, kept as a poll. */
+export async function savePollFrom(db: D1Database, postId: number, question: Question): Promise<void> {
+  const inclusive = await collect(question.getInclusiveOptions());
+  const exclusive = inclusive.length ? [] : await collect(question.getExclusiveOptions());
+  const options = [];
+  for (const option of inclusive.length ? inclusive : exclusive) {
+    const replies = await option.getReplies().catch(() => null);
+    options.push({ title: String(option.name ?? ""), votes: replies?.totalItems ?? 0 });
+  }
+  if (options.length < 2) return;
+  const end = question.endTime ?? question.closed;
+  await savePoll(db, {
+    postId,
+    options,
+    multiple: inclusive.length > 0,
+    expiresAt: end && typeof end === "object" && "epochMilliseconds" in end ? Math.floor(end.epochMilliseconds / 1000) : null,
+    votersCount: question.voters ?? null,
+  });
+}
+
 /** A local person by their actor URL (https://domain/users/name). */
 async function accountByApIdOrLocal(db: D1Database, id: URL): Promise<Account | null> {
   const name = id.pathname.match(/^\/users\/([^/]+)$/)?.[1];

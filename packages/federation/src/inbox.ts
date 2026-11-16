@@ -1,5 +1,7 @@
 import type { Context, FederationBuilder, InboxContext } from "@fedify/fedify";
 import {
+  Question,
+  Note,
   Flag,
   Accept,
   Activity,
@@ -16,6 +18,8 @@ import {
 } from "@fedify/fedify/vocab";
 import type { RequestContext } from "@palm/core";
 import {
+  addRemotePollVote,
+  pollsFor,
   createReport,
   acceptFollow,
   accountByApId,
@@ -43,7 +47,7 @@ import {
 } from "@palm/db";
 import { htmlToText, sanitizeHtml } from "@palm/core";
 import { announceToCommunity } from "./delivery.ts";
-import { ensureAccount, ensureActor, ensureCommunity, storeRemotePost } from "./remote.ts";
+import { ensureAccount, ensureActor, ensureCommunity, savePollFrom, storeRemotePost } from "./remote.ts";
 import { communitySenderKeys, contextsFor, localDomains, logProblem, personKeys, send } from "./shared.ts";
 
 type Ctx = Context<RequestContext>;
@@ -129,6 +133,17 @@ async function onReject(ctx: Ctx, reject: Reject): Promise<void> {
 async function onCreate(ctx: Ctx, create: Create, via: Via): Promise<void> {
   const object = await create.getObject({ crossOrigin: "trust" }).catch(() => null);
   if (!object?.id || !create.actorId) return;
+  // A vote in a poll here: a Note naming the option, answering the Question, with no text.
+  if (object instanceof Note && object.name && object.replyTargetId && !object.content) {
+    const poll = await postFor(ctx, object.replyTargetId);
+    if (poll && poll.apId === null) {
+      const voter = await ensureAccount(ctx, create.actorId);
+      const options = (await pollsFor(ctx.data.bindings.DB, [poll.id])).get(poll.id)?.options ?? [];
+      const choice = options.findIndex((o) => o.title === String(object.name));
+      if (voter && choice >= 0) await addRemotePollVote(ctx.data.bindings.DB, poll.id, voter.id, choice);
+      return;
+    }
+  }
   // The author has to be who sent it (Lemmy communities relay others' posts, via Announce).
   if (object.attributionId && object.attributionId.href !== create.actorId.href) return;
   const addressedHere = [...create.toIds, ...create.ccIds, ...object.toIds, ...object.ccIds].some((u) =>
@@ -161,6 +176,8 @@ async function onUpdate(ctx: Ctx, update: Update, via: Via): Promise<void> {
     sensitive: (object as { sensitive?: boolean | null }).sensitive ?? post.sensitive,
     linkUrl: post.linkUrl,
   });
+  // A poll's counts change as people vote.
+  if (object instanceof Question) await savePollFrom(ctx.data.bindings.DB, post.id, object).catch(() => undefined);
   if (!via.community) await relayIfLocalCommunity(ctx, post, update);
 }
 

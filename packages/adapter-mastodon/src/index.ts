@@ -1,6 +1,7 @@
 import { base64url, hashPassword, needsRehash, utf8, verifyPassword } from "@palm/auth";
 import { escapeHtml, urls, type RequestContext } from "@palm/core";
 import {
+  takeDueStatuses,
   accountById,
   accountForLogin,
   appByClientId,
@@ -393,4 +394,34 @@ app.notFound((c) => fail(c, "Record not found", 404));
 /** Serves one request on a Mastodon API host. */
 export function handleMastodon(request: Request, ctx: RequestContext): Promise<Response> {
   return Promise.resolve(app.fetch(request, ctx));
+}
+
+/**
+ * Publishes scheduled posts that are due, each as its author would have
+ * posted it then, through the same endpoint (with a token made for the
+ * moment). Run by the Worker's cron.
+ */
+export async function publishDueStatuses(contextFor: (domain: string) => RequestContext | null): Promise<number> {
+  let published = 0;
+  const any = contextFor("");
+  if (!any) return 0;
+  const db = any.bindings.DB;
+  for (const due of await takeDueStatuses(db)) {
+    const author = await accountById(db, due.accountId);
+    const ctx = author ? contextFor(author.domain) : null;
+    if (!author || !ctx || author.banned) continue;
+    const { token } = await createToken(db, { appId: due.appId, accountId: author.id, scopes: "read write follow" });
+    const response = await handleMastodon(
+      new Request(`https://${ctx.domain.domain}/api/v1/statuses`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify(due.params),
+      }),
+      ctx,
+    );
+    await revokeToken(db, token);
+    if (response.ok) published++;
+    else console.warn(JSON.stringify({ palm: "scheduled_post_failed", id: due.id, status: response.status }));
+  }
+  return published;
 }

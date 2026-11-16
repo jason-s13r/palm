@@ -40,6 +40,8 @@ export interface Post {
   reblogOf: number | null;
   /** Lemmy: no new comments. */
   locked: boolean;
+  /** The ActivityPub ID of a post this one quotes. */
+  quoteOf: string | null;
   /** Lemmy: pinned to the top of its community, or of the instance. */
   featuredCommunity: boolean;
   featuredLocal: boolean;
@@ -75,6 +77,7 @@ interface PostRow {
   attachments: string | null;
   reblog_of?: number | null;
   locked?: number | null;
+  quote_of?: string | null;
   featured_community?: number | null;
   featured_local?: number | null;
 }
@@ -102,6 +105,7 @@ export const toPost = (r: PostRow): Post => ({
   attachments: r.attachments ? (JSON.parse(r.attachments) as RemoteAttachment[]) : [],
   reblogOf: r.reblog_of ?? null,
   locked: r.locked === 1,
+  quoteOf: r.quote_of ?? null,
   featuredCommunity: r.featured_community === 1,
   featuredLocal: r.featured_local === 1,
 });
@@ -111,7 +115,7 @@ export type { PostRow };
 /** What a new post needs; the thread fields default to a plain status. */
 export type NewPost = Omit<
   Post,
-  "id" | "createdAt" | "updatedAt" | "communityId" | "title" | "linkUrl" | "rootId" | "parentId" | "path" | "apId" | "url" | "attachments" | "reblogOf" | "locked" | "featuredCommunity" | "featuredLocal"
+  "id" | "createdAt" | "updatedAt" | "communityId" | "title" | "linkUrl" | "rootId" | "parentId" | "path" | "apId" | "url" | "attachments" | "reblogOf" | "locked" | "featuredCommunity" | "featuredLocal" | "quoteOf"
 > &
   Partial<Pick<Post, "communityId" | "title" | "linkUrl" | "rootId" | "parentId" | "apId" | "url" | "createdAt" | "updatedAt" | "attachments">>;
 
@@ -158,6 +162,14 @@ export async function editPost(
   id: number,
   edit: { contentSource: string; contentHtml: string; title?: string | null; linkUrl?: string | null },
 ): Promise<void> {
+  // The version being replaced, for Mastodon's edit history.
+  await db
+    .prepare(
+      `INSERT INTO post_edits (post_id, content_html, content_source, spoiler_text, sensitive, created_at)
+       SELECT id, content_html, content_source, spoiler_text, sensitive, COALESCE(updated_at, created_at) FROM posts WHERE id = ?`,
+    )
+    .bind(id)
+    .run();
   await db
     .prepare(
       `UPDATE posts SET content_source = ?, content_html = ?, title = COALESCE(?, title), link_url = COALESCE(?, link_url), updated_at = ?
@@ -190,6 +202,14 @@ export async function updateRemotePost(
   id: number,
   edit: { contentHtml: string; contentSource: string; title: string | null; spoilerText: string; sensitive: boolean; linkUrl: string | null },
 ): Promise<void> {
+  // The version being replaced, for Mastodon's edit history.
+  await db
+    .prepare(
+      `INSERT INTO post_edits (post_id, content_html, content_source, spoiler_text, sensitive, created_at)
+       SELECT id, content_html, content_source, spoiler_text, sensitive, COALESCE(updated_at, created_at) FROM posts WHERE id = ?`,
+    )
+    .bind(id)
+    .run();
   await db
     .prepare(
       "UPDATE posts SET content_html = ?, content_source = ?, title = ?, spoiler_text = ?, sensitive = ?, link_url = ?, updated_at = ? WHERE id = ?",

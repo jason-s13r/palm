@@ -16,8 +16,9 @@
   // An R2 bucket for uploaded images and video (optional; without it uploads
   // are refused). wrangler deploy creates it if it doesn't exist.
   "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "<bucket-name>" }],
-  // Daily pruning of old remote posts nobody here touched, so D1 stays small.
-  "triggers": { "crons": ["17 3 * * *"] },
+  // Every 10 minutes: scheduled posts go out, and in the 03:00 UTC run old
+  // remote posts nobody here touched are pruned, so D1 stays small.
+  "triggers": { "crons": ["*/10 * * * *"] },
   // A queue for outgoing deliveries (optional, but it keeps sending to many
   // followers out of the request). The Worker consumes its own queue;
   // wrangler deploy creates it.

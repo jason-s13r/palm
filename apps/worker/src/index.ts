@@ -1,5 +1,5 @@
 import { handleLemmy } from "@palm/adapter-lemmy";
-import { handleMastodon } from "@palm/adapter-mastodon";
+import { handleMastodon, publishDueStatuses } from "@palm/adapter-mastodon";
 import { activitySink, handleFederation, processQueueMessage, type QueueBody } from "@palm/federation";
 import { defineConfig, normaliseHost, resolveSurface, type DomainConfig, type PalmBindings, type PalmConfig, type RequestContext } from "@palm/core";
 import { migrate, prune } from "@palm/db";
@@ -44,9 +44,19 @@ export function createPalm<Env extends PalmEnv = PalmEnv>(source: ConfigSource<E
     async queue(batch, env, ctx) {
       await consume(configFor(env), batch as MessageBatch<QueueBody>, env, ctx);
     },
-    // A daily cron keeps the database small: see prune.
-    async scheduled(_controller, env) {
+    // The cron runs every 10 minutes: scheduled posts go out when due, and
+    // once a day (in the 03:00 UTC run) old remote posts are pruned.
+    async scheduled(controller, env, ctx) {
       await migrate(env.DB);
+      const config = configFor(env);
+      const contextFor = (domain: string) => {
+        const found = config.domains.find((d) => d.domain === domain) ?? (domain === "" ? config.domains[0] : undefined);
+        return found ? requestContext(config, found, found.domain, env, ctx) : null;
+      };
+      const published = await publishDueStatuses(contextFor);
+      if (published) console.log(JSON.stringify({ palm: "scheduled_published", posts: published }));
+      const at = new Date(controller.scheduledTime);
+      if (at.getUTCHours() !== 3 || at.getUTCMinutes() >= 10) return;
       let removed = 0;
       // A few batches per run keeps each run short; the next day picks up the rest.
       for (let i = 0; i < 5; i++) {

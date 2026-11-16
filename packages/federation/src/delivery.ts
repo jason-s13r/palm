@@ -9,6 +9,7 @@ import {
   Flag,
   Follow,
   Like,
+  Note,
   Reject,
   PUBLIC_COLLECTION,
   traverseCollection,
@@ -18,6 +19,7 @@ import {
 } from "@fedify/fedify/vocab";
 import type { ActivitySink, FederationTask, RequestContext, Resolved } from "@palm/core";
 import {
+  pollChoices,
   reportById,
   followState,
   accountById,
@@ -215,6 +217,22 @@ export async function runTask(ctx: RequestContext, task: FederationTask): Promis
       const activity = task.undo ? new Undo({ id: new URL(`${task.followApId}/undo`), actor: actorUri(account), object: follow }) : follow;
       const to = recipientOf(target);
       if (to) await send(people, await personKeys(people, account), to, activity);
+      return;
+    }
+    case "poll_voted": {
+      const [parts, voter, choices] = await Promise.all([postParts(db, task.postId), accountById(db, task.accountId), pollChoices(db, task.accountId, [task.postId])]);
+      if (!parts?.poll || !voter || !isLocal(voter) || isLocal(parts.author)) return;
+      const to = recipientOf(parts.author);
+      if (!to) return;
+      const question = postUri(parts.post, parts.author);
+      const keys = await personKeys(people, voter);
+      for (const choice of choices.get(task.postId) ?? []) {
+        const title = parts.poll.options[choice]?.title;
+        if (!title) continue;
+        const id = new URL(`${actorUri(voter).href}#votes/${task.postId}/${choice}`);
+        const note = new Note({ id, name: title, replyTarget: question, attribution: actorUri(voter), to: actorUri(parts.author) });
+        await send(people, keys, to, new Create({ id: new URL(`${id.href}/activity`), actor: actorUri(voter), to: actorUri(parts.author), object: note }));
+      }
       return;
     }
     case "reported": {

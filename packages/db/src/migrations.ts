@@ -595,6 +595,52 @@ CREATE TABLE IF NOT EXISTS post_hides (
 )
 `,
   },
+  {
+    version: 19,
+    name: "edit history, scheduled posts, polls and quotes",
+    sql: `
+CREATE TABLE IF NOT EXISTS post_edits (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  post_id INTEGER NOT NULL REFERENCES posts (id),
+  content_html TEXT NOT NULL,
+  content_source TEXT NOT NULL,
+  spoiler_text TEXT NOT NULL DEFAULT '',
+  sensitive INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+)
+;
+CREATE INDEX IF NOT EXISTS post_edits_post ON post_edits (post_id, id)
+;
+CREATE TABLE IF NOT EXISTS scheduled_statuses (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  account_id INTEGER NOT NULL REFERENCES accounts (id),
+  app_id INTEGER NOT NULL,
+  scheduled_at INTEGER NOT NULL,
+  params TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+)
+;
+CREATE INDEX IF NOT EXISTS scheduled_statuses_due ON scheduled_statuses (scheduled_at)
+;
+CREATE TABLE IF NOT EXISTS polls (
+  post_id INTEGER PRIMARY KEY REFERENCES posts (id),
+  options TEXT NOT NULL,
+  multiple INTEGER NOT NULL DEFAULT 0,
+  expires_at INTEGER,
+  voters_count INTEGER
+)
+;
+CREATE TABLE IF NOT EXISTS poll_votes (
+  post_id INTEGER NOT NULL REFERENCES posts (id),
+  account_id INTEGER NOT NULL REFERENCES accounts (id),
+  choice INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (post_id, account_id, choice)
+)
+;
+ALTER TABLE posts ADD COLUMN quote_of TEXT
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

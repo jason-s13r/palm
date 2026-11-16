@@ -1,5 +1,18 @@
 import { escapeHtml, hashtagsIn, htmlToText, mentionsIn, previewLink, textToHtml, urls, type RequestContext } from "@palm/core";
 import {
+  cancelScheduled,
+  pollChoices,
+  pollsFor,
+  postByUri,
+  postVersions,
+  rescheduleStatus,
+  savePoll,
+  scheduledStatuses,
+  scheduleStatus,
+  setQuote,
+  votePoll,
+  type Poll,
+  type ScheduledStatus,
   filtersOf,
   matchFilters,
   pinnedIds,
@@ -247,7 +260,7 @@ export async function statuses(ctx: RequestContext, rows: Post[], viewer: Accoun
 }
 
 /** Statuses for posts (not boosts). */
-async function renderStatuses(ctx: RequestContext, posts: Post[], viewer: Account | null) {
+async function renderStatuses(ctx: RequestContext, posts: Post[], viewer: Account | null, nested = false) {
   const db = ctx.bindings.DB;
   const parentIds = posts.map((p) => p.parentId).filter((id): id is number => id !== null);
   const [media, mentioned, counts, parents, tags] = await Promise.all([
@@ -262,7 +275,20 @@ async function renderStatuses(ctx: RequestContext, posts: Post[], viewer: Accoun
     ...[...mentioned.values()].flat(),
     ...[...parents.values()].map((p) => p.accountId),
   ]);
-  const pins = await pinnedIds(db, posts.map((p) => p.id));
+  const [pins, polls, choices] = await Promise.all([
+    pinnedIds(db, posts.map((p) => p.id)),
+    pollsFor(db, posts.map((p) => p.id)),
+    pollChoices(db, viewer?.id, posts.map((p) => p.id)),
+  ]);
+  // Quoted posts palm holds, shown inside the quote (one level deep).
+  const quotedPosts = new Map<string, Post>();
+  for (const p of posts) {
+    if (!p.quoteOf || quotedPosts.has(p.quoteOf)) continue;
+    const quoted = await postByUri(db, p.quoteOf, [ctx.domain.domain]);
+    if (quoted && (quoted.visibility === "public" || quoted.visibility === "unlisted")) quotedPosts.set(p.quoteOf, quoted);
+  }
+  const quotedStatuses: { id: string }[] = quotedPosts.size && !nested ? ((await renderStatuses(ctx, [...quotedPosts.values()], viewer, true)) as { id: string }[]) : [];
+  const quotedById = new Map<string, unknown>(quotedStatuses.map((s) => [s.id, s]));
   const links = new Map(posts.map((p) => [p.id, previewLink(p)]));
   const cards = await cardsFor(db, [...links.values()].filter((l): l is string => l !== null));
   const statsFor = new Map<number, AccountStats>();
@@ -323,7 +349,10 @@ async function renderStatuses(ctx: RequestContext, posts: Post[], viewer: Accoun
         tags: (tags.get(post.id) ?? []).map((t) => ({ name: t, url: urls.tag(ctx.domain.domain, t) })),
         emojis: [],
         card: cardView(ctx, cards.get(links.get(post.id) ?? "")),
-        poll: null,
+        poll: polls.has(post.id) ? pollView(polls.get(post.id)!, choices.get(post.id), viewer) : null,
+        quote: post.quoteOf
+          ? { state: "accepted", quoted_status: quotedById.get(String(quotedPosts.get(post.quoteOf)?.id ?? "")) ?? null }
+          : null,
       },
     ];
   });
@@ -452,8 +481,19 @@ statusRoutes.post("/api/v1/statuses", async (c) => {
   const source = text(params.status).trim();
 
   const mediaIds = list(params.media_ids);
-  if (params.poll) return fail(c, "Polls aren't available on this server yet");
-  if (params.scheduled_at) return fail(c, "Scheduled posts aren't available on this server yet");
+  const poll = pollParams(params);
+  if (poll === "invalid") return fail(c, "Validation failed: A poll needs 2 to 4 options and an expiry");
+  if (poll && mediaIds.length) return fail(c, "Validation failed: Polls can't have media");
+  // A post for later: kept as it was asked for, and published by the cron.
+  const scheduledAt = text(params.scheduled_at) ? Date.parse(text(params.scheduled_at)) : NaN;
+  if (Number.isFinite(scheduledAt)) {
+    if (scheduledAt < Date.now() + 5 * 60 * 1000) return fail(c, "Validation failed: Scheduled time must be at least 5 minutes in the future");
+    const app = c.get("app");
+    if (!app) return fail(c, "The access token is invalid", 401);
+    const { scheduled_at: _, ...rest } = params;
+    const scheduled = await scheduleStatus(db, { accountId: me.id, appId: app.id, scheduledAt: Math.floor(scheduledAt / 1000), params: rest });
+    return c.json(scheduledView(scheduled));
+  }
   if (mediaIds.length > MAX_ATTACHMENTS) return fail(c, `Validation failed: You can attach up to ${MAX_ATTACHMENTS} images`);
   for (const id of mediaIds) {
     const media = await mediaById(db, id);
@@ -496,9 +536,129 @@ statusRoutes.post("/api/v1/statuses", async (c) => {
   await attachMedia(db, post.id, me.id, mediaIds);
   await addMentions(db, post.id, mentions.accounts.map((a) => a.id));
   await addTags(db, post.id, hashtagsIn(source));
+  if (poll) {
+    await savePoll(db, {
+      postId: post.id,
+      options: poll.options.map((title) => ({ title, votes: 0 })),
+      multiple: poll.multiple,
+      expiresAt: Math.floor(Date.now() / 1000) + poll.expiresIn,
+      votersCount: 0,
+    });
+  }
+  // A quote: the quoted post's ActivityPub ID, which other servers resolve.
+  const quotedId = text(params.quoted_status_id);
+  if (quotedId && /^\d+$/.test(quotedId)) {
+    const quoted = await postById(db, Number(quotedId));
+    if (quoted && (quoted.visibility === "public" || quoted.visibility === "unlisted") && (await canSee(db, quoted, me))) {
+      const quotedAuthor = await accountById(db, quoted.accountId);
+      await setQuote(db, post.id, postUriOf(quoted, quotedAuthor, c.env));
+    }
+  }
   c.env.activities.enqueue({ kind: "post_created", postId: post.id });
-  const [status] = await statuses(c.env, [post], me);
+  const [status] = await statuses(c.env, [(await postById(db, post.id)) ?? post], me);
   return c.json(status);
+});
+
+/** Poll parameters, from JSON (poll.options) or a form (poll[options][]). */
+function pollParams(params: Record<string, unknown>): { options: string[]; expiresIn: number; multiple: boolean } | "invalid" | null {
+  const nested = (typeof params.poll === "object" && params.poll !== null ? params.poll : {}) as Record<string, unknown>;
+  const options = list(nested.options ?? params["poll[options]"]).map((o) => o.trim()).filter(Boolean);
+  if (!options.length && !params.poll) return null;
+  const expiresIn = Number(nested.expires_in ?? params["poll[expires_in]"]);
+  if (options.length < 2 || options.length > 4 || !(expiresIn >= 300 && expiresIn <= 30 * 24 * 3600)) return "invalid";
+  return { options: options.map((o) => o.slice(0, 50)), expiresIn, multiple: truthy(nested.multiple ?? params["poll[multiple]"]) };
+}
+
+const scheduledView = (s: ScheduledStatus) => ({
+  id: String(s.id),
+  scheduled_at: new Date(s.scheduledAt * 1000).toISOString(),
+  params: {
+    text: text(s.params.status),
+    poll: s.params.poll ?? null,
+    media_ids: list(s.params.media_ids),
+    sensitive: truthy(s.params.sensitive),
+    spoiler_text: text(s.params.spoiler_text) || null,
+    visibility: text(s.params.visibility) || "public",
+    scheduled_at: null,
+    in_reply_to_id: text(s.params.in_reply_to_id) || null,
+    language: text(s.params.language) || null,
+    application_id: s.appId,
+    idempotency: null,
+    with_rate_limit: false,
+  },
+  media_attachments: [],
+});
+
+statusRoutes.get("/api/v1/scheduled_statuses", async (c) => {
+  const me = c.get("account");
+  if (!me) return fail(c, "The access token is invalid", 401);
+  return c.json((await scheduledStatuses(c.env.bindings.DB, me.id)).map(scheduledView));
+});
+
+statusRoutes.get("/api/v1/scheduled_statuses/:id{[0-9]+}", async (c) => {
+  const me = c.get("account");
+  if (!me) return fail(c, "The access token is invalid", 401);
+  const found = (await scheduledStatuses(c.env.bindings.DB, me.id)).find((s) => s.id === Number(c.req.param("id")));
+  return found ? c.json(scheduledView(found)) : fail(c, "Record not found", 404);
+});
+
+statusRoutes.put("/api/v1/scheduled_statuses/:id{[0-9]+}", async (c) => {
+  const me = c.get("account");
+  if (!me) return fail(c, "The access token is invalid", 401);
+  const at = Date.parse(text((await body(c)).scheduled_at));
+  if (!Number.isFinite(at) || at < Date.now() + 5 * 60 * 1000) return fail(c, "Validation failed: Scheduled time must be at least 5 minutes in the future");
+  await rescheduleStatus(c.env.bindings.DB, me.id, Number(c.req.param("id")), Math.floor(at / 1000));
+  const found = (await scheduledStatuses(c.env.bindings.DB, me.id)).find((s) => s.id === Number(c.req.param("id")));
+  return found ? c.json(scheduledView(found)) : fail(c, "Record not found", 404);
+});
+
+statusRoutes.delete("/api/v1/scheduled_statuses/:id{[0-9]+}", async (c) => {
+  const me = c.get("account");
+  if (!me) return fail(c, "The access token is invalid", 401);
+  await cancelScheduled(c.env.bindings.DB, me.id, Number(c.req.param("id")));
+  return c.json({});
+});
+
+// --- polls ---------------------------------------------------------------------
+
+function pollView(poll: Poll, own: number[] | undefined, viewer: Account | null) {
+  const expired = poll.expiresAt !== null && poll.expiresAt * 1000 <= Date.now();
+  return {
+    id: String(poll.postId),
+    expires_at: poll.expiresAt ? new Date(poll.expiresAt * 1000).toISOString() : null,
+    expired,
+    multiple: poll.multiple,
+    votes_count: poll.options.reduce((sum, o) => sum + o.votes, 0),
+    voters_count: poll.votersCount,
+    options: poll.options.map((o) => ({ title: o.title, votes_count: o.votes })),
+    emojis: [],
+    ...(viewer ? { voted: (own?.length ?? 0) > 0, own_votes: own ?? [] } : {}),
+  };
+}
+
+statusRoutes.get("/api/v1/polls/:id{[0-9]+}", async (c) => {
+  const post = await postById(c.env.bindings.DB, Number(c.req.param("id")));
+  if (!post || !(await canSee(c.env.bindings.DB, post, c.get("account")))) return fail(c, "Record not found", 404);
+  const poll = (await pollsFor(c.env.bindings.DB, [post.id])).get(post.id);
+  if (!poll) return fail(c, "Record not found", 404);
+  const me = c.get("account");
+  const own = (await pollChoices(c.env.bindings.DB, me?.id, [post.id])).get(post.id);
+  return c.json(pollView(poll, own, me));
+});
+
+statusRoutes.post("/api/v1/polls/:id{[0-9]+}/votes", async (c) => {
+  const me = c.get("account");
+  if (!me) return fail(c, "The access token is invalid", 401);
+  const db = c.env.bindings.DB;
+  const post = await postById(db, Number(c.req.param("id")));
+  if (!post || !(await canSee(db, post, me))) return fail(c, "Record not found", 404);
+  const choices = list((await body(c)).choices).map(Number);
+  // A remote poll is counted by its server, which palm tells; a local one here.
+  if (!(await votePoll(db, post.id, me.id, choices, post.apId === null))) return fail(c, "Validation failed: You have already voted on this poll, or it has ended");
+  if (post.apId) c.env.activities.enqueue({ kind: "poll_voted", postId: post.id, accountId: me.id });
+  const poll = (await pollsFor(db, [post.id])).get(post.id)!;
+  const own = (await pollChoices(db, me.id, [post.id])).get(post.id);
+  return c.json(pollView(poll, own, me));
 });
 
 /** A post the signed-in account (or anyone, if it's public) may see, or null. */
@@ -544,7 +704,27 @@ statusRoutes.put("/api/v1/statuses/:id", async (c) => {
   return statusResponse(c, post.id);
 });
 
-statusRoutes.get("/api/v1/statuses/:id/history", (c) => c.json([]));
+statusRoutes.get("/api/v1/statuses/:id/history", async (c) => {
+  const post = await visiblePost(c);
+  if (!post) return fail(c, "Record not found", 404);
+  const [current] = await statuses(c.env, [post], c.get("account"));
+  if (!current) return fail(c, "Record not found", 404);
+  const versions = await postVersions(c.env.bindings.DB, post.id);
+  const entry = (v: { contentHtml: string; spoilerText: string; sensitive: boolean; createdAt: number }) => ({
+    content: v.contentHtml,
+    spoiler_text: v.spoilerText,
+    sensitive: v.sensitive,
+    created_at: iso(v.createdAt),
+    account: current.account,
+    poll: null,
+    media_attachments: current.media_attachments,
+    emojis: [],
+  });
+  return c.json([
+    ...versions.map(entry),
+    { ...entry({ contentHtml: current.content as string, spoilerText: post.spoilerText, sensitive: post.sensitive, createdAt: post.updatedAt ?? post.createdAt }) },
+  ]);
+});
 
 // Who may quote a status (Mastodon 4.5). palm has no quotes yet, so the
 // policy isn't kept; the author gets their status back unchanged.

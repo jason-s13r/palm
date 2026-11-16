@@ -1,6 +1,8 @@
-import { ChatMessage, Create, Document, Hashtag, Link, Mention, Note, Page, PUBLIC_COLLECTION, Source, Tombstone, type Object as APObject } from "@fedify/fedify/vocab";
+import { ChatMessage, Collection, Create, Document, Question, Hashtag, Link, Mention, Note, Page, PUBLIC_COLLECTION, Source, Tombstone, type Object as APObject } from "@fedify/fedify/vocab";
 import { urls } from "@palm/core";
 import {
+  pollsFor,
+  type Poll,
   accountById,
   accountsByIds,
   communityById,
@@ -40,19 +42,21 @@ export interface PostParts {
   media: Media[];
   mentions: Account[];
   tags: string[];
+  poll: Poll | null;
 }
 
 /** Loads a post and what its object needs; deleted posts too, for Delete. */
 export async function postParts(db: D1Database, postId: number): Promise<PostParts | null> {
   const post = await postByIdAny(db, postId);
   if (!post) return null;
-  const [author, community, parentPost, media, mentioned, tags] = await Promise.all([
+  const [author, community, parentPost, media, mentioned, tags, polls] = await Promise.all([
     accountById(db, post.accountId),
     post.communityId ? communityById(db, post.communityId) : Promise.resolve(null),
     post.parentId ? postById(db, post.parentId) : Promise.resolve(null),
     mediaForPosts(db, [post.id]),
     mentionedIds(db, [post.id]),
     tagsFor(db, [post.id]),
+    pollsFor(db, [post.id]),
   ]);
   if (!author) return null;
   const parentAuthor = parentPost ? await accountById(db, parentPost.accountId) : null;
@@ -65,6 +69,7 @@ export async function postParts(db: D1Database, postId: number): Promise<PostPar
     media: media.get(post.id) ?? [],
     mentions,
     tags: tags.get(post.id) ?? [],
+    poll: polls.get(post.id) ?? null,
   };
 }
 
@@ -99,7 +104,7 @@ export function addressing(parts: PostParts): { tos: URL[]; ccs: URL[] } {
 /** Lemmy people live at /u/name. */
 const isLemmyPerson = (a: Account) => a.apId !== null && /\/u\/[^/]+$/.test(a.apId);
 
-export function objectFor(parts: PostParts): Note | Page | ChatMessage {
+export function objectFor(parts: PostParts): Note | Page | ChatMessage | Question {
   const { post, author, community, parent, media, mentions } = parts;
   const id = postUri(post, author);
   const attachments: (Document | Link)[] = media.map(
@@ -110,6 +115,8 @@ export function objectFor(parts: PostParts): Note | Page | ChatMessage {
   const values = {
     id,
     url: id,
+    // A quoted post, as Misskey and newer Mastodon read it.
+    ...(post.quoteOf ? { quoteUrl: new URL(post.quoteOf) } : {}),
     attribution: actorUri(author),
     ...addressing(parts),
     ...(community ? { audience: communityUri(community) } : {}),
@@ -129,6 +136,16 @@ export function objectFor(parts: PostParts): Note | Page | ChatMessage {
     ],
   };
   if (post.title && post.rootId === null) return new Page({ ...values, name: post.title });
+  // A poll is a Question; each option a Note counting its votes.
+  if (parts.poll) {
+    const options = parts.poll.options.map((o) => new Note({ name: o.title, replies: new Collection({ totalItems: o.votes }) }));
+    return new Question({
+      ...values,
+      ...(parts.poll.multiple ? { inclusiveOptions: options } : { exclusiveOptions: options }),
+      ...(parts.poll.expiresAt ? { endTime: instant(parts.poll.expiresAt) } : {}),
+      voters: parts.poll.votersCount ?? 0,
+    });
+  }
   // A direct message to one person on Lemmy is a Lemmy private message.
   const [only] = mentions;
   if (post.visibility === "direct" && !parent && !post.inReplyTo && mentions.length === 1 && only && isLemmyPerson(only)) {
