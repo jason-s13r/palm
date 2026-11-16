@@ -54,6 +54,9 @@ importers:
       '@palm/federation':
         specifier: workspace:*
         version: link:../../packages/federation
+      '@palm/web':
+        specifier: workspace:*
+        version: link:../../packages/web
       hono:
         specifier: ^4.13.18
         version: 4.13.18
@@ -193,6 +196,28 @@ importers:
       temporal-polyfill:
         specifier: ^1.0.8
         version: 1.0.8
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: ^5.20261116.1
+        version: 5.20261116.1
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^5.1.0
+        version: 5.1.0(@opentelemetry/api@1.9.1)(@types/node@24.19.2)(vite@8.3.8(@types/node@24.19.2)(esbuild@0.28.2)(yaml@2.9.1))
+
+  packages/web:
+    dependencies:
+      '@palm/core':
+        specifier: workspace:*
+        version: link:../core
+      '@palm/db':
+        specifier: workspace:*
+        version: link:../db
+      hono:
+        specifier: ^4.13.18
+        version: 4.13.18
     devDependencies:
       '@cloudflare/workers-types':
         specifier: ^5.20261116.1

@@ -1,0 +1,24 @@
+{
+  "name": "@palm/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "palm's plain web pages: profiles, posts and communities for share links, with no JavaScript.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@palm/core": "workspace:*",
+    "@palm/db": "workspace:*",
+    "hono": "^4.13.18"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261116.1",
+    "typescript": "~6.0.3",
+    "vitest": "^5.1.0"
+  }
+}

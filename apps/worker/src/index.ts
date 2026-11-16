@@ -3,6 +3,7 @@ import { handleMastodon } from "@palm/adapter-mastodon";
 import { activitySink, handleFederation, processQueueMessage, type QueueBody } from "@palm/federation";
 import { defineConfig, normaliseHost, resolveSurface, type DomainConfig, type PalmBindings, type PalmConfig, type RequestContext } from "@palm/core";
 import { migrate, prune } from "@palm/db";
+import { handleWeb } from "@palm/web";
 import { avatarResponse } from "./assets.ts";
 import { VERSION } from "./version.ts";
 
@@ -152,7 +153,7 @@ export async function handle(
       // Uploaded images live where Lemmy keeps them, for both kinds of app.
       if (url.pathname.startsWith("/api/v3/") || url.pathname.startsWith("/pictrs/")) return handleLemmy(request, ctx);
       if (isMastodonPath(url.pathname)) return handleMastodon(request, ctx);
-      return handleFederation(request, ctx, (req) => federationFallback(config, req, new URL(req.url)));
+      return handleFederation(request, ctx, (req) => federationFallback(config, req, new URL(req.url), ctx));
   }
 }
 
@@ -162,14 +163,19 @@ function isMastodonPath(path: string): boolean {
     path.startsWith("/api/v1/") ||
     path.startsWith("/api/v2/") ||
     path.startsWith("/oauth/") ||
-    path === "/.well-known/oauth-authorization-server" ||
-    /^\/@[^/]+(\/[0-9]+)?$/.test(path)
+    path === "/.well-known/oauth-authorization-server"
   );
 }
 
-function federationFallback(config: PalmConfig, request: Request, url: URL): Response {
-  // What Fedify doesn't serve: browsers go where the old redirect rule sent
-  // them, keeping the path; everything else gets a 404.
+async function federationFallback(config: PalmConfig, request: Request, url: URL, ctx: RequestContext): Promise<Response> {
+  // What Fedify doesn't serve: palm's own pages for profiles, posts and
+  // communities (and the URLs other servers link to them by)...
+  if (wantsHtml(request) || /^\/(@|post\/|comment\/)/.test(url.pathname)) {
+    const page = await handleWeb(request, ctx);
+    if (page) return page;
+  }
+  // ...then browsers go where the old redirect rule sent them, keeping the
+  // path; everything else gets a 404.
   if (config.browserRedirect && wantsHtml(request)) {
     return Response.redirect(new URL(url.pathname + url.search, config.browserRedirect).toString(), 302);
   }

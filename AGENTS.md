@@ -35,6 +35,11 @@ Remote people, communities and posts live in the same tables as local ones
 (`accounts`, `communities`, `posts`), marked by their `ap_id`; local rows have
 none. palm keeps a remote post only if someone here would see it, and a daily
 cron prunes old remote posts nobody here touched.
+- `packages/web`: plain HTML pages for share links (profiles at `/@name`,
+  posts at `/@name/id`, `/post/id` and `/comment/id`, communities at `/c/name`),
+  with Open Graph tags, a few lines of CSS and no JavaScript. Browsers on an
+  actor's or object's ID land on these; ActivityPub clients asking for these
+  URLs are sent to the object. Only public and unlisted posts show.
 - `packages/cli`: admin commands run locally (`pnpm palm user create ...`,
   `pnpm palm user keys ...`, `pnpm palm community create ...`,
   `pnpm palm invite create ...`). Signing keys are generated here, not in the

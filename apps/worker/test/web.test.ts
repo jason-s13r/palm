@@ -1,0 +1,94 @@
+import { describe, expect, it } from "vitest";
+import { createAccount, createCommunity, json, MASTODON, mastodonToken, worker } from "./helpers.ts";
+
+const SITE = "https://palm.test";
+const BROWSER = { headers: { accept: "text/html,application/xhtml+xml" }, redirect: "manual" as const };
+
+async function mastodonUser(username: string) {
+  const id = await createAccount(username, "pw-pw-pw");
+  const auth = { authorization: `Bearer ${await mastodonToken(id)}` };
+  const post = (path: string, body: unknown) =>
+    worker.fetch(`${MASTODON}${path}`, { method: "POST", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify(body) });
+  return { id, post };
+}
+
+async function lemmyLogin(username: string) {
+  const { jwt } = await (await worker.fetch(`${SITE}/api/v3/user/login`, json({ username_or_email: username, password: "pw-pw-pw" }))).json<{ jwt: string }>();
+  return (path: string, body: unknown) =>
+    worker.fetch(`${SITE}/api/v3${path}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${jwt}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+}
+
+const meta = (page: string, property: string) => page.match(new RegExp(`<meta (?:property|name)="${property}" content="([^"]*)"`))?.[1];
+
+describe("Web pages", () => {
+  it("shows a profile and a status with its replies, with link-preview tags and no scripts", async () => {
+    const wren = await mastodonUser("wren");
+    const status = await (await wren.post("/api/v1/statuses", { status: "Hello from <script>alert(1)</script> the web" })).json<{ id: string }>();
+    const reply = await lemmyLogin("wren");
+    await reply("/comment", { post_id: Number(status.id), content: "a *reply*" });
+    await wren.post("/api/v1/statuses", { status: "secret", visibility: "private" });
+
+    const profile = await worker.fetch(`${SITE}/@wren`, BROWSER);
+    expect(profile.status).toBe(200);
+    expect(profile.headers.get("content-security-policy")).toContain("default-src 'none'");
+    const profileHtml = await profile.text();
+    expect(meta(profileHtml, "og:type")).toBe("profile");
+    expect(profileHtml).toContain("@wren@palm.test");
+    expect(profileHtml).toContain(`/@wren/${status.id}`);
+    expect(profileHtml).not.toContain("secret");
+    expect(profileHtml).not.toContain("<script");
+
+    const page = await (await worker.fetch(`${SITE}/@wren/${status.id}`, BROWSER)).text();
+    expect(meta(page, "og:type")).toBe("article");
+    expect(meta(page, "og:description")).toContain("Hello from");
+    expect(page).toContain('<link rel="alternate" type="application/activity+json"');
+    expect(page).toContain("<em>reply</em>");
+    expect(page).toContain("1 comment");
+    expect(page).not.toContain("<script>");
+  });
+
+  it("shows a community and a Lemmy post with nested comments", async () => {
+    const communityId = await createCommunity("webby", "Web things");
+    await createAccount("finch", "pw-pw-pw");
+    const call = await lemmyLogin("finch");
+    const post = await (await call("/post", { community_id: communityId, name: "A link post", url: "https://example.com/thing" })).json<{ post_view: { post: { id: number } } }>();
+    const id = post.post_view.post.id;
+    const top = await (await call("/comment", { post_id: id, content: "top" })).json<{ comment_view: { comment: { id: number } } }>();
+    await call("/comment", { post_id: id, parent_id: top.comment_view.comment.id, content: "nested" });
+
+    const community = await (await worker.fetch(`${SITE}/c/webby`, BROWSER)).text();
+    expect(community).toContain("Web things");
+    expect(community).toContain('href="https://example.com/thing"');
+    expect(community).toContain("(example.com)");
+    expect(community).toContain("2 comments");
+
+    const page = await (await worker.fetch(`${SITE}/post/${id}`, BROWSER)).text();
+    expect(meta(page, "og:title")).toBe("A link post");
+    expect(page).toMatch(/<ul class="thread"><li id="c\d+">[\s\S]*top[\s\S]*<ul class="thread"><li id="c\d+">[\s\S]*nested/);
+
+    // A comment's own link opens that comment and what's under it.
+    const comment = await (await worker.fetch(`${SITE}/comment/${top.comment_view.comment.id}`, BROWSER)).text();
+    expect(comment).toContain("A link post");
+    expect(comment).toContain("nested");
+  });
+
+  it("sends apps and other servers to the right place", async () => {
+    await createAccount("lark", "pw-pw-pw");
+    // A server resolving a profile link gets the actor.
+    const ap = await worker.fetch(`${SITE}/@lark`, { headers: { accept: "application/activity+json" }, redirect: "manual" });
+    expect(ap.status).toBe(302);
+    expect(ap.headers.get("location")).toBe("https://palm.test/users/lark");
+    // A browser on an actor's ID gets the profile page.
+    const actor = await worker.fetch(`${SITE}/users/lark`, BROWSER);
+    expect(actor.status).toBe(301);
+    expect(actor.headers.get("location")).toBe("/@lark");
+    // Anything else still goes to the configured site.
+    const other = await worker.fetch(`${SITE}/about`, BROWSER);
+    expect(other.headers.get("location")).toBe("https://site.example/about");
+    expect((await worker.fetch(`${SITE}/@nobody`, BROWSER)).status).toBe(404);
+  });
+});
