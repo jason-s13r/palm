@@ -1,7 +1,13 @@
 import type { RequestContext } from "@palm/core";
 import { urls } from "@palm/core";
-import type { Account } from "@palm/db";
+import type { Account, Community as StoredCommunity, CommunityStats, ThreadComment, ThreadPost } from "@palm/db";
 import type {
+  Comment,
+  CommentView,
+  Community,
+  CommunityView,
+  Post,
+  PostView,
   LocalSite,
   LocalSiteRateLimit,
   LocalUserView,
@@ -41,15 +47,28 @@ export function person(ctx: RequestContext, account: Account): Person {
   };
 }
 
-export function personView(ctx: RequestContext, account: Account): PersonView {
+/** Lemmy's post and comment counts for a person. */
+export interface PersonCounts {
+  posts: number;
+  comments: number;
+}
+
+export function personView(ctx: RequestContext, account: Account, counts?: PersonCounts): PersonView {
   return {
     person: person(ctx, account),
-    counts: { person_id: account.id, post_count: 0, comment_count: 0 },
+    counts: { person_id: account.id, post_count: counts?.posts ?? 0, comment_count: counts?.comments ?? 0 },
     is_admin: account.role === "admin",
   };
 }
 
-export function siteView(ctx: RequestContext, users: number): SiteView {
+export interface SiteCounts {
+  users: number;
+  posts: number;
+  comments: number;
+  communities: number;
+}
+
+export function siteView(ctx: RequestContext, counts: SiteCounts): SiteView {
   const domain = ctx.domain.domain;
   const published = iso(0);
   const site: Site = {
@@ -111,10 +130,10 @@ export function siteView(ctx: RequestContext, users: number): SiteView {
     local_site_rate_limit: rateLimit,
     counts: {
       site_id: 1,
-      users,
-      posts: 0,
-      comments: 0,
-      communities: 0,
+      users: counts.users,
+      posts: counts.posts,
+      comments: counts.comments,
+      communities: counts.communities,
       users_active_day: 0,
       users_active_week: 0,
       users_active_month: 0,
@@ -163,14 +182,155 @@ export function localUserView(ctx: RequestContext, account: Account): LocalUserV
   };
 }
 
-export function myUserInfo(ctx: RequestContext, account: Account): MyUserInfo {
+export function myUserInfo(ctx: RequestContext, account: Account, follows: StoredCommunity[] = []): MyUserInfo {
+  const follower = person(ctx, account);
   return {
     local_user_view: localUserView(ctx, account),
-    follows: [],
+    follows: follows.map((c) => ({ community: community(ctx, c), follower })),
     moderates: [],
     community_blocks: [],
     instance_blocks: [],
     person_blocks: [],
     discussion_languages: [],
+  };
+}
+
+export function community(ctx: RequestContext, c: StoredCommunity): Community {
+  return {
+    id: c.id,
+    name: c.name,
+    title: c.title,
+    ...(c.description ? { description: c.description } : {}),
+    removed: false,
+    published: iso(c.createdAt),
+    deleted: false,
+    nsfw: c.nsfw,
+    actor_id: urls.community(ctx.domain.domain, c.name),
+    local: true,
+    hidden: false,
+    posting_restricted_to_mods: false,
+    instance_id: LOCAL_INSTANCE_ID,
+    visibility: "Public",
+  };
+}
+
+export function communityView(ctx: RequestContext, c: StoredCommunity & CommunityStats): CommunityView {
+  return {
+    community: community(ctx, c),
+    subscribed: c.subscribed ? "Subscribed" : "NotSubscribed",
+    blocked: false,
+    banned_from_community: false,
+    counts: {
+      community_id: c.id,
+      subscribers: c.subscribers,
+      subscribers_local: c.subscribers,
+      posts: c.posts,
+      comments: c.comments,
+      published: iso(c.createdAt),
+      users_active_day: 0,
+      users_active_week: 0,
+      users_active_month: 0,
+      users_active_half_year: 0,
+    },
+  };
+}
+
+/** Everything a post or comment view needs besides the post itself. */
+export interface ThreadContext {
+  creator: Account;
+  community: StoredCommunity;
+  subscribed: boolean;
+}
+
+export function post(ctx: RequestContext, p: ThreadPost): Post {
+  return {
+    id: p.id,
+    name: p.title ?? "",
+    ...(p.linkUrl ? { url: p.linkUrl } : {}),
+    ...(p.contentSource ? { body: p.contentSource } : {}),
+    creator_id: p.accountId,
+    community_id: p.communityId ?? 0,
+    removed: false,
+    locked: false,
+    published: iso(p.createdAt),
+    ...(p.updatedAt ? { updated: iso(p.updatedAt) } : {}),
+    deleted: false,
+    nsfw: p.sensitive,
+    ap_id: urls.object(ctx.domain.domain, String(p.id)),
+    local: true,
+    language_id: 0,
+    featured_community: false,
+    featured_local: false,
+  };
+}
+
+export function postView(ctx: RequestContext, p: ThreadPost, t: ThreadContext): PostView {
+  return {
+    post: post(ctx, p),
+    creator: person(ctx, t.creator),
+    community: community(ctx, t.community),
+    creator_banned_from_community: false,
+    banned_from_community: false,
+    creator_is_moderator: false,
+    creator_is_admin: t.creator.role === "admin",
+    counts: {
+      post_id: p.id,
+      comments: p.comments,
+      score: p.upvotes - p.downvotes,
+      upvotes: p.upvotes,
+      downvotes: p.downvotes,
+      published: iso(p.createdAt),
+      newest_comment_time: iso(p.activeAt),
+    },
+    subscribed: t.subscribed ? "Subscribed" : "NotSubscribed",
+    saved: false,
+    read: false,
+    hidden: false,
+    creator_blocked: false,
+    ...(p.myVote ? { my_vote: p.myVote } : {}),
+    unread_comments: 0,
+  };
+}
+
+export function comment(ctx: RequestContext, c: ThreadComment): Comment {
+  return {
+    id: c.id,
+    creator_id: c.accountId,
+    post_id: c.rootId ?? 0,
+    content: c.contentSource,
+    removed: false,
+    published: iso(c.createdAt),
+    ...(c.updatedAt ? { updated: iso(c.updatedAt) } : {}),
+    deleted: c.deleted,
+    ap_id: urls.object(ctx.domain.domain, String(c.id)),
+    local: true,
+    path: c.path ?? `0.${c.id}`,
+    distinguished: false,
+    language_id: 0,
+  };
+}
+
+export function commentView(ctx: RequestContext, c: ThreadComment, onPost: ThreadPost, t: ThreadContext): CommentView {
+  return {
+    comment: comment(ctx, c),
+    creator: person(ctx, t.creator),
+    post: post(ctx, onPost),
+    community: community(ctx, t.community),
+    counts: {
+      comment_id: c.id,
+      score: c.upvotes - c.downvotes,
+      upvotes: c.upvotes,
+      downvotes: c.downvotes,
+      published: iso(c.createdAt),
+      child_count: c.childCount,
+    },
+    creator_banned_from_community: false,
+    banned_from_community: false,
+    creator_is_moderator: false,
+    creator_is_admin: t.creator.role === "admin",
+    subscribed: t.subscribed ? "Subscribed" : "NotSubscribed",
+    saved: false,
+    creator_blocked: false,
+    ...(c.myVote ? { my_vote: c.myVote } : {}),
   };
 }

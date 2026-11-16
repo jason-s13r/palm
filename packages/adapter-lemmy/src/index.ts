@@ -10,6 +10,9 @@ import {
   setPasswordHash,
   revokeSession,
   sessionAccount,
+  siteCounts,
+  subscriptions,
+  threadCounts,
   type Account,
 } from "@palm/db";
 import { Hono, type Context } from "hono";
@@ -18,17 +21,16 @@ import type {
   GetFederatedInstancesResponse,
   GetPersonDetailsResponse,
   GetPersonMentionsResponse,
-  GetPostsResponse,
   GetRepliesResponse,
   GetReportCountResponse,
   GetSiteResponse,
   GetUnreadCountResponse,
-  ListCommunitiesResponse,
   LoginResponse,
   PrivateMessagesResponse,
   SearchResponse,
   SuccessResponse,
 } from "lemmy-js-client";
+import { personThreads, searchThreads, threadRoutes } from "./threads.ts";
 import { LEMMY_VERSION, myUserInfo, personView, siteView } from "./views.ts";
 
 export { LEMMY_VERSION };
@@ -107,13 +109,18 @@ app.get("/nodeinfo/2.1", async (c) =>
 app.get("/api/v3/site", async (c) => {
   const db = c.env.bindings.DB;
   const domain = c.env.domain.domain;
-  const [users, adminAccounts] = await Promise.all([countAccounts(db, domain), admins(db, domain)]);
   const auth = c.get("auth");
+  const [users, adminAccounts, counts, follows] = await Promise.all([
+    countAccounts(db, domain),
+    admins(db, domain),
+    siteCounts(db, domain),
+    auth ? subscriptions(db, auth.account.id) : Promise.resolve([]),
+  ]);
   const body: GetSiteResponse = {
-    site_view: siteView(c.env, users),
+    site_view: siteView(c.env, { users, ...counts }),
     admins: adminAccounts.map((a) => personView(c.env, a)),
     version: LEMMY_VERSION,
-    ...(auth ? { my_user: myUserInfo(c.env, auth.account) } : {}),
+    ...(auth ? { my_user: myUserInfo(c.env, auth.account, follows) } : {}),
     all_languages: [{ id: 0, code: "und", name: "Undetermined" }, { id: 37, code: "en", name: "English" }],
     discussion_languages: [],
     taglines: [],
@@ -170,14 +177,14 @@ app.get("/api/v3/user", async (c) => {
   else if (username) account = (await accountForLogin(db, c.env.domain.domain, username))?.account ?? null;
   else account = auth?.account ?? null;
   if (!account || account.domain !== c.env.domain.domain) return fail(c, "couldnt_find_person", 404);
-  const body: GetPersonDetailsResponse = { person_view: personView(c.env, account), comments: [], posts: [], moderates: [] };
+  const [counts, threads] = await Promise.all([threadCounts(db, account.id), personThreads(c, account.id)]);
+  const body: GetPersonDetailsResponse = { person_view: personView(c.env, account, counts), ...threads, moderates: [] };
   return c.json(body);
 });
 
-// Feeds and inboxes: empty until federation brings content in (M2, M3).
-app.get("/api/v3/post/list", (c) => c.json({ posts: [] } satisfies GetPostsResponse));
-app.get("/api/v3/comment/list", (c) => c.json({ comments: [] }));
-app.get("/api/v3/community/list", (c) => c.json({ communities: [] } satisfies ListCommunitiesResponse));
+app.route("/", threadRoutes);
+
+// Inboxes: empty until replies and mentions are tracked.
 app.get("/api/v3/user/unread_count", (c) =>
   c.json({ replies: 0, mentions: 0, private_messages: 0 } satisfies GetUnreadCountResponse),
 );
@@ -190,12 +197,13 @@ app.get("/api/v3/private_message/list", (c) => c.json({ private_messages: [] } s
 app.get("/api/v3/federated_instances", (c) =>
   c.json({ federated_instances: { linked: [], allowed: [], blocked: [] } } satisfies GetFederatedInstancesResponse),
 );
-app.get("/api/v3/search", (c) =>
-  c.json({ type_: "All", comments: [], posts: [], communities: [], users: [] } satisfies SearchResponse),
-);
+app.get("/api/v3/search", async (c) => {
+  const type = c.req.query("type_") ?? "All";
+  const query = c.req.query("q")?.trim() ?? "";
+  const found = query ? await searchThreads(c, query, type) : { communities: [], posts: [] };
+  return c.json({ type_: "All", comments: [], users: [], ...found } as SearchResponse);
+});
 app.get("/api/v3/resolve_object", (c) => fail(c, "couldnt_find_object", 404));
-app.get("/api/v3/post", (c) => fail(c, "couldnt_find_post", 404));
-app.get("/api/v3/community", (c) => fail(c, "couldnt_find_community", 404));
 
 // Everything else: logged, so the next endpoint to build shows up in the
 // Worker's logs as apps ask for it.
