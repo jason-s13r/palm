@@ -23,10 +23,19 @@ outside this repo (the Palm project's `palm-decisions.md`).
   (`CloudflareMessageQueue`). Delivery runs as queue jobs, which the same
   Worker consumes, so a request only enqueues. Deliveries are signed with the
   RSA key alone: the Ed25519 Object Integrity Proof costs several times the
-  rest of signing.
+  rest of signing. Two federations share the database: people at
+  `/users/{name}` and communities (Lemmy Groups) at `/c/{name}`, because
+  Fedify allows one actor path per federation.
+
+Remote people, communities and posts live in the same tables as local ones
+(`accounts`, `communities`, `posts`), marked by their `ap_id`; local rows have
+none. palm keeps a remote post only if someone here would see it, and a daily
+cron prunes old remote posts nobody here touched.
 - `packages/cli`: admin commands run locally (`pnpm palm user create ...`,
-  `pnpm palm user keys ...`). Signing keys are generated here, not in the
-  Worker, because key generation is too slow for the free CPU limit.
+  `pnpm palm user keys ...`, `pnpm palm community create ...`,
+  `pnpm palm invite create ...`). Signing keys are generated here, not in the
+  Worker, because key generation is too slow for the free CPU limit; invites
+  carry a key pair for whoever signs up with them.
 
 All of the above are internal and never published.
 
