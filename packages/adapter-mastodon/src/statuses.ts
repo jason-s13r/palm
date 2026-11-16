@@ -147,7 +147,47 @@ function remoteAttachment(postId: number, index: number, a: Post["attachments"][
  * Mastodon Status entities for posts. Authors, parents, media, mentions and
  * counts are each looked up once for the whole list.
  */
-export async function statuses(ctx: RequestContext, posts: Post[], viewer: Account | null) {
+export async function statuses(ctx: RequestContext, rows: Post[], viewer: Account | null) {
+  const db = ctx.bindings.DB;
+  // Boosts are rows that point at the post they boost: show the post inside.
+  const boosted = await postsByIds(db, rows.map((r) => r.reblogOf).filter((id): id is number => id !== null));
+  const inner = await renderStatuses(ctx, [...boosted.values()], viewer);
+  const innerById = new Map(inner.map((s) => [s.id, s]));
+  const plain = await renderStatuses(ctx, rows.filter((r) => r.reblogOf === null), viewer);
+  const plainById = new Map(plain.map((s) => [s.id, s]));
+  const boosters = await accountsByIds(db, rows.filter((r) => r.reblogOf !== null).map((r) => r.accountId));
+  return rows.flatMap((row) => {
+    if (row.reblogOf === null) return plainById.has(String(row.id)) ? [plainById.get(String(row.id))!] : [];
+    const original = innerById.get(String(row.reblogOf));
+    const booster = boosters.get(row.accountId);
+    if (!original || !booster) return [];
+    return [
+      {
+        ...original,
+        id: String(row.id),
+        created_at: iso(row.createdAt),
+        uri: `${original.uri}#boosts/${row.id}`,
+        url: original.url,
+        content: "",
+        account: account(ctx, booster),
+        media_attachments: [],
+        mentions: [],
+        reblog: original,
+        in_reply_to_id: null,
+        in_reply_to_account_id: null,
+        replies_count: 0,
+        reblogs_count: 0,
+        favourites_count: 0,
+        favourited: false,
+        bookmarked: false,
+        reblogged: original.reblogged,
+      },
+    ];
+  });
+}
+
+/** Statuses for posts (not boosts). */
+async function renderStatuses(ctx: RequestContext, posts: Post[], viewer: Account | null) {
   const db = ctx.bindings.DB;
   const parentIds = posts.map((p) => p.parentId).filter((id): id is number => id !== null);
   const [media, mentioned, counts, parents] = await Promise.all([
@@ -203,7 +243,7 @@ export async function statuses(ctx: RequestContext, posts: Post[], viewer: Accou
               post.attachments.some((a) => a.url === post.linkUrl)),
         ),
         filtered: [],
-        reblog: null,
+        reblog: null as unknown,
         application: null,
         account: authorView,
         media_attachments: [
