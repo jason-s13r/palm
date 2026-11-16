@@ -51,7 +51,6 @@ describe("routing", () => {
   it("does not redirect inbox posts", async () => {
     const res = await worker.fetch("https://palm.test/inbox", { method: "POST", headers: { accept: "text/html" }, redirect: "manual" });
     expect(res.status).not.toBe(302);
-    expect(res.status).toBeGreaterThanOrEqual(400);
   });
 
   it("serves the placeholder avatar on every host", async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createAccount, giveKeys, mastodonToken, worker } from "./helpers.ts";
+import { createAccount, db, giveKeys, mastodonToken, worker } from "./helpers.ts";
 
 const DOMAIN = "https://palm.test";
 const AP = { headers: { accept: "application/activity+json" } };
@@ -51,13 +51,18 @@ describe("federation", () => {
     expect(info.software.version).toMatch(/^0\.19\.9\+palm\.\d+\.\d+\.\d+$/);
   });
 
-  it("refuses unsigned inbox deliveries", async () => {
+  it("takes inbox deliveries at once, and drops unsigned ones when the queue checks them", async () => {
+    const id = await createAccount("unsigned", "pw");
     const res = await worker.fetch(`${DOMAIN}/inbox`, {
       method: "POST",
       headers: { "content-type": "application/activity+json" },
-      body: JSON.stringify({ type: "Follow", actor: "https://elsewhere.test/u/x", object: "https://palm.test/users/hal" }),
+      body: JSON.stringify({ type: "Follow", actor: "https://elsewhere.test/u/x", object: "https://palm.test/users/unsigned" }),
     });
-    expect(res.status).toBeGreaterThanOrEqual(400);
+    // Accepted for checking in a queue job, which refuses it: no follower appears.
+    expect(res.status).toBe(202);
+    await new Promise((r) => setTimeout(r, 1500));
+    const followers = await db.prepare("SELECT COUNT(*) AS n FROM followers WHERE account_id = ?").bind(id).first<{ n: number }>();
+    expect(followers?.n).toBe(0);
   });
 
   it("serves both client APIs on the bare domain, and keeps nodeinfo as Lemmy", async () => {
