@@ -1,5 +1,5 @@
 import { hashPassword } from "@palm/auth";
-import { migrate } from "@palm/db";
+import { createApp, createToken, migrate } from "@palm/db";
 import { env, exports } from "cloudflare:workers";
 
 // `wrangler types` would type these; the tests only need fetch() and DB.
@@ -47,4 +47,10 @@ export async function giveKeys(accountId: number): Promise<void> {
       )
       .run();
   }
+}
+
+/** A Mastodon API bearer token for an account, as if it had signed in through OAuth. */
+export async function mastodonToken(accountId: number): Promise<string> {
+  const app = await createApp(db, { name: "Test", website: null, redirectUris: ["ivory://oauth"], scopes: "read write follow" });
+  return (await createToken(db, { appId: app.id, accountId, scopes: "read write follow" })).token;
 }

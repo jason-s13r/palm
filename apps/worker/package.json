@@ -30,7 +30,8 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@fedify/fedify": "^2.4.5"
+    "@fedify/fedify": "^2.4.5",
+    "temporal-polyfill": "^1.0.8"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.8.2",

@@ -1,6 +1,6 @@
 import { handleLemmy } from "@palm/adapter-lemmy";
 import { handleMastodon } from "@palm/adapter-mastodon";
-import { handleFederation } from "@palm/federation";
+import { activitySink, handleFederation } from "@palm/federation";
 import { defineConfig, normaliseHost, resolveSurface, type PalmBindings, type PalmConfig, type RequestContext } from "@palm/core";
 import { migrate } from "@palm/db";
 import { avatarResponse } from "./assets.ts";
@@ -71,14 +71,16 @@ export async function handle(
   // schema first (a no-op after the first request in each isolate).
   await migrate(env.DB);
 
-  const ctx: RequestContext = {
+  const ctx = {
     config,
     domain: surface.domain,
     host: normaliseHost(url.host),
     bindings: env,
     version: VERSION,
-    waitUntil: (promise) => executionCtx.waitUntil(promise),
-  };
+    waitUntil: (promise: Promise<unknown>) => executionCtx.waitUntil(promise),
+  } as RequestContext;
+  // The sink delivers with the finished context, so it's attached after.
+  ctx.activities = activitySink(ctx);
 
   switch (surface.kind) {
     case "lemmy":

@@ -113,7 +113,7 @@ describe("Mastodon API", () => {
     ).toBe(401);
   });
 
-  it("answers timelines with empty lists", async () => {
-    expect(await (await worker.fetch(`${MASTODON}/api/v1/timelines/home`)).json()).toEqual([]);
+  it("needs a signed-in account for the home timeline", async () => {
+    expect((await worker.fetch(`${MASTODON}/api/v1/timelines/home`)).status).toBe(401);
   });
 });
