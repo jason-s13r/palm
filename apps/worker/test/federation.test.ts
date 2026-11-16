@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createAccount, giveKeys, json, worker } from "./helpers.ts";
+import { createAccount, giveKeys, worker } from "./helpers.ts";
 
 const DOMAIN = "https://palm.test";
 const AP = { headers: { accept: "application/activity+json" } };
@@ -59,9 +59,8 @@ describe("federation", () => {
     expect(res.status).toBeGreaterThanOrEqual(400);
   });
 
-  it("serves both client APIs on the bare domain too", async () => {
-    await createAccount("ida", "pw-ida");
-    expect((await worker.fetch(`${DOMAIN}/api/v3/user/login`, json({ username_or_email: "ida", password: "pw-ida" }))).status).toBe(200);
-    expect((await (await worker.fetch(`${DOMAIN}/api/v2/instance`)).json<{ domain: string }>()).domain).toBe("palm.test");
+  it("leaves the client APIs to their own hosts", async () => {
+    expect((await worker.fetch(`${DOMAIN}/api/v3/site`)).status).toBe(404);
+    expect((await worker.fetch(`${DOMAIN}/api/v2/instance`)).status).toBe(404);
   });
 });

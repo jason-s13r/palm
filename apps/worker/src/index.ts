@@ -86,17 +86,9 @@ export async function handle(
     case "mastodon":
       return handleMastodon(request, ctx);
     case "federation":
-      // The client APIs answer on the bare domain too, so an app can be
-      // pointed at the handle's domain. Their paths don't overlap with
-      // federation's. Apps that identify the server by nodeinfo will see
-      // "palm" here; the dedicated API hosts remain for those.
-      if (url.pathname.startsWith("/api/v3/")) return handleLemmy(request, ctx);
-      if (MASTODON_ON_DOMAIN.test(url.pathname)) return handleMastodon(request, ctx);
       return handleFederation(request, ctx, (req) => federationFallback(config, req, new URL(req.url)));
   }
 }
-
-const MASTODON_ON_DOMAIN = /^\/(api\/v[12]\/|oauth\/|\.well-known\/oauth-authorization-server$)/;
 
 function federationFallback(config: PalmConfig, request: Request, url: URL): Response {
   // What Fedify doesn't serve: browsers go where the old redirect rule sent
