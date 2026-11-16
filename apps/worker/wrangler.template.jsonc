@@ -12,19 +12,19 @@
   // One D1 database (wrangler d1 create <name>). palm creates and migrates its
   // own tables on the first request, so there's no migration step to run.
   "d1_databases": [{ "binding": "DB", "database_name": "<database-name>", "database_id": "<database-id>" }],
-  // An R2 bucket for uploaded images (optional; without it uploads are
-  // refused). wrangler deploy creates it if it doesn't exist.
+  // An R2 bucket for uploaded images and video (optional; without it uploads
+  // are refused). wrangler deploy creates it if it doesn't exist.
   "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "<bucket-name>" }],
-  // A queue for deliveries and received activities (optional, but needed to
-  // stay inside the free plan's CPU budget once people have followers). The
-  // Worker consumes its own queue; wrangler deploy creates it.
   // Daily pruning of old remote posts nobody here touched, so D1 stays small.
   "triggers": { "crons": ["17 3 * * *"] },
+  // A queue for outgoing deliveries (optional, but it keeps sending to many
+  // followers out of the request). The Worker consumes its own queue;
+  // wrangler deploy creates it.
   "queues": {
     "producers": [{ "binding": "QUEUE", "queue": "<queue-name>" }],
     "consumers": [{ "queue": "<queue-name>", "max_batch_size": 5, "max_retries": 5 }]
   },
-  // One route per host in palm.config.ts: the domain, plus any API hosts.
+  // The domain, whole: palm serves its own paths and sends browsers on.
   "routes": [
     { "pattern": "<domain>/*", "zone_name": "<domain>" }
   ]
