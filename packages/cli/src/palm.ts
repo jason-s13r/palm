@@ -5,6 +5,7 @@
  *
  *   pnpm palm user create <username> --domain <domain> --db <d1-name> [--admin] [--password <pw>]
  *   pnpm palm user keys <username> --domain <domain> --db <d1-name>
+ *   pnpm palm invite create --domain <domain> --db <d1-name> [--count <n>]
  *   pnpm palm community create <name> --domain <domain> --db <d1-name> [--title <title>] [--description <text>]
  *
  * Signing keys (RSA for HTTP Signatures, Ed25519 for integrity proofs) are
@@ -24,6 +25,7 @@ const USAGE = [
   "  pnpm palm user create <username> --domain <domain> [--db <d1-name>] [--admin] [--password <pw>] [--local]",
   "  pnpm palm user keys <username> --domain <domain> [--db <d1-name>] [--local]",
   "  pnpm palm community create <name> --domain <domain> [--db <d1-name>] [--title <title>] [--description <text>] [--local]",
+  "  pnpm palm invite create --domain <domain> [--db <d1-name>] [--count <n>] [--local]",
 ].join("\n");
 
 const sqlString = (value: string) => `'${value.replaceAll("'", "''")}'`;
@@ -128,11 +130,54 @@ async function communityCreate(args: string[]): Promise<void> {
   if (values.db) console.log(`\nCreated !${name}@${values.domain}.`);
 }
 
+/**
+ * Invite codes for signing up. Each carries a key pair made here, because
+ * making one in the Worker would blow the free plan's CPU budget; whoever
+ * signs up with the code gets those keys.
+ */
+async function inviteCreate(args: string[]): Promise<void> {
+  const { values } = parseArgs({
+    args,
+    options: { domain: { type: "string" }, db: { type: "string" }, count: { type: "string" }, local: { type: "boolean", default: false } },
+  });
+  if (!values.domain) throw new Error(USAGE);
+  const count = Math.min(Math.max(Number(values.count ?? 1) || 1, 1), 20);
+  const codes: string[] = [];
+  const rows: string[] = [];
+  for (let i = 0; i < count; i++) {
+    // Short enough to type on a phone: 12 characters, no look-alikes.
+    const alphabet = "abcdefghjkmnpqrstuvwxyz23456789";
+    const code = [...crypto.getRandomValues(new Uint8Array(12))].map((b) => alphabet[b % alphabet.length]).join("");
+    const rsa = (await crypto.subtle.generateKey(
+      { name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
+      true,
+      ["sign", "verify"],
+    )) as CryptoKeyPair;
+    const ed = (await crypto.subtle.generateKey("Ed25519", true, ["sign", "verify"])) as CryptoKeyPair;
+    const pair = async (algorithm: string, keys: CryptoKeyPair) => ({
+      algorithm,
+      publicJwk: await crypto.subtle.exportKey("jwk", keys.publicKey),
+      privateJwk: await crypto.subtle.exportKey("jwk", keys.privateKey),
+    });
+    const keyPairs = JSON.stringify([await pair("RSASSA-PKCS1-v1_5", rsa), await pair("Ed25519", ed)]);
+    rows.push(
+      `INSERT INTO invites (code, domain, key_pairs, created_at) VALUES (${sqlString(code)}, ${sqlString(values.domain)}, ${sqlString(keyPairs)}, ${Math.floor(Date.now() / 1000)});`,
+    );
+    codes.push(code);
+  }
+  run(values.db, values.local ?? false, rows.join("\n"));
+  if (values.db) {
+    console.log(`\nInvite codes for ${values.domain} (each signs up one account, in a Lemmy app's application answer or a Mastodon app's reason):`);
+    for (const code of codes) console.log(`  ${code}`);
+  }
+}
+
 async function main(argv: string[]): Promise<void> {
   const [group, command, ...rest] = argv;
   if (group === "user" && command === "create") return userCreate(rest);
   if (group === "user" && command === "keys") return userKeys(rest);
   if (group === "community" && command === "create") return communityCreate(rest);
+  if (group === "invite" && command === "create") return inviteCreate(rest);
   throw new Error(USAGE);
 }
 
