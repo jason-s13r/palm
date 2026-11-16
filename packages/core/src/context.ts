@@ -30,3 +30,19 @@ export const urls = {
   inbox: (domain: string) => `https://${domain}/inbox`,
   userInbox: (domain: string, username: string) => `${urls.user(domain, username)}/inbox`,
 };
+
+/**
+ * The Lemmy version palm answers as. Lemmy apps check it (Voyager needs
+ * ">=0.19.0"), so it's a real Lemmy version.
+ */
+export const LEMMY_COMPAT_VERSION = "0.19.9";
+
+/**
+ * The version palm reports in nodeinfo: the Lemmy version it's compatible
+ * with, plus palm's own as semver build metadata, e.g. "0.19.9+palm.0.2.0".
+ * Comparisons ignore build metadata, so app version checks still pass; anyone
+ * reading it can see it's palm. (The software name has to be plain "lemmy":
+ * the schema allows one lowercase word.)
+ */
+export const nodeinfoVersion = (palmVersion: string) =>
+  `${LEMMY_COMPAT_VERSION}+palm.${palmVersion.replace(/[^0-9A-Za-z.-]/g, "-")}`;
