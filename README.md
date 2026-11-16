@@ -12,17 +12,22 @@ tier.
 The name is MLAP backwards: Mastodon, Lemmy, ActivityPub.
 
 > **Status: early.** This is the M0 skeleton: config, host routing, the
-> release pipeline and a staging Worker. Nothing federates yet.
+> release pipeline and a staging Worker. Posts from Mastodon apps federate;
+following others and inbound content come next.
 
 ## How it's put together
 
-One Worker serves every host and routes on the `Host` header:
+One Worker serves the domain and routes on the path:
 
-| Host | Serves |
+| Path | Serves |
 | --- | --- |
-| `your.domain` | Federation: WebFinger, nodeinfo, actors, the inbox |
-| `lemmy.your.domain` | The Lemmy API v3, for Lemmy apps |
-| `mastodon.your.domain` | The Mastodon API, for Mastodon apps |
+| `/.well-known/webfinger`, `/users`, `/objects`, `/inbox`, nodeinfo | Federation |
+| `/api/v3` | The Lemmy API, for Lemmy apps |
+| `/api/v1`, `/api/v2`, `/oauth` | The Mastodon API, for Mastodon apps |
+
+People sign in to both kinds of app with the domain itself (`your.domain`), so
+apps show their handle as `@name@your.domain`. Nodeinfo answers as Lemmy, which
+Lemmy apps check before they sign in.
 
 The code is generic. A deployment lives in its own repo and passes its config
 to `createPalm`:
@@ -32,7 +37,7 @@ to `createPalm`:
 import { defineConfig } from "@jason-s13r/palm-worker";
 
 export default defineConfig({
-  domains: [{ domain: "your.domain", hosts: { lemmy: "lemmy.your.domain", mastodon: "mastodon.your.domain" } }],
+  domains: [{ domain: "your.domain" }],
   instance: { name: "Our place" },
   browserRedirect: "https://your.website",
 });
