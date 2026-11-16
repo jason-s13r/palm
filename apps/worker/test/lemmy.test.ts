@@ -17,8 +17,9 @@ describe("Lemmy API", () => {
 
   it("identifies itself as Lemmy in nodeinfo", async () => {
     const links = await (await worker.fetch(`${LEMMY}/.well-known/nodeinfo`)).json<{ links: { href: string }[] }>();
-    const info = await (await worker.fetch(links.links[0]!.href)).json<{ software: { name: string } }>();
+    const info = await (await worker.fetch(links.links[0]!.href)).json<{ software: { name: string; version: string } }>();
     expect(info.software.name).toBe("lemmy");
+    expect(info.software.version).toMatch(/^0\.19\.9\+palm\./);
   });
 
   it("logs in, shows the account in the site, and logs out", async () => {

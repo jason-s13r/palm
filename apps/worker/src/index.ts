@@ -86,6 +86,10 @@ export async function handle(
     case "mastodon":
       return handleMastodon(request, ctx);
     case "federation":
+      // The Lemmy API answers on the bare domain as well as its own host:
+      // Lemmy apps (Voyager) talk to the handle's domain once signed in.
+      // Mastodon's API stays on its own host only.
+      if (url.pathname.startsWith("/api/v3/")) return handleLemmy(request, ctx);
       return handleFederation(request, ctx, (req) => federationFallback(config, req, new URL(req.url)));
   }
 }

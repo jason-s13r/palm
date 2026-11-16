@@ -44,10 +44,11 @@ describe("federation", () => {
     expect((await worker.fetch(`${DOMAIN}/.well-known/webfinger?resource=acct:nobody@palm.test`)).status).toBe(404);
   });
 
-  it("reports itself as palm in nodeinfo", async () => {
+  it("answers nodeinfo as Lemmy, with palm's version as build metadata", async () => {
     const links = await (await worker.fetch(`${DOMAIN}/.well-known/nodeinfo`)).json<{ links: { href: string }[] }>();
-    const info = await (await worker.fetch(links.links[0]!.href)).json<{ software: { name: string } }>();
-    expect(info.software.name).toBe("palm");
+    const info = await (await worker.fetch(links.links[0]!.href)).json<{ software: { name: string; version: string } }>();
+    expect(info.software.name).toBe("lemmy");
+    expect(info.software.version).toMatch(/^0\.19\.9\+palm\.\d+\.\d+\.\d+$/);
   });
 
   it("refuses unsigned inbox deliveries", async () => {
@@ -59,8 +60,8 @@ describe("federation", () => {
     expect(res.status).toBeGreaterThanOrEqual(400);
   });
 
-  it("leaves the client APIs to their own hosts", async () => {
-    expect((await worker.fetch(`${DOMAIN}/api/v3/site`)).status).toBe(404);
+  it("serves the Lemmy API on the bare domain, and leaves Mastodon's to its own host", async () => {
+    expect((await worker.fetch(`${DOMAIN}/api/v3/site`)).status).toBe(200);
     expect((await worker.fetch(`${DOMAIN}/api/v2/instance`)).status).toBe(404);
   });
 });
