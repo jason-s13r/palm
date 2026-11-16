@@ -42,7 +42,7 @@ export function mentionsIn(text: string): string[] {
   return [...new Set([...text.matchAll(MENTION)].map((m) => m[2]!.toLowerCase()))];
 }
 
-const ALLOWED_TAGS = new Set(["p", "br", "a", "span", "strong", "b", "em", "i", "u", "s", "del", "code", "pre", "blockquote", "ul", "ol", "li", "h1", "h2", "h3", "h4", "h5", "h6", "sup", "sub", "img"]);
+const ALLOWED_TAGS = new Set(["p", "br", "hr", "a", "span", "strong", "b", "em", "i", "u", "s", "del", "code", "pre", "blockquote", "ul", "ol", "li", "h1", "h2", "h3", "h4", "h5", "h6", "sup", "sub", "img"]);
 const ALLOWED_ATTRS: Record<string, Set<string>> = {
   a: new Set(["href", "rel", "class", "target", "title"]),
   span: new Set(["class"]),
@@ -73,7 +73,7 @@ export function sanitizeHtml(html: string): string {
           attrs.push(`${attr}="${value.replaceAll('"', "&quot;")}"`);
         }
       }
-      const selfClosing = name === "br" || name === "img";
+      const selfClosing = name === "br" || name === "img" || name === "hr";
       return `<${name}${attrs.length ? " " + attrs.join(" ") : ""}${selfClosing ? " /" : ""}>`;
     });
 }
@@ -112,4 +112,84 @@ export function htmlToText(html: string): string {
   )
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+/**
+ * Lemmy's Markdown as HTML, for other servers and Mastodon apps: paragraphs,
+ * line breaks, headings, emphasis, inline and fenced code, links, images,
+ * quotes, lists and rules. Anything else stays as its (escaped) text.
+ */
+export function markdownToHtml(markdown: string): string {
+  const inline = (text: string) => {
+    const codes: string[] = [];
+    let out = escapeHtml(text).replace(/`([^`]+)`/g, (_, code: string) => {
+      codes.push(`<code>${code}</code>`);
+      return `\u0000${codes.length - 1}\u0000`;
+    });
+    out = out
+      .replace(/!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/g, '<img src="$2" alt="$1" />')
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" rel="nofollow noopener" target="_blank">$1</a>')
+      .replace(/(^|[\s(])(https?:\/\/[^\s<)]+[^\s<).,;:!?])/g, '$1<a href="$2" rel="nofollow noopener" target="_blank">$2</a>')
+      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+      .replace(/(^|[^*])\*([^*\s][^*]*)\*/g, "$1<em>$2</em>")
+      .replace(/(^|\W)_([^_\s][^_]*)_(?=\W|$)/g, "$1<em>$2</em>")
+      .replace(/~~([^~]+)~~/g, "<del>$1</del>");
+    return out.replace(/\u0000(\d+)\u0000/g, (_, i: string) => codes[Number(i)]!);
+  };
+  const lines = markdown.replaceAll("\r\n", "\n").split("\n");
+  const out: string[] = [];
+  let paragraph: string[] = [];
+  const flush = () => {
+    if (paragraph.length) out.push(`<p>${paragraph.map(inline).join("<br>")}</p>`);
+    paragraph = [];
+  };
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const fence = line.match(/^```/);
+    if (fence) {
+      flush();
+      const code: string[] = [];
+      while (++i < lines.length && !/^```/.test(lines[i]!)) code.push(lines[i]!);
+      out.push(`<pre><code>${escapeHtml(code.join("\n"))}</code></pre>`);
+      continue;
+    }
+    const heading = line.match(/^(#{1,6})\s+(.*)$/);
+    if (heading) {
+      flush();
+      out.push(`<h${heading[1]!.length}>${inline(heading[2]!)}</h${heading[1]!.length}>`);
+      continue;
+    }
+    if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) {
+      flush();
+      out.push("<hr>");
+      continue;
+    }
+    if (/^>\s?/.test(line)) {
+      flush();
+      const quote: string[] = [];
+      while (i < lines.length && /^>\s?/.test(lines[i]!)) quote.push(lines[i++]!.replace(/^>\s?/, ""));
+      i--;
+      out.push(`<blockquote>${markdownToHtml(quote.join("\n"))}</blockquote>`);
+      continue;
+    }
+    const item = line.match(/^\s*([-*+]|\d+\.)\s+(.*)$/);
+    if (item) {
+      flush();
+      const ordered = /\d/.test(item[1]!);
+      const items: string[] = [];
+      while (i < lines.length) {
+        const m = lines[i]!.match(/^\s*([-*+]|\d+\.)\s+(.*)$/);
+        if (!m) break;
+        items.push(`<li>${inline(m[2]!)}</li>`);
+        i++;
+      }
+      i--;
+      out.push(ordered ? `<ol>${items.join("")}</ol>` : `<ul>${items.join("")}</ul>`);
+      continue;
+    }
+    if (!line.trim()) flush();
+    else paragraph.push(line);
+  }
+  flush();
+  return out.join("");
 }
