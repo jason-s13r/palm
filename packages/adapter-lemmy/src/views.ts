@@ -1,5 +1,5 @@
 import type { RequestContext } from "@palm/core";
-import { urls } from "@palm/core";
+import { htmlToText, urls } from "@palm/core";
 import type { Account, Community as StoredCommunity, CommunityStats, ThreadComment, ThreadPost } from "@palm/db";
 import type {
   Comment,
@@ -29,21 +29,34 @@ export { LEMMY_COMPAT_VERSION as LEMMY_VERSION } from "@palm/core";
 /** palm is one Lemmy "instance" per domain; Lemmy numbers its own as 1. */
 const LOCAL_INSTANCE_ID = 1;
 
+/**
+ * Lemmy numbers every instance it knows; palm doesn't keep a table of them,
+ * so a remote host gets a stable number from its name. Apps only compare them.
+ */
+function instanceId(host: string): number {
+  let hash = 0;
+  for (const ch of host) hash = (hash * 31 + ch.charCodeAt(0)) | 0;
+  return 2 + (Math.abs(hash) % 1_000_000_000);
+}
+
 const iso = (seconds: number) => new Date(seconds * 1000).toISOString();
 
 export function person(ctx: RequestContext, account: Account): Person {
+  const local = account.apId === null;
   return {
     id: account.id,
     name: account.username,
     ...(account.displayName ? { display_name: account.displayName } : {}),
-    ...(account.bio ? { bio: account.bio } : {}),
+    ...(account.bio ? { bio: local ? account.bio : htmlToText(account.bio) } : {}),
+    ...(account.avatarUrl ? { avatar: account.avatarUrl } : {}),
+    ...(account.headerUrl ? { banner: account.headerUrl } : {}),
     banned: false,
     published: iso(account.createdAt),
-    actor_id: urls.user(ctx.domain.domain, account.username),
-    local: true,
+    actor_id: account.apId ?? urls.user(account.domain, account.username),
+    local,
     deleted: false,
-    bot_account: false,
-    instance_id: LOCAL_INSTANCE_ID,
+    bot_account: account.actorType === "Service",
+    instance_id: local ? LOCAL_INSTANCE_ID : instanceId(account.domain),
   };
 }
 
@@ -196,28 +209,35 @@ export function myUserInfo(ctx: RequestContext, account: Account, follows: Store
 }
 
 export function community(ctx: RequestContext, c: StoredCommunity): Community {
+  const local = c.apId === null;
   return {
     id: c.id,
     name: c.name,
     title: c.title,
-    ...(c.description ? { description: c.description } : {}),
+    ...(c.description ? { description: local ? c.description : htmlToText(c.description) } : {}),
+    ...(c.iconUrl ? { icon: c.iconUrl } : {}),
+    ...(c.bannerUrl ? { banner: c.bannerUrl } : {}),
     removed: false,
     published: iso(c.createdAt),
     deleted: false,
     nsfw: c.nsfw,
-    actor_id: urls.community(ctx.domain.domain, c.name),
-    local: true,
+    actor_id: c.apId ?? urls.community(c.domain, c.name),
+    local,
     hidden: false,
     posting_restricted_to_mods: false,
-    instance_id: LOCAL_INSTANCE_ID,
+    instance_id: local ? LOCAL_INSTANCE_ID : instanceId(c.domain),
     visibility: "Public",
   };
 }
 
+/** Lemmy's subscription states. */
+const subscribedType = (s: { subscribed: boolean; pending?: boolean }) =>
+  s.subscribed ? ("Subscribed" as const) : s.pending ? ("Pending" as const) : ("NotSubscribed" as const);
+
 export function communityView(ctx: RequestContext, c: StoredCommunity & CommunityStats): CommunityView {
   return {
     community: community(ctx, c),
-    subscribed: c.subscribed ? "Subscribed" : "NotSubscribed",
+    subscribed: subscribedType(c),
     blocked: false,
     banned_from_community: false,
     counts: {
@@ -240,9 +260,13 @@ export interface ThreadContext {
   creator: Account;
   community: StoredCommunity;
   subscribed: boolean;
+  pending: boolean;
 }
 
-export function post(ctx: RequestContext, p: ThreadPost): Post {
+/** A post's or comment's ActivityPub ID. */
+const apIdOf = (p: { apId: string | null; id: number }, author: Account) => p.apId ?? urls.object(author.domain, String(p.id));
+
+export function post(ctx: RequestContext, p: ThreadPost, creator?: Account): Post {
   return {
     id: p.id,
     name: p.title ?? "",
@@ -258,8 +282,8 @@ export function post(ctx: RequestContext, p: ThreadPost): Post {
     ...(p.updatedAt ? { updated: iso(p.updatedAt) } : {}),
     deleted: false,
     nsfw: p.sensitive,
-    ap_id: urls.object(ctx.domain.domain, String(p.id)),
-    local: true,
+    ap_id: creator ? apIdOf(p, creator) : (p.apId ?? urls.object(ctx.domain.domain, String(p.id))),
+    local: p.apId === null,
     language_id: 0,
     featured_community: false,
     featured_local: false,
@@ -268,7 +292,7 @@ export function post(ctx: RequestContext, p: ThreadPost): Post {
 
 export function postView(ctx: RequestContext, p: ThreadPost, t: ThreadContext): PostView {
   return {
-    post: post(ctx, p),
+    post: post(ctx, p, t.creator),
     creator: person(ctx, t.creator),
     community: community(ctx, t.community),
     creator_banned_from_community: false,
@@ -284,8 +308,8 @@ export function postView(ctx: RequestContext, p: ThreadPost, t: ThreadContext): 
       published: iso(p.createdAt),
       newest_comment_time: iso(p.activeAt),
     },
-    subscribed: t.subscribed ? "Subscribed" : "NotSubscribed",
-    saved: false,
+    subscribed: subscribedType(t),
+    saved: p.saved,
     read: false,
     hidden: false,
     creator_blocked: false,
@@ -294,7 +318,7 @@ export function postView(ctx: RequestContext, p: ThreadPost, t: ThreadContext): 
   };
 }
 
-export function comment(ctx: RequestContext, c: ThreadComment): Comment {
+export function comment(ctx: RequestContext, c: ThreadComment, creator?: Account): Comment {
   return {
     id: c.id,
     creator_id: c.accountId,
@@ -304,8 +328,8 @@ export function comment(ctx: RequestContext, c: ThreadComment): Comment {
     published: iso(c.createdAt),
     ...(c.updatedAt ? { updated: iso(c.updatedAt) } : {}),
     deleted: c.deleted,
-    ap_id: urls.object(ctx.domain.domain, String(c.id)),
-    local: true,
+    ap_id: creator ? apIdOf(c, creator) : (c.apId ?? urls.object(ctx.domain.domain, String(c.id))),
+    local: c.apId === null,
     path: c.path ?? `0.${c.id}`,
     distinguished: false,
     language_id: 0,
@@ -314,7 +338,7 @@ export function comment(ctx: RequestContext, c: ThreadComment): Comment {
 
 export function commentView(ctx: RequestContext, c: ThreadComment, onPost: ThreadPost, t: ThreadContext): CommentView {
   return {
-    comment: comment(ctx, c),
+    comment: comment(ctx, c, t.creator),
     creator: person(ctx, t.creator),
     post: post(ctx, onPost),
     community: community(ctx, t.community),
@@ -330,8 +354,8 @@ export function commentView(ctx: RequestContext, c: ThreadComment, onPost: Threa
     banned_from_community: false,
     creator_is_moderator: false,
     creator_is_admin: t.creator.role === "admin",
-    subscribed: t.subscribed ? "Subscribed" : "NotSubscribed",
-    saved: false,
+    subscribed: subscribedType(t),
+    saved: c.saved,
     creator_blocked: false,
     ...(c.myVote ? { my_vote: c.myVote } : {}),
   };

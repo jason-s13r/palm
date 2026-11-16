@@ -1,22 +1,28 @@
 import { textToHtml, urls, type RequestContext } from "@palm/core";
 import {
   accountById,
+  accountsByIds,
   attachMedia,
+  bookmark,
   communitiesByIds,
   communityById,
   communityByName,
   createPost,
+  currentVote,
   deletePost,
   editPost,
   listCommunities,
   listThreadComments,
+  hasLocalSubscribers,
   listThreadPosts,
   mediaById,
   postByIdAny,
   restorePost,
   subscribe,
+  subscription,
   subscriptions,
   threadSort,
+  unbookmark,
   unsubscribe,
   vote,
   type Account,
@@ -36,7 +42,7 @@ import type {
   PostResponse,
   SuccessResponse,
 } from "lemmy-js-client";
-import { commentView, communityView, postView, type ThreadContext } from "./views.ts";
+import { commentView, communityView, personView, postView, type ThreadContext } from "./views.ts";
 
 /**
  * Communities, posts, comments and votes: Lemmy's side of palm's posts. A
@@ -76,38 +82,51 @@ function paging(c: C, defaultLimit: number, maxLimit: number) {
   return { limit, offset: fromCursor ?? (page - 1) * limit };
 }
 
-/** A community named "sandbox", "!sandbox" or "sandbox@this.domain"; others aren't here. */
+/**
+ * A community by name: "sandbox", "!sandbox", "sandbox@this.domain", or a
+ * remote one, "rust@lemmy.ml", which palm fetches the first time it's asked.
+ */
 async function communityNamed(c: C, name: string): Promise<Community | null> {
-  const [local, host] = name.replace(/^!/, "").split("@");
-  if (!local || (host && host.toLowerCase() !== c.env.domain.domain)) return null;
-  return communityByName(c.env.bindings.DB, c.env.domain.domain, local);
+  const [local, rawHost] = name.replace(/^!/, "").split("@");
+  if (!local) return null;
+  const host = rawHost?.toLowerCase() ?? c.env.domain.domain;
+  const db = c.env.bindings.DB;
+  const known = await communityByName(db, host, local);
+  if (known && (known.apId !== null || host === c.env.domain.domain)) return known;
+  if (host === c.env.domain.domain) return null;
+  const found = await c.env.activities.resolve(`!${local}@${host}`);
+  return found?.kind === "community" ? communityById(db, found.id) : null;
 }
 
+/** A community this domain can show: its own, or a remote one palm knows. */
+const visible = (c: C, community: Community | null) =>
+  community && (community.apId !== null || community.domain === c.env.domain.domain) ? community : null;
+
 async function communityFor(c: C, id: number | undefined, name: string | undefined): Promise<Community | null | undefined> {
-  if (id !== undefined) {
-    const found = await communityById(c.env.bindings.DB, id);
-    return found?.domain === c.env.domain.domain ? found : null;
-  }
+  if (id !== undefined) return visible(c, await communityById(c.env.bindings.DB, id));
   if (name) return communityNamed(c, name);
   return undefined;
 }
+
+/** Lemmy's listing types: Local is this domain's communities; All and Subscribed take in remote ones. */
+const scopeOf = (type: string | undefined) => (type === "Local" ? ("local" as const) : ("all" as const));
 
 /** Looks up the people, communities and subscriptions a set of views needs, once each. */
 async function contextFor(c: C, items: { accountId: number; communityId: number | null }[]) {
   const db = c.env.bindings.DB;
   const viewer = c.get("auth")?.account ?? null;
-  const accountIds = [...new Set(items.map((i) => i.accountId))];
-  const [accounts, communities, subscribed] = await Promise.all([
-    Promise.all(accountIds.map((id) => accountById(db, id))),
+  const [byId, communities, subscribed] = await Promise.all([
+    accountsByIds(db, items.map((i) => i.accountId)),
     communitiesByIds(db, items.map((i) => i.communityId ?? 0)),
     viewer ? subscriptions(db, viewer.id) : Promise.resolve([]),
   ]);
-  const byId = new Map(accounts.filter((a): a is Account => a !== null).map((a) => [a.id, a]));
-  const subscribedIds = new Set(subscribed.map((s) => s.id));
+  const states = new Map(subscribed.map((s) => [s.id, s.pending]));
   return (item: { accountId: number; communityId: number | null }): ThreadContext | null => {
     const creator = byId.get(item.accountId);
     const community = communities.get(item.communityId ?? 0);
-    return creator && community ? { creator, community, subscribed: subscribedIds.has(community.id) } : null;
+    if (!creator || !community) return null;
+    const pending = states.get(community.id);
+    return { creator, community, subscribed: pending === false, pending: pending === true };
   };
 }
 
@@ -122,6 +141,7 @@ async function postViews(c: C, posts: ThreadPost[]) {
 async function commentViews(c: C, comments: ThreadComment[]) {
   const roots = await listThreadPosts(c.env.bindings.DB, {
     domain: c.env.domain.domain,
+    scope: "all",
     ids: [...new Set(comments.map((x) => x.rootId ?? 0))],
     sort: "new",
     viewerId: c.get("auth")?.account.id ?? null,
@@ -141,6 +161,7 @@ async function commentViews(c: C, comments: ThreadComment[]) {
 async function threadPost(c: C, id: number): Promise<ThreadPost | null> {
   const [found] = await listThreadPosts(c.env.bindings.DB, {
     domain: c.env.domain.domain,
+    scope: "all",
     ids: [id],
     sort: "new",
     viewerId: c.get("auth")?.account.id ?? null,
@@ -153,6 +174,7 @@ async function threadPost(c: C, id: number): Promise<ThreadPost | null> {
 async function threadComment(c: C, id: number): Promise<ThreadComment | null> {
   const [found] = await listThreadComments(c.env.bindings.DB, {
     domain: c.env.domain.domain,
+    scope: "all",
     ids: [id],
     sort: "new",
     viewerId: c.get("auth")?.account.id ?? null,
@@ -178,12 +200,22 @@ async function communityStats(c: C, community: Community) {
   const viewer = c.get("auth")?.account.id ?? null;
   const [found] = await listCommunities(c.env.bindings.DB, {
     domain: c.env.domain.domain,
+    scope: "all",
     ids: [community.id],
     viewerId: viewer,
     limit: 1,
     offset: 0,
   });
-  return found ?? { ...community, subscribers: 0, posts: 0, comments: 0, subscribed: false };
+  return found ?? { ...community, subscribers: 0, posts: 0, comments: 0, subscribed: false, pending: false };
+}
+
+/** Records a vote and tells the post's community (or author) about it. */
+async function castVote(c: C, postId: number, accountId: number, score: number): Promise<void> {
+  const db = c.env.bindings.DB;
+  const previous = await currentVote(db, postId, accountId);
+  if (previous === score) return;
+  await vote(db, postId, accountId, score);
+  c.env.activities.enqueue({ kind: "voted", postId, accountId, score, previous });
 }
 
 export const threadRoutes = new Hono<Env>();
@@ -208,6 +240,7 @@ threadRoutes.get("/api/v3/community/list", async (c) => {
   if (type === "Subscribed" && !viewer) return c.json({ communities: [] } satisfies ListCommunitiesResponse);
   const found = await listCommunities(c.env.bindings.DB, {
     domain: c.env.domain.domain,
+    scope: scopeOf(type),
     subscribedBy: type === "Subscribed" ? viewer?.id : undefined,
     viewerId: viewer?.id ?? null,
     limit,
@@ -223,8 +256,25 @@ threadRoutes.post("/api/v3/community/follow", async (c) => {
   const community = await communityFor(c, int(params.community_id), undefined);
   if (!community) return fail(c, "couldnt_find_community", 404);
   const db = c.env.bindings.DB;
-  if (params.follow === false) await unsubscribe(db, community.id, auth.account.id);
-  else await subscribe(db, community.id, auth.account.id);
+  const existing = await subscription(db, community.id, auth.account.id);
+  if (params.follow === false) {
+    await unsubscribe(db, community.id, auth.account.id);
+    if (community.apId && existing?.followApId) {
+      c.env.activities.enqueue({ kind: "subscribed", accountId: auth.account.id, communityId: community.id, followApId: existing.followApId, undo: true });
+    }
+  } else if (!existing) {
+    if (community.apId) {
+      // A remote community: ask it, and show "Pending" until it accepts.
+      const followApId = `${urls.user(auth.account.domain, auth.account.username)}#follows/c${community.id}-${Date.now()}`;
+      const first = !(await hasLocalSubscribers(db, community.id));
+      await subscribe(db, community.id, auth.account.id, { followApId });
+      c.env.activities.enqueue({ kind: "subscribed", accountId: auth.account.id, communityId: community.id, followApId, undo: false });
+      // The first subscriber here gets the community's recent posts to start with.
+      if (first) c.env.activities.enqueue({ kind: "backfill", communityId: community.id });
+    } else {
+      await subscribe(db, community.id, auth.account.id);
+    }
+  }
   return c.json({ community_view: communityView(c.env, await communityStats(c, community)), discussion_languages: [] } satisfies CommunityResponse);
 });
 
@@ -235,16 +285,19 @@ threadRoutes.get("/api/v3/post/list", async (c) => {
   const { limit, offset } = paging(c, 20, 50);
   const community = await communityFor(c, int(c.req.query("community_id")), c.req.query("community_name"));
   if (community === null) return fail(c, "couldnt_find_community", 404);
-  // Saved, liked and hidden posts aren't kept yet.
-  if (bool(c.req.query("saved_only")) || bool(c.req.query("liked_only")) || bool(c.req.query("disliked_only"))) {
-    return c.json({ posts: [] } satisfies GetPostsResponse);
-  }
   const type = c.req.query("type_");
-  if (!community && type === "Subscribed" && !viewer) return c.json({ posts: [] } satisfies GetPostsResponse);
+  const mine = bool(c.req.query("saved_only")) || bool(c.req.query("liked_only")) || bool(c.req.query("disliked_only"));
+  if ((mine || (!community && type === "Subscribed")) && !viewer) return c.json({ posts: [] } satisfies GetPostsResponse);
   const posts = await listThreadPosts(c.env.bindings.DB, {
     domain: c.env.domain.domain,
+    scope: community ? "all" : scopeOf(type),
     communityId: community?.id,
-    subscribedBy: !community && type === "Subscribed" ? viewer?.id : undefined,
+    savedBy: bool(c.req.query("saved_only")) ? viewer?.id : undefined,
+    votedBy:
+      viewer && (bool(c.req.query("liked_only")) || bool(c.req.query("disliked_only")))
+        ? { accountId: viewer.id, score: bool(c.req.query("liked_only")) ? 1 : -1 }
+        : undefined,
+    subscribedBy: !community && !mine && type === "Subscribed" ? viewer?.id : undefined,
     sort: threadSort(c.req.query("sort")),
     viewerId: viewer?.id ?? null,
     limit,
@@ -304,7 +357,7 @@ threadRoutes.post("/api/v3/post", async (c) => {
   // and other servers show the picture rather than a bare link.
   const uploaded = link?.startsWith(urls.media(c.env.domain.domain, "")) ? await mediaById(db, link.slice(urls.media(c.env.domain.domain, "").length)) : null;
   if (uploaded && uploaded.accountId === auth.account.id) await attachMedia(db, created.id, auth.account.id, [uploaded.id]);
-  c.env.activities.postCreated(created);
+  c.env.activities.enqueue({ kind: "post_created", postId: created.id });
   return postResponse(c, created.id);
 });
 
@@ -320,6 +373,7 @@ threadRoutes.put("/api/v3/post", async (c) => {
   const link = str(params.url)?.trim();
   if (link && !/^https?:\/\/\S+$/.test(link)) return fail(c, "invalid_url");
   await editPost(c.env.bindings.DB, found.id, { contentSource: text, contentHtml: textToHtml(text), title: title ?? null, linkUrl: link || null });
+  c.env.activities.enqueue({ kind: "post_updated", postId: found.id });
   return postResponse(c, found.id);
 });
 
@@ -338,7 +392,7 @@ threadRoutes.post("/api/v3/post/delete", async (c) => {
   const before = await threadPost(c, found.id);
   const [view] = before ? await postViews(c, [before]) : [];
   await deletePost(c.env.bindings.DB, found.id);
-  c.env.activities.postDeleted(found);
+  c.env.activities.enqueue({ kind: "post_deleted", postId: found.id });
   if (!view) return fail(c, "couldnt_find_post", 404);
   view.post.deleted = true;
   return c.json({ post_view: view } satisfies PostResponse);
@@ -350,18 +404,24 @@ threadRoutes.post("/api/v3/post/like", async (c) => {
   const params = await body(c);
   const found = await threadPost(c, int(params.post_id) ?? -1);
   if (!found) return fail(c, "couldnt_find_post", 404);
-  await vote(c.env.bindings.DB, found.id, auth.account.id, Math.sign(int(params.score) ?? 0));
+  await castVote(c, found.id, auth.account.id, Math.sign(int(params.score) ?? 0));
   return postResponse(c, found.id);
 });
 
-// Read marks, saves and hides aren't kept yet; apps get the post back as if they were.
-for (const path of ["/api/v3/post/save", "/api/v3/post/hide"]) {
-  threadRoutes.on(["POST", "PUT"], path, async (c) => {
-    const params = await body(c);
-    const id = int(params.post_id) ?? (Array.isArray(params.post_ids) ? int(params.post_ids[0]) : undefined);
-    return id === undefined ? c.json({ success: true } satisfies SuccessResponse) : postResponse(c, id);
-  });
-}
+// Saving is a bookmark, shared with Mastodon apps.
+threadRoutes.put("/api/v3/post/save", async (c) => {
+  const auth = c.get("auth");
+  if (!auth) return fail(c, "not_logged_in", 401);
+  const params = await body(c);
+  const found = await threadPost(c, int(params.post_id) ?? -1);
+  if (!found) return fail(c, "couldnt_find_post", 404);
+  if (params.save === false) await unbookmark(c.env.bindings.DB, found.id, auth.account.id);
+  else await bookmark(c.env.bindings.DB, found.id, auth.account.id);
+  return postResponse(c, found.id);
+});
+
+// Hiding posts isn't kept yet.
+threadRoutes.post("/api/v3/post/hide", (c) => c.json({ success: true } satisfies SuccessResponse));
 threadRoutes.post("/api/v3/post/mark_as_read", (c) => c.json({ success: true } satisfies SuccessResponse));
 
 // --- comments --------------------------------------------------------------
@@ -371,13 +431,15 @@ threadRoutes.get("/api/v3/comment/list", async (c) => {
   const maxDepth = int(c.req.query("max_depth"));
   // A tree with a depth limit comes back whole, as Lemmy does; flat lists page.
   const { limit, offset } = maxDepth !== undefined ? { limit: 500, offset: 0 } : paging(c, 20, 50);
-  if (bool(c.req.query("saved_only")) || bool(c.req.query("liked_only")) || bool(c.req.query("disliked_only"))) {
-    return c.json({ comments: [] } satisfies GetCommentsResponse);
-  }
+  if (bool(c.req.query("liked_only")) || bool(c.req.query("disliked_only"))) return c.json({ comments: [] } satisfies GetCommentsResponse);
+  const savedOnly = bool(c.req.query("saved_only"));
+  if (savedOnly && !viewer) return c.json({ comments: [] } satisfies GetCommentsResponse);
   const community = await communityFor(c, int(c.req.query("community_id")), c.req.query("community_name"));
   if (community === null) return fail(c, "couldnt_find_community", 404);
   const comments = await listThreadComments(c.env.bindings.DB, {
     domain: c.env.domain.domain,
+    scope: scopeOf(c.req.query("type_")),
+    savedBy: savedOnly ? viewer?.id : undefined,
     postId: int(c.req.query("post_id")),
     parentId: int(c.req.query("parent_id")),
     communityId: community?.id,
@@ -401,13 +463,14 @@ threadRoutes.post("/api/v3/comment", async (c) => {
   const onPost = await threadPost(c, int(params.post_id) ?? -1);
   if (!onPost) return fail(c, "couldnt_find_post", 404);
   const parentId = int(params.parent_id);
-  let inReplyTo = onPost.id;
+  let inReplyTo: { id: number; apId: string | null; accountId: number } = onPost;
   if (parentId !== undefined) {
     const parent = await threadComment(c, parentId);
     if (!parent || parent.rootId !== onPost.id) return fail(c, "couldnt_find_comment", 404);
-    inReplyTo = parent.id;
+    inReplyTo = parent;
   }
   const db = c.env.bindings.DB;
+  const parentAuthor = await accountById(db, inReplyTo.accountId);
   const created = await createPost(db, {
     accountId: auth.account.id,
     contentSource: text,
@@ -416,13 +479,13 @@ threadRoutes.post("/api/v3/comment", async (c) => {
     sensitive: false,
     visibility: "public",
     language: null,
-    inReplyTo: `https://${c.env.domain.domain}/objects/${inReplyTo}`,
+    inReplyTo: inReplyTo.apId ?? urls.object(parentAuthor?.domain ?? c.env.domain.domain, String(inReplyTo.id)),
     communityId: onPost.communityId,
     rootId: onPost.id,
-    parentId: inReplyTo,
+    parentId: inReplyTo.id,
   });
   await vote(db, created.id, auth.account.id, 1);
-  c.env.activities.postCreated(created);
+  c.env.activities.enqueue({ kind: "post_created", postId: created.id });
   return commentResponse(c, created.id);
 });
 
@@ -435,6 +498,7 @@ threadRoutes.put("/api/v3/comment", async (c) => {
   const text = str(params.content)?.trim() ?? "";
   if (!text || text.length > MAX_BODY) return fail(c, "invalid_body_field");
   await editPost(c.env.bindings.DB, found.id, { contentSource: text, contentHtml: textToHtml(text) });
+  c.env.activities.enqueue({ kind: "post_updated", postId: found.id });
   return commentResponse(c, found.id);
 });
 
@@ -447,7 +511,7 @@ threadRoutes.post("/api/v3/comment/delete", async (c) => {
   if (params.deleted === false) await restorePost(c.env.bindings.DB, found.id);
   else {
     await deletePost(c.env.bindings.DB, found.id);
-    c.env.activities.postDeleted(found);
+    c.env.activities.enqueue({ kind: "post_deleted", postId: found.id });
   }
   return commentResponse(c, found.id);
 });
@@ -458,12 +522,20 @@ threadRoutes.post("/api/v3/comment/like", async (c) => {
   const params = await body(c);
   const found = await threadComment(c, int(params.comment_id) ?? -1);
   if (!found || found.deleted) return fail(c, "couldnt_find_comment", 404);
-  await vote(c.env.bindings.DB, found.id, auth.account.id, Math.sign(int(params.score) ?? 0));
+  await castVote(c, found.id, auth.account.id, Math.sign(int(params.score) ?? 0));
   return commentResponse(c, found.id);
 });
 
-threadRoutes.put("/api/v3/comment/save", async (c) => commentResponse(c, int((await body(c)).comment_id) ?? -1));
-threadRoutes.post("/api/v3/comment/mark_as_read", (c) => c.json({ success: true } satisfies SuccessResponse));
+threadRoutes.put("/api/v3/comment/save", async (c) => {
+  const auth = c.get("auth");
+  if (!auth) return fail(c, "not_logged_in", 401);
+  const params = await body(c);
+  const found = await threadComment(c, int(params.comment_id) ?? -1);
+  if (!found) return fail(c, "couldnt_find_comment", 404);
+  if (params.save === false) await unbookmark(c.env.bindings.DB, found.id, auth.account.id);
+  else await bookmark(c.env.bindings.DB, found.id, auth.account.id);
+  return commentResponse(c, found.id);
+});
 
 /** A person's Lemmy posts and comments, newest first, for their profile. */
 export async function personThreads(c: C, accountId: number) {
@@ -471,8 +543,8 @@ export async function personThreads(c: C, accountId: number) {
   const db = c.env.bindings.DB;
   const viewerId = c.get("auth")?.account.id ?? null;
   const [posts, comments] = await Promise.all([
-    listThreadPosts(db, { domain: c.env.domain.domain, creatorId: accountId, sort: "new", viewerId, limit, offset }),
-    listThreadComments(db, { domain: c.env.domain.domain, creatorId: accountId, sort: "new", viewerId, limit, offset }),
+    listThreadPosts(db, { domain: c.env.domain.domain, scope: "all", creatorId: accountId, sort: "new", viewerId, limit, offset }),
+    listThreadComments(db, { domain: c.env.domain.domain, scope: "all", creatorId: accountId, sort: "new", viewerId, limit, offset }),
   ]);
   return { posts: await postViews(c, posts), comments: await commentViews(c, comments) };
 }
@@ -484,11 +556,87 @@ export async function searchThreads(c: C, query: string, type: string) {
   const { limit, offset } = paging(c, 20, 50);
   const [communities, posts] = await Promise.all([
     type === "All" || type === "Communities"
-      ? listCommunities(db, { domain: c.env.domain.domain, query, viewerId, limit, offset })
+      ? listCommunities(db, { domain: c.env.domain.domain, scope: "all", query, viewerId, limit, offset })
       : Promise.resolve([]),
     type === "All" || type === "Posts"
-      ? listThreadPosts(db, { domain: c.env.domain.domain, query, sort: "new", viewerId, limit, offset })
+      ? listThreadPosts(db, { domain: c.env.domain.domain, scope: "all", query, sort: "new", viewerId, limit, offset })
       : Promise.resolve([]),
   ]);
   return { communities: communities.map((x) => communityView(c.env, x)), posts: await postViews(c, posts) };
+}
+
+/**
+ * Lemmy's resolve_object: a remote community, person, post or comment by
+ * handle or URL, fetched if palm hasn't seen it. Voyager uses it for search
+ * and links.
+ */
+export async function resolveObject(c: C, query: string) {
+  const found = await c.env.activities.resolve(query);
+  if (!found) return null;
+  const db = c.env.bindings.DB;
+  if (found.kind === "community") {
+    const community = await communityById(db, found.id);
+    return community ? { community: communityView(c.env, await communityStats(c, community)) } : null;
+  }
+  if (found.kind === "account") {
+    const account = await accountById(db, found.id);
+    return account ? { person: personView(c.env, account) } : null;
+  }
+  const post = await threadPost(c, found.id);
+  if (post) return { post: (await postViews(c, [post]))[0] };
+  const comment = await threadComment(c, found.id);
+  if (comment) return { comment: (await commentViews(c, [comment]))[0] };
+  return null;
+}
+
+/** Lemmy's unread counts: replies and mentions on Lemmy comments, from notifications. */
+export async function lemmyInboxCounts(db: D1Database, accountId: number): Promise<{ replies: number; mentions: number }> {
+  const row = await db
+    .prepare(
+      `SELECT
+         SUM(n.kind = 'reply') AS replies,
+         SUM(n.kind = 'mention') AS mentions
+       FROM notifications n JOIN posts p ON p.id = n.post_id
+       WHERE n.account_id = ? AND n.read = 0 AND p.root_id IS NOT NULL AND p.deleted_at IS NULL`,
+    )
+    .bind(accountId)
+    .first<{ replies: number | null; mentions: number | null }>();
+  return { replies: row?.replies ?? 0, mentions: row?.mentions ?? 0 };
+}
+
+/**
+ * The signed-in account's Lemmy inbox: comments replying to it, or mentioning
+ * it, as CommentReplyView or PersonMentionView. The notification's ID is the
+ * reply's or mention's ID, which apps send back to mark it read.
+ */
+export async function inboxItems(c: C, recipient: Account, kind: "reply" | "mention") {
+  const db = c.env.bindings.DB;
+  const { limit, offset } = paging(c, 20, 50);
+  const unreadOnly = bool(c.req.query("unread_only"));
+  const { results } = await db
+    .prepare(
+      `SELECT n.id, n.post_id, n.read, n.created_at FROM notifications n JOIN posts p ON p.id = n.post_id
+       WHERE n.account_id = ? AND n.kind = ? AND p.root_id IS NOT NULL AND p.deleted_at IS NULL${unreadOnly ? " AND n.read = 0" : ""}
+       ORDER BY n.id DESC LIMIT ? OFFSET ?`,
+    )
+    .bind(recipient.id, kind, limit, offset)
+    .all<{ id: number; post_id: number; read: number; created_at: number }>();
+  if (!results.length) return [];
+  const comments = await listThreadComments(db, {
+    domain: c.env.domain.domain,
+    scope: "all",
+    ids: results.map((r) => r.post_id),
+    sort: "new",
+    viewerId: recipient.id,
+    limit: results.length,
+    offset: 0,
+  });
+  const views = new Map((await commentViews(c, comments)).map((v) => [v.comment.id, v]));
+  const me = personView(c.env, recipient).person;
+  return results.flatMap((r) => {
+    const view = views.get(r.post_id);
+    if (!view) return [];
+    const item = { id: r.id, recipient_id: recipient.id, comment_id: r.post_id, read: r.read === 1, published: new Date(r.created_at * 1000).toISOString() };
+    return [{ ...view, recipient: me, ...(kind === "reply" ? { comment_reply: item } : { person_mention: item }) }];
+  });
 }

@@ -1,8 +1,10 @@
 import { hashPassword, needsRehash, signJwt, verifyJwt, verifyPassword } from "@palm/auth";
 import { nodeinfoVersion, type RequestContext } from "@palm/core";
 import {
+  accountByHandle,
   accountById,
   accountForLogin,
+  markNotificationsRead,
   admins,
   countAccounts,
   createSession,
@@ -22,6 +24,7 @@ import {
 import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 import type {
+  CommentReplyView,
   GetFederatedInstancesResponse,
   GetPersonDetailsResponse,
   GetPersonMentionsResponse,
@@ -30,11 +33,13 @@ import type {
   GetSiteResponse,
   GetUnreadCountResponse,
   LoginResponse,
+  PersonMentionView,
   PrivateMessagesResponse,
+  ResolveObjectResponse,
   SearchResponse,
   SuccessResponse,
 } from "lemmy-js-client";
-import { personThreads, searchThreads, threadRoutes } from "./threads.ts";
+import { inboxItems, lemmyInboxCounts, personThreads, resolveObject, searchThreads, threadRoutes } from "./threads.ts";
 import { LEMMY_VERSION, myUserInfo, personView, siteView } from "./views.ts";
 
 export { LEMMY_VERSION };
@@ -202,23 +207,76 @@ app.get("/api/v3/user", async (c) => {
   const auth = c.get("auth");
   const db = c.env.bindings.DB;
   const id = c.req.query("person_id");
-  const username = c.req.query("username")?.replace(/@.*$/, "");
+  const username = c.req.query("username");
   let account: Account | null = null;
   if (id) account = await accountById(db, Number(id));
-  else if (username) account = (await accountForLogin(db, c.env.domain.domain, username))?.account ?? null;
+  else if (username) account = await personNamed(c, username);
   else account = auth?.account ?? null;
-  if (!account || account.domain !== c.env.domain.domain) return fail(c, "couldnt_find_person", 404);
+  // A local account of another domain this deployment serves isn't this one's.
+  if (!account || (account.apId === null && account.domain !== c.env.domain.domain)) return fail(c, "couldnt_find_person", 404);
   const [counts, threads] = await Promise.all([threadCounts(db, account.id), personThreads(c, account.id)]);
   const body: GetPersonDetailsResponse = { person_view: personView(c.env, account, counts), ...threads, moderates: [] };
   return c.json(body);
 });
 
+/** A person by name: "jason", "jason@this.domain", or a remote "name@host", fetched if new. */
+async function personNamed(c: C, name: string): Promise<Account | null> {
+  const db = c.env.bindings.DB;
+  const [local, rawHost] = name.replace(/^@/, "").split("@");
+  if (!local) return null;
+  const host = rawHost?.toLowerCase() ?? c.env.domain.domain;
+  if (host === c.env.domain.domain) return (await accountForLogin(db, host, local))?.account ?? null;
+  const known = await accountByHandle(db, local, host);
+  if (known) return known;
+  const found = await c.env.activities.resolve(`@${local}@${host}`);
+  return found?.kind === "account" ? accountById(db, found.id) : null;
+}
+
 app.route("/", threadRoutes);
 
-// Inboxes: empty until replies and mentions are tracked.
-app.get("/api/v3/user/unread_count", (c) =>
-  c.json({ replies: 0, mentions: 0, private_messages: 0 } satisfies GetUnreadCountResponse),
-);
+// --- the inbox: replies to and mentions of the signed-in account -------------
+
+app.get("/api/v3/user/unread_count", async (c) => {
+  const auth = c.get("auth");
+  if (!auth) return fail(c, "not_logged_in", 401);
+  const counts = await lemmyInboxCounts(c.env.bindings.DB, auth.account.id);
+  return c.json({ ...counts, private_messages: 0 } satisfies GetUnreadCountResponse);
+});
+
+app.get("/api/v3/user/replies", async (c) => {
+  const auth = c.get("auth");
+  if (!auth) return fail(c, "not_logged_in", 401);
+  return c.json({ replies: (await inboxItems(c, auth.account, "reply")) as CommentReplyView[] } satisfies GetRepliesResponse);
+});
+
+app.get("/api/v3/user/mention", async (c) => {
+  const auth = c.get("auth");
+  if (!auth) return fail(c, "not_logged_in", 401);
+  return c.json({ mentions: (await inboxItems(c, auth.account, "mention")) as PersonMentionView[] } satisfies GetPersonMentionsResponse);
+});
+
+app.post("/api/v3/comment/mark_as_read", async (c) => {
+  const auth = c.get("auth");
+  if (!auth) return fail(c, "not_logged_in", 401);
+  const params = await c.req.json<{ comment_reply_id?: number; read?: boolean }>().catch(() => ({}) as { comment_reply_id?: number });
+  if (params.comment_reply_id !== undefined) await markNotificationsRead(c.env.bindings.DB, auth.account.id, [params.comment_reply_id]);
+  return c.json({ success: true } satisfies SuccessResponse);
+});
+
+app.post("/api/v3/user/mention/mark_as_read", async (c) => {
+  const auth = c.get("auth");
+  if (!auth) return fail(c, "not_logged_in", 401);
+  const params = await c.req.json<{ person_mention_id?: number }>().catch(() => ({}) as { person_mention_id?: number });
+  if (params.person_mention_id !== undefined) await markNotificationsRead(c.env.bindings.DB, auth.account.id, [params.person_mention_id]);
+  return c.json({ success: true } satisfies SuccessResponse);
+});
+
+app.post("/api/v3/user/mark_all_as_read", async (c) => {
+  const auth = c.get("auth");
+  if (!auth) return fail(c, "not_logged_in", 401);
+  await markNotificationsRead(c.env.bindings.DB, auth.account.id);
+  return c.json({ replies: [] } satisfies GetRepliesResponse);
+});
 app.get("/api/v3/user/report_count", (c) =>
   c.json({ comment_reports: 0, post_reports: 0, private_message_reports: 0 } satisfies GetReportCountResponse),
 );
@@ -236,9 +294,21 @@ app.get("/api/v3/search", async (c) => {
   const type = c.req.query("type_") ?? "All";
   const query = c.req.query("q")?.trim() ?? "";
   const found = query ? await searchThreads(c, query, type) : { communities: [], posts: [] };
-  return c.json({ type_: "All", comments: [], users: [], ...found } as SearchResponse);
+  // A handle or URL is looked up remotely too, as Lemmy does.
+  const remote = /^[@!]?[^@\s/]+@[^@\s/]+\.[^@\s/]+$|^https?:\/\//.test(query) ? await resolveObject(c, query) : null;
+  return c.json({
+    type_: "All",
+    comments: remote?.comment ? [remote.comment] : [],
+    users: remote?.person ? [remote.person] : [],
+    communities: [...(remote?.community ? [remote.community] : []), ...found.communities.filter((x) => x.community.id !== remote?.community?.community.id)],
+    posts: [...(remote?.post ? [remote.post] : []), ...found.posts],
+  } as SearchResponse);
 });
-app.get("/api/v3/resolve_object", (c) => fail(c, "couldnt_find_object", 404));
+app.get("/api/v3/resolve_object", async (c) => {
+  const query = c.req.query("q")?.trim();
+  const found = query ? await resolveObject(c, query) : null;
+  return found ? c.json(found as ResolveObjectResponse) : fail(c, "couldnt_find_object", 404);
+});
 
 // Everything else: logged, so the next endpoint to build shows up in the
 // Worker's logs as apps ask for it.
