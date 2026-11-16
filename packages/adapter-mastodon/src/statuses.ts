@@ -82,7 +82,7 @@ export const accountStats = stats;
 async function statuses(ctx: RequestContext, posts: Post[]) {
   const db = ctx.bindings.DB;
   const authors = new Map<number, Promise<ReturnType<typeof account> | null>>();
-  const author = (id: number) => {
+  const authorOf = (id: number) => {
     let found = authors.get(id);
     if (!found) {
       found = accountById(db, id).then(async (a) => (a ? account(ctx, a, await stats(ctx, a)) : null));
@@ -93,6 +93,7 @@ async function statuses(ctx: RequestContext, posts: Post[]) {
 
   return Promise.all(
     posts.map(async (post) => {
+      const author = await authorOf(post.accountId);
       const parentId = localPostId(ctx, post.inReplyTo);
       const parent = parentId === null ? null : await postById(db, parentId);
       const uri = postUri(ctx, post.id);
@@ -106,7 +107,7 @@ async function statuses(ctx: RequestContext, posts: Post[]) {
         visibility: post.visibility,
         language: post.language,
         uri,
-        url: uri,
+        url: author ? `${author.url}/${post.id}` : uri,
         replies_count: 0,
         reblogs_count: 0,
         favourites_count: 0,
@@ -121,7 +122,7 @@ async function statuses(ctx: RequestContext, posts: Post[]) {
         filtered: [],
         reblog: null,
         application: null,
-        account: await author(post.accountId),
+        account: author,
         media_attachments: [],
         mentions: [],
         tags: [],

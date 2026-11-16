@@ -28,8 +28,14 @@ export interface AccountStats {
   lastStatusAt: number | null;
 }
 
+/**
+ * An account's profile page, on the API host as Mastodon does it. Apps rely on
+ * this: the Mastodon iOS app finds the signed-in account by matching this
+ * URL's host to the server it signed in to. The ActivityPub ID is `uri`.
+ */
+export const profileUrl = (ctx: RequestContext, username: string) => `https://${ctx.host}/@${encodeURIComponent(username)}`;
+
 export function account(ctx: RequestContext, a: Account, stats?: AccountStats) {
-  const url = urls.user(ctx.domain.domain, a.username);
   return {
     id: String(a.id),
     username: a.username,
@@ -42,8 +48,8 @@ export function account(ctx: RequestContext, a: Account, stats?: AccountStats) {
     group: false,
     created_at: day(a.createdAt),
     note: a.bio ? `<p>${escapeHtml(a.bio)}</p>` : "",
-    url,
-    uri: url,
+    url: profileUrl(ctx, a.username),
+    uri: urls.user(ctx.domain.domain, a.username),
     avatar: avatarUrl(ctx.host),
     avatar_static: avatarUrl(ctx.host),
     header: avatarUrl(ctx.host),

@@ -1,5 +1,5 @@
 import { base64url, hashPassword, needsRehash, utf8, verifyPassword } from "@palm/auth";
-import type { RequestContext } from "@palm/core";
+import { urls, type RequestContext } from "@palm/core";
 import {
   accountById,
   accountForLogin,
@@ -87,6 +87,11 @@ app.get("/", (c) =>
       `Sign in from Ivory, Ice Cubes or the Mastodon app, with ${c.env.host} as the server.\n`,
   ),
 );
+
+// Profile and post pages (the `url` of accounts and statuses). palm has no web
+// UI, so they lead to the ActivityPub IDs, which send browsers on as configured.
+app.get("/:handle{@[^/]+}", (c) => c.redirect(urls.user(c.env.domain.domain, c.req.param("handle").slice(1)), 302));
+app.get("/:handle{@[^/]+}/:id{[0-9]+}", (c) => c.redirect(urls.object(c.env.domain.domain, c.req.param("id")), 302));
 
 // --- discovery -------------------------------------------------------------
 
