@@ -6,6 +6,12 @@ export interface PalmBindings {
   DB: D1Database;
   /** An R2 bucket for uploaded images. Without it, uploads are refused. */
   MEDIA?: R2Bucket;
+  /**
+   * A Cloudflare Queue for delivery and received activities, consumed by the
+   * same Worker. Without it, that work runs in the request (slower, and over
+   * the free plan's CPU budget once there are followers).
+   */
+  QUEUE?: Queue;
 }
 
 /** What every adapter gets for one request. */
