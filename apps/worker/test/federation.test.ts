@@ -26,8 +26,17 @@ describe("federation", () => {
       preferredUsername: "hal",
       inbox: "https://palm.test/users/hal/inbox",
       endpoints: { sharedInbox: "https://palm.test/inbox" },
+      // Lemmy refuses an actor without one.
+      outbox: "https://palm.test/users/hal/outbox",
     });
     expect((actor.publicKey as { publicKeyPem: string }).publicKeyPem).toContain("BEGIN PUBLIC KEY");
+  });
+
+  it("serves the outbox", async () => {
+    await createAccount("ivy", "pw");
+    const res = await worker.fetch(`${DOMAIN}/users/ivy/outbox`, AP);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ type: "OrderedCollection", totalItems: 0 });
   });
 
   it("returns 404 for an unknown actor", async () => {

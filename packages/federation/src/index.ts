@@ -13,6 +13,7 @@ export { D1KvStore };
  *   /users/{name}            the Person actor
  *   /users/{name}/inbox      its inbox; /inbox is the shared inbox
  *   /users/{name}/followers  its followers collection
+ *   /users/{name}/outbox     its posts
  *   /nodeinfo/2.1            software and usage, via /.well-known/nodeinfo
  *
  * These paths are the URL scheme in @palm/core's `urls`, and permanent.
@@ -38,6 +39,8 @@ builder
       inbox: ctx.getInboxUri(identifier),
       endpoints: new Endpoints({ sharedInbox: ctx.getInboxUri() }),
       followers: ctx.getFollowersUri(identifier),
+      // Lemmy refuses actors without an outbox.
+      outbox: ctx.getOutboxUri(identifier),
       manuallyApprovesFollowers: false,
       discoverable: true,
       icon: new Image({ url: new URL(`https://${ctx.data.host}/palm/avatar.png`), mediaType: "image/png" }),
@@ -76,6 +79,14 @@ builder
     const account = await accountFor(ctx.data, identifier);
     return account ? countFollowers(ctx.data.bindings.DB, account.id) : 0;
   });
+
+// The actor's posts. Empty until palm stores posts; Lemmy needs it to exist.
+builder
+  .setOutboxDispatcher("/users/{identifier}/outbox", async (ctx, identifier) => {
+    const account = await accountFor(ctx.data, identifier);
+    return account ? { items: [] } : null;
+  })
+  .setCounter(async () => 0);
 
 builder
   .setInboxListeners("/users/{identifier}/inbox", "/inbox")
