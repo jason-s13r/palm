@@ -1,0 +1,24 @@
+{
+  "name": "@palm/federation",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ActivityPub federation for palm, on Fedify: WebFinger, actors, nodeinfo and inboxes.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@fedify/fedify": "^2.4.5",
+    "@palm/core": "workspace:*",
+    "@palm/db": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261116.1",
+    "typescript": "~6.0.3",
+    "vitest": "^5.1.0"
+  }
+}
