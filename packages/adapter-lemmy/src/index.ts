@@ -141,7 +141,9 @@ app.post("/api/v3/user/login", async (c) => {
   }
   const sessionId = await createSession(db, found.account.id, "lemmy");
   const jwt = await signJwt(
-    { sub: String(found.account.id), sid: sessionId, iss: domain, iat: Math.floor(Date.now() / 1000) },
+    // iss is the host the app signed in on, as Lemmy does: Voyager reads it to
+    // know which server to talk to, so it must be the Lemmy API host.
+    { sub: String(found.account.id), sid: sessionId, iss: c.env.host, iat: Math.floor(Date.now() / 1000) },
     await instanceSecret(db, "lemmy-jwt"),
   );
   const response: LoginResponse = { jwt, registration_created: false, verify_email_sent: false };

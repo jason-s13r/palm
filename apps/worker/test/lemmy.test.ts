@@ -28,6 +28,9 @@ describe("Lemmy API", () => {
     expect(res.status).toBe(200);
     const { jwt } = await res.json<{ jwt: string }>();
     expect(jwt.split(".")).toHaveLength(3);
+    // Voyager reads iss to find the server; it must be the API host.
+    const claims = JSON.parse(atob(jwt.split(".")[1]!.replaceAll("-", "+").replaceAll("_", "/")));
+    expect(claims.iss).toBe("lemmy.palm.test");
 
     const auth = { headers: { authorization: `Bearer ${jwt}` } };
     const site = await (await worker.fetch(`${LEMMY}/api/v3/site`, auth)).json<{
