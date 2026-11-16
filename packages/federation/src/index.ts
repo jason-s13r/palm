@@ -1,5 +1,5 @@
-import { createFederationBuilder, importJwk, type Context, type Federation } from "@fedify/fedify";
-import { Accept, Create, Delete, Document, Endpoints, Follow, Image, Note, Person, PUBLIC_COLLECTION, Tombstone, Undo } from "@fedify/fedify/vocab";
+import { createFederationBuilder, importJwk, type Context, type Federation, type SenderKeyPair } from "@fedify/fedify";
+import { Accept, Create, Delete, Document, Endpoints, Follow, Image, Note, Person, PUBLIC_COLLECTION, Tombstone, Undo, type Recipient } from "@fedify/fedify/vocab";
 import { nodeinfoVersion, urls, type ActivitySink, type PostRef, type RequestContext } from "@palm/core";
 import {
   accountById,
@@ -21,8 +21,10 @@ import {
 } from "@palm/db";
 import { Temporal } from "temporal-polyfill";
 import { D1KvStore } from "./kv.ts";
+import { CloudflareMessageQueue, type QueueBody, type Task } from "./queue.ts";
 
-export { D1KvStore };
+export { CloudflareMessageQueue, D1KvStore };
+export type { QueueBody, Task };
 
 /**
  * palm's ActivityPub surface on the bare domain, on Fedify:
@@ -210,9 +212,9 @@ builder
       followId: follow.id.href,
     });
     await ctx.sendActivity(
-      { identifier: target.identifier },
+      await rsaKeys(ctx, target.identifier),
       follower,
-      new Accept({ id: new URL(`#accepts/${crypto.randomUUID()}`, ctx.getActorUri(target.identifier)), actor: follow.objectId, object: follow }),
+      new Accept({ id: new URL(`#accepts/${crypto.randomUUID()}`, ctx.getActorUri(target.identifier)), actor: follow.objectId, object: follow.id }),
     );
   })
   // They unfollow.
@@ -246,14 +248,41 @@ builder.setNodeInfoDispatcher("/nodeinfo/2.1", async (ctx) => ({
   metadata: { nodeName: ctx.data.config.instance.name, palm: { version: ctx.data.version } },
 }));
 
+/**
+ * The keys to sign deliveries with: RSA only. That signs the HTTP request,
+ * which is what Mastodon and Lemmy check, and the Linked Data signature.
+ * Leaving out the Ed25519 key skips the Object Integrity Proof, which costs
+ * several times the rest of signing and nothing palm talks to requires yet.
+ */
+async function rsaKeys(ctx: Context<RequestContext>, identifier: string): Promise<SenderKeyPair[]> {
+  const pairs = await ctx.getActorKeyPairs(identifier);
+  return pairs
+    .filter((pair) => pair.privateKey.algorithm.name === "RSASSA-PKCS1-v1_5")
+    .map(({ keyId, privateKey }) => ({ keyId, privateKey }));
+}
+
+/** A local account's followers, as Fedify recipients. */
+async function followerRecipients(db: D1Database, accountId: number): Promise<Recipient[]> {
+  return (await followers(db, accountId)).map((f) => ({
+    id: new URL(f.actorId),
+    inboxId: new URL(f.inbox),
+    endpoints: f.sharedInbox ? { sharedInbox: new URL(f.sharedInbox) } : null,
+  }));
+}
+
 // One Federation per database per isolate: building it is the costly part.
 const built = new WeakMap<D1Database, Promise<Federation<RequestContext>>>();
 
-function federationFor(db: D1Database): Promise<Federation<RequestContext>> {
-  let federation = built.get(db);
+function federationFor(bindings: RequestContext["bindings"]): Promise<Federation<RequestContext>> {
+  let federation = built.get(bindings.DB);
   if (!federation) {
-    federation = builder.build({ kv: new D1KvStore(db) });
-    built.set(db, federation);
+    federation = builder.build({
+      kv: new D1KvStore(bindings.DB),
+      // With a queue, delivery and received activities become queue jobs;
+      // the Worker's queue handler runs them (see processQueueMessage).
+      ...(bindings.QUEUE ? { queue: new CloudflareMessageQueue(bindings.QUEUE, "people"), manuallyStartQueue: true } : {}),
+    });
+    built.set(bindings.DB, federation);
   }
   return federation;
 }
@@ -267,7 +296,7 @@ export async function handleFederation(
   ctx: RequestContext,
   fallback: (request: Request) => Response | Promise<Response>,
 ): Promise<Response> {
-  const federation = await federationFor(ctx.bindings.DB);
+  const federation = await federationFor(ctx.bindings);
   return federation.fetch(request, {
     contextData: ctx,
     onNotFound: fallback,
@@ -276,60 +305,92 @@ export async function handleFederation(
   });
 }
 
+/** Runs one of palm's queued tasks. */
+export async function runTask(ctx: RequestContext, task: Task): Promise<void> {
+  const db = ctx.bindings.DB;
+  const federation = await federationFor(ctx.bindings);
+  const fctx = federation.createContext(new URL(`https://${ctx.domain.domain}`), ctx);
+  switch (task.kind) {
+    case "post_created": {
+      const post = await postById(db, task.postId);
+      const account = post && (await accountById(db, post.accountId));
+      if (!post || !account || account.domain !== ctx.domain.domain) return;
+      const media = await mediaForPosts(db, [post.id]);
+      await fctx.sendActivity(
+        await rsaKeys(fctx, identifierOf(account)),
+        await followerRecipients(db, account.id),
+        createFor(fctx, account, post, media.get(post.id)),
+        { preferSharedInbox: true },
+      );
+      return;
+    }
+    case "post_deleted": {
+      const account = await accountById(db, task.accountId);
+      if (!account || account.domain !== ctx.domain.domain) return;
+      const id = noteUri(fctx, task.postId);
+      await fctx.sendActivity(
+        await rsaKeys(fctx, identifierOf(account)),
+        await followerRecipients(db, account.id),
+        new Delete({
+          id: new URL(`${id.href}#delete`),
+          actor: fctx.getActorUri(identifierOf(account)),
+          ...audience(fctx, account, task.visibility as PostRef["visibility"]),
+          object: new Tombstone({ id }),
+        }),
+        { preferSharedInbox: true },
+      );
+      return;
+    }
+  }
+}
+
 /**
- * Delivers activities about local posts to followers' servers. Delivery runs
- * in the background; failures are logged, not retried, until palm has a queue.
+ * Handles one message from palm's queue. `contextFor` builds the request
+ * context for a domain, or returns null for one this deployment doesn't serve.
+ */
+export async function processQueueMessage(
+  body: QueueBody,
+  contextFor: (domain: string) => RequestContext | null,
+): Promise<void> {
+  if (body.palm === "task") {
+    const ctx = contextFor(body.domain);
+    if (ctx) await runTask(ctx, body.task);
+    return;
+  }
+  // Fedify's messages carry the origin they were made for.
+  const baseUrl = (body.message as { baseUrl?: string }).baseUrl;
+  const ctx = baseUrl ? contextFor(new URL(baseUrl).host) : null;
+  if (!ctx) return;
+  const federation = await federationFor(ctx.bindings);
+  await federation.processQueuedTask(ctx, body.message as Parameters<typeof federation.processQueuedTask>[1]);
+}
+
+/**
+ * Tells followers' servers about local posts. With a queue, a request only
+ * enqueues a task; without one, the delivery runs after the response.
  */
 export function activitySink(ctx: RequestContext): ActivitySink {
-  const run = (name: string, work: () => Promise<void>) =>
+  const enqueue = (task: Task) => {
+    const queue = ctx.bindings.QUEUE;
+    const work = queue
+      ? queue.send({ palm: "task", domain: ctx.domain.domain, task } satisfies QueueBody)
+      : runTask(ctx, task);
     ctx.waitUntil(
-      work().catch((error: unknown) =>
-        console.error(JSON.stringify({ palm: "delivery_failed", activity: name, error: String(error) })),
+      work.catch((error: unknown) =>
+        console.error(JSON.stringify({ palm: "delivery_failed", task: task.kind, error: String(error) })),
       ),
     );
-
-  async function prepare(ref: PostRef) {
-    const db = ctx.bindings.DB;
-    const account = await accountById(db, ref.accountId);
-    if (!account || account.domain !== ctx.domain.domain) return null;
-    const federation = await federationFor(db);
-    return { account, fctx: federation.createContext(new URL(`https://${ctx.domain.domain}`), ctx) };
-  }
-
+  };
   return {
     postCreated(ref) {
       // Lemmy posts and comments go through their community, once
       // communities federate; until then they stay on this server.
       if (ref.visibility === "direct" || ref.communityId) return;
-      run("Create", async () => {
-        const ready = await prepare(ref);
-        const post = await postById(ctx.bindings.DB, ref.id);
-        if (!ready || !post) return;
-        const media = await mediaForPosts(ctx.bindings.DB, [post.id]);
-        await ready.fctx.sendActivity({ identifier: identifierOf(ready.account) }, "followers", createFor(ready.fctx, ready.account, post, media.get(post.id)), {
-          preferSharedInbox: true,
-        });
-      });
+      enqueue({ kind: "post_created", postId: ref.id });
     },
     postDeleted(ref) {
       if (ref.visibility === "direct" || ref.communityId) return;
-      run("Delete", async () => {
-        const ready = await prepare(ref);
-        if (!ready) return;
-        const { account, fctx } = ready;
-        const id = noteUri(fctx, ref.id);
-        await fctx.sendActivity(
-          { identifier: identifierOf(account) },
-          "followers",
-          new Delete({
-            id: new URL(`${id.href}#delete`),
-            actor: fctx.getActorUri(identifierOf(account)),
-            ...audience(fctx, account, ref.visibility),
-            object: new Tombstone({ id }),
-          }),
-          { preferSharedInbox: true },
-        );
-      });
+      enqueue({ kind: "post_deleted", postId: ref.id, accountId: ref.accountId, visibility: ref.visibility, communityId: ref.communityId ?? null });
     },
   };
 }
