@@ -65,11 +65,8 @@ describe("Lemmy API", () => {
 
   it("answers the feeds apps load at startup with empty lists", async () => {
     expect(await (await worker.fetch(`${LEMMY}/api/v3/post/list`)).json()).toEqual({ posts: [] });
-    expect(await (await worker.fetch(`${LEMMY}/api/v3/user/unread_count`)).json()).toEqual({
-      replies: 0,
-      mentions: 0,
-      private_messages: 0,
-    });
+    // The inbox needs a login, as Lemmy's does.
+    expect((await worker.fetch(`${LEMMY}/api/v3/user/unread_count`)).status).toBe(401);
   });
 
   it("returns a Lemmy-style 404 for endpoints it doesn't have yet", async () => {
