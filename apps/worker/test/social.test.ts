@@ -64,6 +64,23 @@ describe("Following, favourites and notifications", () => {
     expect(unfollowed.following).toBe(false);
   });
 
+  it("shows boosts by people you follow in your home timeline", async () => {
+    const lia = await mastodonUser("lia");
+    const max = await mastodonUser("max");
+    const ned = await mastodonUser("nedd");
+    const original = await (await ned.post("/api/v1/statuses", { status: "worth sharing" })).json<Status>();
+    await lia.post(`/api/v1/accounts/${max.id}/follow`);
+    const boosted = await (await max.post(`/api/v1/statuses/${original.id}/reblog`)).json<Status>();
+    expect(boosted.reblogged).toBe(true);
+    const home = await (await lia.get("/api/v1/timelines/home")).json<{ id: string; account: { acct: string }; reblog: Status | null }[]>();
+    const entry = home.find((s) => s.reblog?.id === original.id);
+    expect(entry?.account.acct).toBe("max");
+    expect(entry?.id).not.toBe(original.id);
+    await max.post(`/api/v1/statuses/${original.id}/unreblog`);
+    const after = await (await lia.get("/api/v1/timelines/home")).json<{ reblog: Status | null }[]>();
+    expect(after.some((s) => s.reblog?.id === original.id)).toBe(false);
+  });
+
   it("links and notifies mentions, and shows direct messages only to those in them", async () => {
     const cal = await mastodonUser("cal");
     const dot = await mastodonUser("dot");
