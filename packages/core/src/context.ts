@@ -54,6 +54,11 @@ export interface ActivitySink {
    * nothing if palm did so recently.
    */
   backfillProfile(accountId: number): Promise<void>;
+  /**
+   * Fills in a remote post's comments from its own server, for a thread
+   * someone here has opened. Does nothing if palm did so recently.
+   */
+  backfillThread(postId: number): Promise<void>;
 }
 
 /** What `resolve` found, by its ID in palm's tables. */
