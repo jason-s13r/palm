@@ -3,4 +3,4 @@ export type { ApiKind, DomainConfig, InstanceConfig, PalmConfig } from "./config
 export { normaliseHost, resolveSurface } from "./routing.ts";
 export type { Surface } from "./routing.ts";
 export { LEMMY_COMPAT_VERSION, nodeinfoVersion, urls } from "./context.ts";
-export type { PalmBindings, RequestContext } from "./context.ts";
+export type { ActivitySink, PalmBindings, PostRef, RequestContext } from "./context.ts";

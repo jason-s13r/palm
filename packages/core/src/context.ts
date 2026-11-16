@@ -18,6 +18,29 @@ export interface RequestContext {
   version: string;
   /** For work that may finish after the response, such as logging. */
   waitUntil(promise: Promise<unknown>): void;
+  /**
+   * Tells other servers about local changes. The worker supplies this from
+   * the federation package, so the client adapters don't depend on Fedify.
+   */
+  activities: ActivitySink;
+}
+
+/**
+ * Local changes that federate. Each call returns straight away and delivers in
+ * the background, through waitUntil.
+ */
+export interface ActivitySink {
+  /** A local post was written: send a Create to its audience. */
+  postCreated(post: PostRef): void;
+  /** A local post was deleted: send a Delete to its audience. */
+  postDeleted(post: PostRef): void;
+}
+
+/** Enough of a local post to address activities about it. */
+export interface PostRef {
+  id: number;
+  accountId: number;
+  visibility: "public" | "unlisted" | "private" | "direct";
 }
 
 /**
