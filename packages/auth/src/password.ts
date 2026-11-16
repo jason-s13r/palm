@@ -8,7 +8,8 @@ import { base64url, fromBase64url, timingSafeEqual, utf8 } from "./encoding.ts";
  * 10 ms of CPU per request. It's stored in each hash, so it can be raised later
  * and old hashes upgraded on the next successful login.
  */
-export const PASSWORD_ITERATIONS = 50_000;
+// 50,000 measured 10–13 ms on Workers, at or over the free plan's limit.
+export const PASSWORD_ITERATIONS = 20_000;
 
 const PREFIX = "pbkdf2-sha256";
 
@@ -34,7 +35,7 @@ export async function verifyPassword(password: string, stored: string): Promise<
   return timingSafeEqual(actual, fromBase64url(hashText));
 }
 
-/** True when a stored hash uses fewer iterations than the current setting. */
+/** True when a stored hash uses a different iteration count than the current setting. */
 export function needsRehash(stored: string): boolean {
-  return Number(stored.split("$")[1]) < PASSWORD_ITERATIONS;
+  return Number(stored.split("$")[1]) !== PASSWORD_ITERATIONS;
 }

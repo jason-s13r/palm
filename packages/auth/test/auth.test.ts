@@ -19,7 +19,7 @@ describe("passwords", () => {
     expect(await verifyPassword("x", "pbkdf2-sha256$zero$abc$def")).toBe(false);
   });
 
-  it("flags hashes below the current iteration count", async () => {
+  it("flags hashes made with another iteration count", async () => {
     expect(needsRehash(await hashPassword("x", 1_000))).toBe(true);
     expect(needsRehash(await hashPassword("x"))).toBe(false);
   });
