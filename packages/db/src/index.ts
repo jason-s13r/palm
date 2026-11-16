@@ -10,6 +10,7 @@ export {
   admins,
   countAccounts,
   isLocal,
+  markOutboxFetched,
   setPasswordHash,
   updateProfile,
   upsertRemoteAccount,

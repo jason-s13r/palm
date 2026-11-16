@@ -348,6 +348,21 @@ CREATE TABLE IF NOT EXISTS invites (
 )
 `,
   },
+  {
+    version: 8,
+    name: "remote profile counts and outboxes",
+    sql: `
+ALTER TABLE accounts ADD COLUMN outbox_url TEXT
+;
+ALTER TABLE accounts ADD COLUMN followers_count INTEGER
+;
+ALTER TABLE accounts ADD COLUMN following_count INTEGER
+;
+ALTER TABLE accounts ADD COLUMN statuses_count INTEGER
+;
+ALTER TABLE accounts ADD COLUMN outbox_fetched_at INTEGER
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

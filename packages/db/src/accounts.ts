@@ -25,6 +25,11 @@ export interface Account {
   fetchedAt: number | null;
   /** Banned accounts can't sign in, and other servers' banned people are ignored. */
   banned: boolean;
+  /** A remote account's outbox, and the counts its server gives. */
+  outboxUrl: string | null;
+  remoteCounts: { followers: number | null; following: number | null; statuses: number | null };
+  /** When palm last read a remote account's outbox for its profile. */
+  outboxFetchedAt: number | null;
 }
 
 interface AccountRow {
@@ -45,10 +50,15 @@ interface AccountRow {
   actor_type: string | null;
   fetched_at: number | null;
   banned_at?: number | null;
+  outbox_url?: string | null;
+  followers_count?: number | null;
+  following_count?: number | null;
+  statuses_count?: number | null;
+  outbox_fetched_at?: number | null;
 }
 
 const COLUMNS =
-  "id, domain, username, display_name, bio, password_hash, role, created_at, ap_id, inbox, shared_inbox, profile_url, avatar_url, header_url, actor_type, fetched_at, banned_at";
+  "id, domain, username, display_name, bio, password_hash, role, created_at, ap_id, inbox, shared_inbox, profile_url, avatar_url, header_url, actor_type, fetched_at, banned_at, outbox_url, followers_count, following_count, statuses_count, outbox_fetched_at";
 
 export function toAccount(row: AccountRow): Account {
   return {
@@ -68,6 +78,9 @@ export function toAccount(row: AccountRow): Account {
     actorType: row.actor_type ?? null,
     fetchedAt: row.fetched_at ?? null,
     banned: row.banned_at != null,
+    outboxUrl: row.outbox_url ?? null,
+    remoteCounts: { followers: row.followers_count ?? null, following: row.following_count ?? null, statuses: row.statuses_count ?? null },
+    outboxFetchedAt: row.outbox_fetched_at ?? null,
   };
 }
 
@@ -116,18 +129,27 @@ export interface RemoteAccount {
   avatarUrl: string | null;
   headerUrl: string | null;
   actorType: string;
+  outboxUrl: string | null;
+  followersCount: number | null;
+  followingCount: number | null;
+  statusesCount: number | null;
 }
 
 /** Records a remote person, or refreshes what palm knows of them. */
 export async function upsertRemoteAccount(db: D1Database, remote: RemoteAccount): Promise<Account> {
   const row = await db
     .prepare(
-      `INSERT INTO accounts (domain, username, display_name, bio, role, created_at, ap_id, inbox, shared_inbox, profile_url, avatar_url, header_url, actor_type, fetched_at)
-       VALUES (?, ?, ?, ?, 'user', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO accounts (domain, username, display_name, bio, role, created_at, ap_id, inbox, shared_inbox, profile_url, avatar_url, header_url, actor_type, fetched_at,
+                             outbox_url, followers_count, following_count, statuses_count)
+       VALUES (?, ?, ?, ?, 'user', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (ap_id) WHERE ap_id IS NOT NULL DO UPDATE SET
          display_name = excluded.display_name, bio = excluded.bio, inbox = excluded.inbox,
          shared_inbox = excluded.shared_inbox, profile_url = excluded.profile_url, avatar_url = excluded.avatar_url,
-         header_url = excluded.header_url, actor_type = excluded.actor_type, fetched_at = excluded.fetched_at
+         header_url = excluded.header_url, actor_type = excluded.actor_type, fetched_at = excluded.fetched_at,
+         outbox_url = excluded.outbox_url,
+         followers_count = COALESCE(excluded.followers_count, followers_count),
+         following_count = COALESCE(excluded.following_count, following_count),
+         statuses_count = COALESCE(excluded.statuses_count, statuses_count)
        RETURNING ${COLUMNS}`,
     )
     .bind(
@@ -144,6 +166,10 @@ export async function upsertRemoteAccount(db: D1Database, remote: RemoteAccount)
       remote.headerUrl,
       remote.actorType,
       now(),
+      remote.outboxUrl,
+      remote.followersCount,
+      remote.followingCount,
+      remote.statusesCount,
     )
     .first<AccountRow>();
   return toAccount(row!);
@@ -208,4 +234,9 @@ export async function admins(db: D1Database, domain: string): Promise<Account[]>
     .bind(domain)
     .all<AccountRow>();
   return results.map(toAccount);
+}
+
+/** Records that palm read a remote account's outbox just now. */
+export async function markOutboxFetched(db: D1Database, id: number): Promise<void> {
+  await db.prepare("UPDATE accounts SET outbox_fetched_at = ? WHERE id = ?").bind(now(), id).run();
 }
