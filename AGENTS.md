@@ -40,8 +40,14 @@ published package's dependencies.
 Nodeinfo answers as Lemmy everywhere, with palm's version as semver build
 metadata (`0.19.9+palm.X.Y.Z`): Voyager saves an account under the handle's
 domain and then only talks to that domain, after checking its nodeinfo for
-Lemmy >=0.19. So the Lemmy API answers on the bare domain as well as on its own
-host. The Mastodon API answers only on its own host.
+Lemmy >=0.19.
+
+Both client APIs answer on the bare domain as well as on their own hosts, so
+people sign in with the domain in their handle. Apps build the handle from the
+host they signed in to (the Mastodon iOS app uses the host of the account's
+`url`, and matches it to that host to find the signed-in account). The paths
+don't overlap: Lemmy's API is `/api/v3`, Mastodon's `/api/v1`, `/api/v2` and
+`/oauth`.
 
 ## Commands
 
