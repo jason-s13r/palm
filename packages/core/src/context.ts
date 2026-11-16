@@ -41,6 +41,8 @@ export interface PostRef {
   id: number;
   accountId: number;
   visibility: "public" | "unlisted" | "private" | "direct";
+  /** Set for Lemmy posts and comments, which go to their community instead. */
+  communityId?: number | null;
 }
 
 /**
@@ -50,6 +52,8 @@ export interface PostRef {
 export const urls = {
   user: (domain: string, username: string) => `https://${domain}/users/${encodeURIComponent(username.toLowerCase())}`,
   object: (domain: string, id: string) => `https://${domain}/objects/${encodeURIComponent(id)}`,
+  /** A community, as Lemmy names them: `!name@domain` lives at /c/name. */
+  community: (domain: string, name: string) => `https://${domain}/c/${encodeURIComponent(name.toLowerCase())}`,
   inbox: (domain: string) => `https://${domain}/inbox`,
   userInbox: (domain: string, username: string) => `${urls.user(domain, username)}/inbox`,
 };
