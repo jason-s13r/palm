@@ -31,9 +31,17 @@ export function federationsFor(bindings: RequestContext["bindings"]): Promise<Fe
   if (!found) {
     const options = (name: FederationName) => ({
       kv: new D1KvStore(bindings.DB),
-      // With a queue, delivery and received activities become queue jobs;
-      // the Worker's queue handler runs them (see processQueueMessage).
-      ...(bindings.QUEUE ? { queue: new CloudflareMessageQueue(bindings.QUEUE, name), manuallyStartQueue: true } : {}),
+      // With a queue, outgoing deliveries become queue jobs, which the
+      // Worker's queue handler runs (see processQueueMessage). Received
+      // activities are handled in the request: a busy Lemmy community sends
+      // over a thousand an hour, and each queued one costs three of the free
+      // plan's 10,000 daily queue operations.
+      ...(bindings.QUEUE
+        ? (() => {
+            const queue = new CloudflareMessageQueue(bindings.QUEUE, name);
+            return { queue: { outbox: queue, fanout: queue }, manuallyStartQueue: true };
+          })()
+        : {}),
     });
     found = Promise.all([peopleBuilder.build(options("people")), communitiesBuilder.build(options("communities"))]).then(
       ([people, communities]) => ({ people, communities }),

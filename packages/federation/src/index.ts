@@ -4,10 +4,8 @@ import "./people.ts";
 import "./communities.ts";
 import { processQueueMessage as processMessage } from "./delivery.ts";
 import type { QueueBody } from "./queue.ts";
+import { irrelevantDelivery } from "./prefilter.ts";
 import { federationsFor } from "./shared.ts";
-
-/** Queue messages are capped at 128 KB; bigger deliveries are checked in the request. */
-const MAX_DEFERRED_BODY = 100_000;
 
 const isInboxPath = (path: string) =>
   path === "/inbox" || path === "/communities/inbox" || /^\/(users|c)\/[^/]+\/inbox$/.test(path);
@@ -18,13 +16,14 @@ const isInboxPath = (path: string) =>
  */
 export async function processQueueMessage(body: QueueBody, contextFor: (domain: string) => RequestContext | null): Promise<void> {
   if (body.palm !== "inbox") return processMessage(body, contextFor);
+  // Deliveries queued before inbox deferral was dropped.
   const url = new URL(body.url);
   const ctx = contextFor(url.host);
   if (!ctx) return;
   // The delivery, as it arrived, now through Fedify's checks. A bad
   // signature answers 401 to nobody; it's logged and dropped.
   const request = new Request(body.url, { method: "POST", headers: body.headers, body: body.body });
-  const response = await handleFederation(request, ctx, () => new Response(null, { status: 404 }), { deferInbox: false });
+  const response = await handleFederation(request, ctx, () => new Response(null, { status: 404 }));
   if (response.status >= 400) {
     console.warn(JSON.stringify({ palm: "inbox_refused", url: body.url, status: response.status, waited: Date.now() - body.receivedAt }));
   }
@@ -45,25 +44,14 @@ export async function handleFederation(
   request: Request,
   ctx: RequestContext,
   fallback: (request: Request) => Response | Promise<Response>,
-  mode: { deferInbox?: boolean } = {},
 ): Promise<Response> {
   const url = new URL(request.url);
-  // A delivery to an inbox: with a queue, take it now and check its signature
-  // in a queue job. Checking it here (fetching the sender's key, parsing the
-  // activity) costs more CPU than the free plan gives a request.
-  const queue = ctx.bindings.QUEUE;
-  if ((mode.deferInbox ?? true) && queue && request.method === "POST" && isInboxPath(url.pathname)) {
+  // A delivery to an inbox about something palm doesn't hold (a vote on a
+  // post nobody here has seen, a deleted stranger) is dropped before Fedify
+  // parses it and checks its signature, the costly part.
+  if (request.method === "POST" && isInboxPath(url.pathname)) {
     const body = await request.text();
-    if (body.length <= MAX_DEFERRED_BODY) {
-      await queue.send({
-        palm: "inbox",
-        url: request.url,
-        headers: [...request.headers.entries()],
-        body,
-        receivedAt: Date.now(),
-      } satisfies QueueBody);
-      return new Response(null, { status: 202 });
-    }
+    if (await irrelevantDelivery(ctx.bindings.DB, body, ctx.config.domains.map((d) => d.domain.toLowerCase()))) return new Response(null, { status: 202 });
     request = new Request(request.url, { method: "POST", headers: request.headers, body });
   }
   const { people, communities } = await federationsFor(ctx.bindings);

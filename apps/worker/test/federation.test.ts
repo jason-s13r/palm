@@ -51,18 +51,32 @@ describe("federation", () => {
     expect(info.software.version).toMatch(/^0\.19\.9\+palm\.\d+\.\d+\.\d+$/);
   });
 
-  it("takes inbox deliveries at once, and drops unsigned ones when the queue checks them", async () => {
+  it("refuses unsigned inbox deliveries", async () => {
     const id = await createAccount("unsigned", "pw");
     const res = await worker.fetch(`${DOMAIN}/inbox`, {
       method: "POST",
       headers: { "content-type": "application/activity+json" },
       body: JSON.stringify({ type: "Follow", actor: "https://elsewhere.test/u/x", object: "https://palm.test/users/unsigned" }),
     });
-    // Accepted for checking in a queue job, which refuses it: no follower appears.
-    expect(res.status).toBe(202);
-    await new Promise((r) => setTimeout(r, 1500));
+    expect(res.status).toBeGreaterThanOrEqual(400);
     const followers = await db.prepare("SELECT COUNT(*) AS n FROM followers WHERE account_id = ?").bind(id).first<{ n: number }>();
     expect(followers?.n).toBe(0);
+  });
+
+  it("drops votes and deletes about things palm doesn't hold before checking them", async () => {
+    const post = (activity: object) =>
+      worker.fetch(`${DOMAIN}/inbox`, {
+        method: "POST",
+        headers: { "content-type": "application/activity+json" },
+        body: JSON.stringify(activity),
+      });
+    const like = { type: "Like", actor: "https://elsewhere.test/u/x", object: "https://elsewhere.test/post/1" };
+    // A community relaying a vote on a post nobody here has.
+    expect((await post({ type: "Announce", actor: "https://elsewhere.test/c/x", object: like })).status).toBe(202);
+    expect((await post({ type: "Undo", actor: "https://elsewhere.test/u/x", object: like })).status).toBe(202);
+    expect((await post({ type: "Delete", actor: "https://elsewhere.test/u/y", object: "https://elsewhere.test/u/y" })).status).toBe(202);
+    // A vote on a local post still goes through the signature check.
+    expect((await post({ ...like, object: "https://palm.test/objects/1" })).status).toBeGreaterThanOrEqual(400);
   });
 
   it("serves both client APIs on the bare domain, and keeps nodeinfo as Lemmy", async () => {

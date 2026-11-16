@@ -279,7 +279,14 @@ export function activitySink(ctx: RequestContext): ActivitySink {
   return {
     enqueue(task) {
       const queue = ctx.bindings.QUEUE;
-      const work = queue ? queue.send({ palm: "task", domain: ctx.domain.domain, task } satisfies QueueBody) : runTask(ctx, task);
+      // When the queue refuses (the free plan's daily operations are used
+      // up), the task runs here instead of being lost.
+      const work = queue
+        ? queue.send({ palm: "task", domain: ctx.domain.domain, task } satisfies QueueBody).catch((error: unknown) => {
+            logProblem("queue_send_failed", { task: task.kind, error: String(error) });
+            return runTask(ctx, task);
+          })
+        : runTask(ctx, task);
       ctx.waitUntil(work.catch((error: unknown) => logProblem("task_failed", { task: task.kind, error: String(error) })));
     },
     async resolve(query): Promise<Resolved | null> {

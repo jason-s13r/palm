@@ -20,8 +20,12 @@ outside this repo (the Palm project's `palm-decisions.md`).
 - `packages/federation`: ActivityPub on Fedify: WebFinger, Person actors,
   followers, the inboxes and nodeinfo, with Fedify's key-value store on D1
   (`D1KvStore`) and its message queue on a Cloudflare Queue
-  (`CloudflareMessageQueue`). Delivery runs as queue jobs, which the same
-  Worker consumes, so a request only enqueues. Deliveries are signed with the
+  (`CloudflareMessageQueue`). Outgoing delivery runs as queue jobs, which the
+  same Worker consumes. Received activities are handled in the request, not
+  queued: a busy Lemmy community sends over a thousand an hour, and each queue
+  message costs three of the free plan's 10,000 daily operations. Votes and
+  deletes about things palm doesn't hold are dropped before Fedify parses them
+  (`prefilter.ts`). Deliveries are signed with the
   RSA key alone: the Ed25519 Object Integrity Proof costs several times the
   rest of signing. Two federations share the database: people at
   `/users/{name}` and communities (Lemmy Groups) at `/c/{name}`, because
