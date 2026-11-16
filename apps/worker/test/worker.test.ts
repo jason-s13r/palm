@@ -61,7 +61,8 @@ describe("handle", () => {
 
   it("does not redirect non-GET requests", async () => {
     const res = await handle(config, new Request("https://1j.example/inbox", { method: "POST", headers: { accept: "text/html" } }), env, executionCtx);
-    expect(res.status).toBe(404);
+    expect(res.status).not.toBe(302);
+    expect(res.status).toBeGreaterThanOrEqual(400);
   });
 
   it("checks a static config when the Worker is created", () => {

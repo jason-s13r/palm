@@ -1,5 +1,6 @@
 import { handleLemmy } from "@palm/adapter-lemmy";
 import { handleMastodon } from "@palm/adapter-mastodon";
+import { handleFederation } from "@palm/federation";
 import { defineConfig, normaliseHost, resolveSurface, type PalmBindings, type PalmConfig, type RequestContext } from "@palm/core";
 import { migrate } from "@palm/db";
 import { avatarResponse } from "./assets.ts";
@@ -85,14 +86,21 @@ export async function handle(
     case "mastodon":
       return handleMastodon(request, ctx);
     case "federation":
-      return federation(config, request, url);
+      // The client APIs answer on the bare domain too, so an app can be
+      // pointed at the handle's domain. Their paths don't overlap with
+      // federation's. Apps that identify the server by nodeinfo will see
+      // "palm" here; the dedicated API hosts remain for those.
+      if (url.pathname.startsWith("/api/v3/")) return handleLemmy(request, ctx);
+      if (MASTODON_ON_DOMAIN.test(url.pathname)) return handleMastodon(request, ctx);
+      return handleFederation(request, ctx, (req) => federationFallback(config, req, new URL(req.url)));
   }
 }
 
-function federation(config: PalmConfig, request: Request, url: URL): Response {
-  // Federation (WebFinger, actors, the inbox) arrives with Fedify. Until then,
-  // browsers that land here go where the old redirect rule sent them, keeping
-  // the path; everything else gets a 404.
+const MASTODON_ON_DOMAIN = /^\/(api\/v[12]\/|oauth\/|\.well-known\/oauth-authorization-server$)/;
+
+function federationFallback(config: PalmConfig, request: Request, url: URL): Response {
+  // What Fedify doesn't serve: browsers go where the old redirect rule sent
+  // them, keeping the path; everything else gets a 404.
   if (config.browserRedirect && wantsHtml(request)) {
     return Response.redirect(new URL(url.pathname + url.search, config.browserRedirect).toString(), 302);
   }

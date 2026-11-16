@@ -26,3 +26,25 @@ export const json = (body: unknown) => ({
   headers: { "content-type": "application/json" },
   body: JSON.stringify(body),
 });
+
+/** Gives an account RSA and Ed25519 keys, as `palm user keys` does. */
+export async function giveKeys(accountId: number): Promise<void> {
+  const rsa = (await crypto.subtle.generateKey(
+    { name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
+    true,
+    ["sign", "verify"],
+  )) as CryptoKeyPair;
+  const ed = (await crypto.subtle.generateKey("Ed25519", true, ["sign", "verify"])) as CryptoKeyPair;
+  for (const [algorithm, pair] of [["RSASSA-PKCS1-v1_5", rsa], ["Ed25519", ed]] as const) {
+    await db
+      .prepare("INSERT INTO actor_keys (account_id, algorithm, public_jwk, private_jwk, created_at) VALUES (?, ?, ?, ?, ?)")
+      .bind(
+        accountId,
+        algorithm,
+        JSON.stringify(await crypto.subtle.exportKey("jwk", pair.publicKey)),
+        JSON.stringify(await crypto.subtle.exportKey("jwk", pair.privateKey)),
+        0,
+      )
+      .run();
+  }
+}
