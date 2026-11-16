@@ -385,6 +385,13 @@ CREATE TABLE IF NOT EXISTS post_tags (
 CREATE INDEX IF NOT EXISTS post_tags_tag ON post_tags (tag, post_id)
 `,
   },
+  {
+    version: 11,
+    name: "thread backfill marker",
+    sql: `
+ALTER TABLE posts ADD COLUMN thread_fetched_at INTEGER
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

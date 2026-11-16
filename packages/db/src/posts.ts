@@ -412,3 +412,15 @@ export async function searchTags(db: D1Database, prefix: string, limit = 10): Pr
     .all<{ tag: string }>();
   return results.map((r) => r.tag);
 }
+
+/**
+ * Claims a remote thread for refreshing: true if nobody has refreshed it in
+ * the last `ttlSeconds`, and marks it refreshed now.
+ */
+export async function claimThreadRefresh(db: D1Database, postId: number, ttlSeconds: number): Promise<boolean> {
+  const result = await db
+    .prepare("UPDATE posts SET thread_fetched_at = ? WHERE id = ? AND (thread_fetched_at IS NULL OR thread_fetched_at < ?)")
+    .bind(now(), postId, now() - ttlSeconds)
+    .run();
+  return (result.meta.changes ?? 0) > 0;
+}
