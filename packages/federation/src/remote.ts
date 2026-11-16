@@ -2,6 +2,8 @@ import type { Context } from "@fedify/fedify";
 import {
   Application,
   Article,
+  Create,
+  traverseCollection,
   Document,
   Group,
   Image,
@@ -20,7 +22,9 @@ import {
 import { htmlToText, sanitizeHtml, type RequestContext } from "@palm/core";
 import {
   accountByApId,
+  accountById,
   accountForLogin,
+  markOutboxFetched,
   addMentions,
   communityByApId,
   communityByName,
@@ -115,6 +119,20 @@ async function recordActor(ctx: RequestContext, actor: APObject): Promise<{ acco
       }),
     };
   }
+  // The profile's counts live on its server, on its collections.
+  const total = async (get: () => Promise<{ totalItems: number | null } | null>) => {
+    try {
+      return (await get())?.totalItems ?? null;
+    } catch {
+      return null;
+    }
+  };
+  const person = a as Person;
+  const [followersCount, followingCount, statusesCount] = await Promise.all([
+    total(() => person.getFollowers()),
+    total(() => person.getFollowing()),
+    total(() => person.getOutbox()),
+  ]);
   return {
     account: await upsertRemoteAccount(db, {
       ...common,
@@ -124,6 +142,10 @@ async function recordActor(ctx: RequestContext, actor: APObject): Promise<{ acco
       avatarUrl: hrefOf(icon?.url),
       headerUrl: hrefOf(image?.url),
       actorType: actor instanceof Service ? "Service" : actor instanceof Group ? "Group" : "Person",
+      outboxUrl: a.outboxId?.href ?? null,
+      followersCount,
+      followingCount,
+      statusesCount,
     }),
   };
 }
@@ -345,5 +367,40 @@ export async function resolve(
   } catch (error) {
     logProblem("resolve_failed", { query: q, error: String(error) });
     return null;
+  }
+}
+
+/** How long a remote profile's posts stay fresh before palm reads its outbox again. */
+const OUTBOX_TTL_SECONDS = 6 * 60 * 60;
+
+/**
+ * Fills in a remote person's recent public posts, read from their outbox, so
+ * their profile isn't empty the first time someone here opens it. Also
+ * refreshes their profile and counts if those are stale.
+ */
+export async function backfillProfile(fctx: Context<RequestContext>, accountId: number): Promise<void> {
+  const db = fctx.data.bindings.DB;
+  let account = await accountById(db, accountId);
+  if (!account?.apId) return;
+  if (account.outboxFetchedAt && now() - account.outboxFetchedAt < OUTBOX_TTL_SECONDS) return;
+  await markOutboxFetched(db, account.id);
+  account = (await ensureAccount(fctx, new URL(account.apId))) ?? account;
+  if (!account.outboxUrl) return;
+  try {
+    const outbox = await fctx.lookupObject(account.outboxUrl);
+    if (!outbox || !("getFirst" in outbox)) return;
+    let count = 0;
+    for await (const item of traverseCollection(outbox as Parameters<typeof traverseCollection>[0], {
+      documentLoader: fctx.documentLoader,
+      contextLoader: fctx.contextLoader,
+    })) {
+      if (++count > 20) break;
+      // Their own posts; boosts of others' are left out.
+      if (!(item instanceof Create)) continue;
+      const object = await item.getObject({ crossOrigin: "trust" }).catch(() => null);
+      if (object) await storeRemotePost(fctx, object, { required: true }).catch(() => null);
+    }
+  } catch (error) {
+    logProblem("outbox_fetch_failed", { account: account.apId, error: String(error) });
   }
 }
