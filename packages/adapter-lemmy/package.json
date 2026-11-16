@@ -1,0 +1,26 @@
+{
+  "name": "@palm/adapter-lemmy",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The Lemmy API v3, as Lemmy apps expect it, over palm's data.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@palm/auth": "workspace:*",
+    "@palm/core": "workspace:*",
+    "@palm/db": "workspace:*",
+    "hono": "^4.13.18"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261116.1",
+    "lemmy-js-client": "0.19.9",
+    "typescript": "~6.0.3",
+    "vitest": "^5.1.0"
+  }
+}
