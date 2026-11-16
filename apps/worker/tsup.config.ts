@@ -2,8 +2,8 @@ import { defineConfig } from "tsup";
 
 // The published package is one self-contained module: palm's internal
 // packages (@palm/*) are bundled in, so a deployment installs exactly one
-// thing. Third-party dependencies, once there are any, stay external and are
-// listed in this package's dependencies.
+// thing. Small runtime libraries (hono) are bundled too, so the package has no
+// dependencies at all.
 export default defineConfig({
   entry: ["src/index.ts"],
   format: ["esm"],
@@ -13,9 +13,9 @@ export default defineConfig({
   // through node_modules they would be left as imports of unpublished packages.
   dts: {
     resolve: true,
-    compilerOptions: { paths: { "@palm/core": ["../../packages/core/src/index.ts"] } },
+    compilerOptions: { paths: { "@palm/*": ["../../packages/*/src/index.ts"] } },
   },
-  noExternal: [/^@palm\//],
+  noExternal: [/^@palm\//, "hono", /^hono\//],
   clean: true,
   sourcemap: true,
 });

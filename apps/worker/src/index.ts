@@ -1,15 +1,19 @@
-import { defineConfig, resolveSurface, type PalmConfig, type Surface } from "@palm/core";
+import { handleLemmy } from "@palm/adapter-lemmy";
+import { handleMastodon } from "@palm/adapter-mastodon";
+import { defineConfig, normaliseHost, resolveSurface, type PalmBindings, type PalmConfig, type RequestContext } from "@palm/core";
+import { migrate } from "@palm/db";
+import { avatarResponse } from "./assets.ts";
 import { VERSION } from "./version.ts";
 
 export { ConfigError, defineConfig } from "@palm/core";
-export type { ApiKind, DomainConfig, InstanceConfig, PalmConfig, Surface } from "@palm/core";
+export type { ApiKind, DomainConfig, InstanceConfig, PalmBindings, PalmConfig, Surface } from "@palm/core";
 export { VERSION };
 
 /**
- * The bindings a deployment gives the Worker. Empty for now; D1, R2, the Queue
- * and secrets arrive with the milestones that need them.
+ * The bindings a deployment gives the Worker: a D1 database bound as `DB`.
+ * R2, the Queue and so on arrive with the milestones that need them.
  */
-export interface PalmEnv {}
+export interface PalmEnv extends PalmBindings {}
 
 /** A config, or a function that builds one from the Worker's bindings. */
 export type ConfigSource<Env extends PalmEnv = PalmEnv> = PalmConfig | ((env: Env) => PalmConfig);
@@ -29,15 +33,20 @@ export function createPalm<Env extends PalmEnv = PalmEnv>(source: ConfigSource<E
   let config: PalmConfig | undefined = typeof source === "function" ? undefined : defineConfig(source);
 
   return {
-    fetch(request, env) {
+    fetch(request, env, ctx) {
       config ??= defineConfig((source as (env: Env) => PalmConfig)(env));
-      return handle(config, request);
+      return handle(config, request, env, ctx);
     },
   };
 }
 
 /** Routes one request by its host, then by its path. */
-export async function handle(config: PalmConfig, request: Request): Promise<Response> {
+export async function handle(
+  config: PalmConfig,
+  request: Request,
+  env: PalmEnv,
+  executionCtx: Pick<ExecutionContext, "waitUntil">,
+): Promise<Response> {
   const url = new URL(request.url);
   const surface = resolveSurface(config, url.host);
 
@@ -51,34 +60,42 @@ export async function handle(config: PalmConfig, request: Request): Promise<Resp
       domain: surface?.domain.domain ?? null,
     });
   }
+  if (url.pathname === "/palm/avatar.png") return avatarResponse();
 
   if (!surface) {
     return json({ error: "unknown_host" }, 421);
   }
 
-  return surface.kind === "federation" ? federation(config, request, url) : apiHost(config, surface, request, url);
+  // Everything past here touches the database; bring it up to this release's
+  // schema first (a no-op after the first request in each isolate).
+  await migrate(env.DB);
+
+  const ctx: RequestContext = {
+    config,
+    domain: surface.domain,
+    host: normaliseHost(url.host),
+    bindings: env,
+    version: VERSION,
+    waitUntil: (promise) => executionCtx.waitUntil(promise),
+  };
+
+  switch (surface.kind) {
+    case "lemmy":
+      return handleLemmy(request, ctx);
+    case "mastodon":
+      return handleMastodon(request, ctx);
+    case "federation":
+      return federation(config, request, url);
+  }
 }
 
 function federation(config: PalmConfig, request: Request, url: URL): Response {
-  // Nothing federates yet (M1). Browsers that land here go where the old
-  // redirect rule sent them, keeping the path; everything else gets a 404.
+  // Federation (WebFinger, actors, the inbox) arrives with Fedify. Until then,
+  // browsers that land here go where the old redirect rule sent them, keeping
+  // the path; everything else gets a 404.
   if (config.browserRedirect && wantsHtml(request)) {
     return Response.redirect(new URL(url.pathname + url.search, config.browserRedirect).toString(), 302);
   }
-  return json({ error: "not_found" }, 404);
-}
-
-function apiHost(config: PalmConfig, surface: Surface, request: Request, url: URL): Response {
-  if (url.pathname === "/" && (request.method === "GET" || request.method === "HEAD")) {
-    const apps = surface.kind === "lemmy" ? "Voyager, Mlem or Thunder" : "Ivory, Ice Cubes or the Mastodon app";
-    const api = surface.kind === "lemmy" ? "Lemmy" : "Mastodon";
-    return new Response(
-      `${config.instance.name}\n\nThis is the ${api} API for ${surface.domain.domain}.\n` +
-        `Sign in from ${apps}, with ${url.host} as the server.\n`,
-      { headers: { "content-type": "text/plain; charset=utf-8" } },
-    );
-  }
-  // Lemmy and Mastodon both answer errors as {"error": "..."}.
   return json({ error: "not_found" }, 404);
 }
 

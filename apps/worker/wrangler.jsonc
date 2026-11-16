@@ -9,6 +9,8 @@
   "workers_dev": true,
   "observability": { "enabled": true },
   "version_metadata": { "binding": "CF_VERSION_METADATA" },
+  // palm creates and migrates its own tables on first request.
+  "d1_databases": [{ "binding": "DB", "database_name": "palm-staging", "database_id": "a34ddc76-6aaf-4ece-bd52-8bedbc10b95c" }],
   // Staging lives on its own throwaway hosts under 1j.nz. They're flat
   // (palm-test-lemmy, not lemmy.palm-test) so Cloudflare's free certificate
   // covers them. Anything staging mints is disposable; 1j.nz itself is not.

@@ -9,6 +9,9 @@
   "workers_dev": false,
   "observability": { "enabled": true },
   "version_metadata": { "binding": "CF_VERSION_METADATA" },
+  // One D1 database (wrangler d1 create <name>). palm creates and migrates its
+  // own tables on the first request, so there's no migration step to run.
+  "d1_databases": [{ "binding": "DB", "database_name": "<database-name>", "database_id": "<database-id>" }],
   // One route per host in palm.config.ts: the domain itself and each API host.
   "routes": [
     { "pattern": "<domain>/*", "zone_name": "<domain>" },

@@ -1,9 +1,10 @@
-import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { createPalm, handle, VERSION } from "../src/index.ts";
 
-// `wrangler types` would type this; the test only needs fetch().
-const worker = (exports as unknown as { default: Fetcher }).default;
+import { db, worker } from "./helpers.ts";
+
+const env = { DB: db };
+const executionCtx = { waitUntil: () => {} };
 
 describe("staging entry point", () => {
   it("reports its version on every host", async () => {
@@ -48,21 +49,18 @@ describe("handle", () => {
   };
 
   it("sends browsers on the bare domain to the redirect target, keeping the path", async () => {
-    const res = await handle(config, new Request("https://1j.example/some/page?x=1", { headers: { accept: "text/html" } }));
+    const res = await handle(config, new Request("https://1j.example/some/page?x=1", { headers: { accept: "text/html" } }), env, executionCtx);
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe("https://site.example/some/page?x=1");
   });
 
   it("does not redirect ActivityPub requests", async () => {
-    const res = await handle(
-      config,
-      new Request("https://1j.example/users/jason", { headers: { accept: "application/activity+json, text/html" } }),
-    );
+    const res = await handle(config, new Request("https://1j.example/users/jason", { headers: { accept: "application/activity+json, text/html" } }), env, executionCtx);
     expect(res.status).toBe(404);
   });
 
   it("does not redirect non-GET requests", async () => {
-    const res = await handle(config, new Request("https://1j.example/inbox", { method: "POST", headers: { accept: "text/html" } }));
+    const res = await handle(config, new Request("https://1j.example/inbox", { method: "POST", headers: { accept: "text/html" } }), env, executionCtx);
     expect(res.status).toBe(404);
   });
 
