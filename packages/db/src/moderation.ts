@@ -171,6 +171,7 @@ export async function prune(db: D1Database, days = 30, batch = 300): Promise<num
       db.prepare(`DELETE FROM boosts WHERE post_id IN (${marks})`).bind(...ids),
       db.prepare(`DELETE FROM bookmarks WHERE post_id IN (${marks})`).bind(...ids),
       db.prepare(`DELETE FROM mentions WHERE post_id IN (${marks})`).bind(...ids),
+      db.prepare(`DELETE FROM post_tags WHERE post_id IN (${marks})`).bind(...ids),
       db.prepare(`DELETE FROM notifications WHERE post_id IN (${marks})`).bind(...ids),
       db.prepare(`DELETE FROM posts WHERE id IN (${marks})`).bind(...ids),
     ]);

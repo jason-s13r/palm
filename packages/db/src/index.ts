@@ -44,6 +44,10 @@ export {
 } from "./federation.ts";
 export type { Follower, KeyAlgorithm, StoredKeyPair } from "./federation.ts";
 export {
+  addTags,
+  postsTagged,
+  searchTags,
+  tagsFor,
   countLocalPosts,
   countPosts,
   createPost,

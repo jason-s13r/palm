@@ -372,6 +372,19 @@ ALTER TABLE posts ADD COLUMN reblog_of INTEGER REFERENCES posts (id)
 CREATE INDEX IF NOT EXISTS posts_reblog_of ON posts (reblog_of) WHERE reblog_of IS NOT NULL
 `,
   },
+  {
+    version: 10,
+    name: "hashtags",
+    sql: `
+CREATE TABLE IF NOT EXISTS post_tags (
+  post_id INTEGER NOT NULL REFERENCES posts (id),
+  tag TEXT NOT NULL,
+  PRIMARY KEY (post_id, tag)
+)
+;
+CREATE INDEX IF NOT EXISTS post_tags_tag ON post_tags (tag, post_id)
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

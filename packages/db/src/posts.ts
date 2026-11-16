@@ -370,3 +370,45 @@ export async function postsByIds(db: D1Database, ids: number[]): Promise<Map<num
     .all<PostRow>();
   return new Map(results.map((r) => [r.id, toPost(r)]));
 }
+
+/** Hashtags, lowercased and without the #, are how palm finds posts by tag. */
+export async function addTags(db: D1Database, postId: number, tags: string[]): Promise<void> {
+  const unique = [...new Set(tags.map((t) => t.replace(/^#/, "").toLowerCase()).filter(Boolean))].slice(0, 20);
+  if (!unique.length) return;
+  await db.batch(unique.map((tag) => db.prepare("INSERT INTO post_tags (post_id, tag) VALUES (?, ?) ON CONFLICT DO NOTHING").bind(postId, tag)));
+}
+
+export async function tagsFor(db: D1Database, postIds: number[]): Promise<Map<number, string[]>> {
+  const out = new Map<number, string[]>();
+  const unique = [...new Set(postIds)];
+  if (!unique.length) return out;
+  const { results } = await db
+    .prepare(`SELECT post_id, tag FROM post_tags WHERE post_id IN (${unique.map(() => "?").join(", ")})`)
+    .bind(...unique)
+    .all<{ post_id: number; tag: string }>();
+  for (const r of results) out.set(r.post_id, [...(out.get(r.post_id) ?? []), r.tag]);
+  return out;
+}
+
+/** Public posts with a hashtag, newest first. */
+export async function postsTagged(db: D1Database, tag: string, page: Page): Promise<Post[]> {
+  const { sql, params } = pageClause(page);
+  const { results } = await db
+    .prepare(
+      `SELECT p.* FROM posts p JOIN post_tags t ON t.post_id = p.id
+       WHERE t.tag = ? AND p.deleted_at IS NULL AND p.visibility = 'public'${sql.replaceAll("id ", "p.id ")}
+       ORDER BY p.id DESC LIMIT ?`,
+    )
+    .bind(tag.replace(/^#/, "").toLowerCase(), ...params, page.limit)
+    .all<PostRow>();
+  return results.map(toPost);
+}
+
+/** Hashtags palm has seen that start with this, most used first, for search. */
+export async function searchTags(db: D1Database, prefix: string, limit = 10): Promise<string[]> {
+  const { results } = await db
+    .prepare("SELECT tag FROM post_tags WHERE tag LIKE ? GROUP BY tag ORDER BY COUNT(*) DESC LIMIT ?")
+    .bind(`${prefix.replace(/^#/, "").toLowerCase()}%`, limit)
+    .all<{ tag: string }>();
+  return results.map((r) => r.tag);
+}
