@@ -1,7 +1,11 @@
 import { markdownToHtml, urls, type RequestContext } from "@palm/core";
 import {
+  accountByHandle,
   accountById,
   accountsByIds,
+  addMentions,
+  follow,
+  followState,
   attachMedia,
   bookmark,
   communitiesByIds,
@@ -12,6 +16,8 @@ import {
   deletePost,
   editPost,
   listCommunities,
+  listStatusComments,
+  listStatusPosts,
   listThreadComments,
   hasLocalSubscribers,
   listThreadPosts,
@@ -20,15 +26,18 @@ import {
   restorePost,
   subscribe,
   subscription,
+  statusRootOf,
   subscriptions,
   threadSort,
   unbookmark,
+  unfollow,
   unsubscribe,
   vote,
   type Account,
   type Community,
   type ThreadComment,
   type ThreadPost,
+  type ThreadSort,
 } from "@palm/db";
 import { Hono, type Context } from "hono";
 import type {
@@ -42,6 +51,15 @@ import type {
   PostResponse,
   SuccessResponse,
 } from "lemmy-js-client";
+import {
+  accountIdOfCommunity,
+  followStates,
+  hasPersonCommunity,
+  isPersonCommunityId,
+  personCommunity,
+  personCommunityStats,
+  statusTitle,
+} from "./people-communities.ts";
 import { commentView, communityView, personView, postView, type ThreadContext } from "./views.ts";
 
 /**
@@ -93,9 +111,28 @@ async function communityNamed(c: C, name: string): Promise<Community | null> {
   const db = c.env.bindings.DB;
   const known = await communityByName(db, host, local);
   if (known && (known.apId !== null || host === c.env.domain.domain)) return known;
+  // No community by that name: a person's statuses, as their person community.
+  const person = await personNamed(c, local, host);
+  if (person) return personCommunity(person);
   if (host === c.env.domain.domain) return null;
   const found = await c.env.activities.resolve(`!${local}@${host}`);
   return found?.kind === "community" ? communityById(db, found.id) : null;
+}
+
+/** A person who can have a person community, fetched the first time a remote one is asked for. */
+async function personNamed(c: C, username: string, host: string): Promise<Account | null> {
+  const db = c.env.bindings.DB;
+  let account = await accountByHandle(db, username, host);
+  if (!account && host !== c.env.domain.domain) {
+    const found = await c.env.activities.resolve(`@${username}@${host}`);
+    account = found?.kind === "account" ? await accountById(db, found.id) : null;
+  }
+  return account && hasPersonCommunity(account) ? account : null;
+}
+
+async function personCommunityById(c: C, id: number): Promise<Community | null> {
+  const account = await accountById(c.env.bindings.DB, accountIdOfCommunity(id));
+  return account && hasPersonCommunity(account) ? personCommunity(account) : null;
 }
 
 /** A community this domain can show: its own, or a remote one palm knows. */
@@ -103,7 +140,10 @@ const visible = (c: C, community: Community | null) =>
   community && (community.apId !== null || community.domain === c.env.domain.domain) ? community : null;
 
 async function communityFor(c: C, id: number | undefined, name: string | undefined): Promise<Community | null | undefined> {
-  if (id !== undefined) return visible(c, await communityById(c.env.bindings.DB, id));
+  if (id !== undefined) {
+    if (isPersonCommunityId(id)) return personCommunityById(c, id);
+    return visible(c, await communityById(c.env.bindings.DB, id));
+  }
   if (name) return communityNamed(c, name);
   return undefined;
 }
@@ -111,48 +151,74 @@ async function communityFor(c: C, id: number | undefined, name: string | undefin
 /** Lemmy's listing types: Local is this domain's communities; All and Subscribed take in remote ones. */
 const scopeOf = (type: string | undefined) => (type === "Local" ? ("local" as const) : ("all" as const));
 
+/**
+ * What a post or comment view needs to know about where it sits. A status,
+ * or a reply under one, sits in a person community: `ownerId` is the
+ * person whose statuses those are.
+ */
+interface Placed {
+  accountId: number;
+  communityId: number | null;
+  ownerId?: number | undefined;
+}
+
 /** Looks up the people, communities and subscriptions a set of views needs, once each. */
-async function contextFor(c: C, items: { accountId: number; communityId: number | null }[]) {
+async function contextFor(c: C, items: Placed[]) {
   const db = c.env.bindings.DB;
   const viewer = c.get("auth")?.account ?? null;
-  const [byId, communities, subscribed] = await Promise.all([
-    accountsByIds(db, items.map((i) => i.accountId)),
+  const [byId, communities, subscribed, following] = await Promise.all([
+    accountsByIds(db, items.flatMap((i) => [i.accountId, i.ownerId ?? i.accountId])),
     communitiesByIds(db, items.map((i) => i.communityId ?? 0)),
     viewer ? subscriptions(db, viewer.id) : Promise.resolve([]),
+    followStates(db, viewer?.id ?? null),
   ]);
   const states = new Map(subscribed.map((s) => [s.id, s.pending]));
-  return (item: { accountId: number; communityId: number | null }): ThreadContext | null => {
+  return (item: Placed): ThreadContext | null => {
     const creator = byId.get(item.accountId);
-    const community = communities.get(item.communityId ?? 0);
-    if (!creator || !community) return null;
+    if (!creator) return null;
+    if (item.communityId === null) {
+      const owner = byId.get(item.ownerId ?? item.accountId);
+      if (!owner) return null;
+      const state = following.get(owner.id);
+      return { creator, community: personCommunity(owner), subscribed: state === "accepted", pending: state === "pending" };
+    }
+    const community = communities.get(item.communityId);
+    if (!community) return null;
     const pending = states.get(community.id);
     return { creator, community, subscribed: pending === false, pending: pending === true };
   };
+}
+
+/** A status as a Lemmy post: a title from its text, and its first picture as the link. */
+function asLemmyPost<T extends ThreadPost>(p: T): T {
+  if (p.communityId !== null) return p;
+  const picture = p.attachments.find((a) => a.mediaType?.startsWith("image/") || /\.(jpe?g|png|gif|webp)(\?|$)/i.test(a.url));
+  return { ...p, title: statusTitle(p), linkUrl: p.linkUrl ?? picture?.url ?? null };
 }
 
 async function postViews(c: C, posts: ThreadPost[]) {
   const ctxOf = await contextFor(c, posts);
   return posts.flatMap((p) => {
     const t = ctxOf(p);
-    return t ? [postView(c.env, p, t)] : [];
+    return t ? [postView(c.env, asLemmyPost(p), t)] : [];
   });
 }
 
 async function commentViews(c: C, comments: ThreadComment[]) {
-  const roots = await listThreadPosts(c.env.bindings.DB, {
-    domain: c.env.domain.domain,
-    scope: "all",
-    ids: [...new Set(comments.map((x) => x.rootId ?? 0))],
-    sort: "new",
-    viewerId: c.get("auth")?.account.id ?? null,
-    limit: 1000,
-    offset: 0,
-  });
-  const rootById = new Map(roots.map((r) => [r.id, r]));
-  const ctxOf = await contextFor(c, comments);
+  const ids = [...new Set(comments.map((x) => x.rootId ?? 0))];
+  const viewerId = c.get("auth")?.account.id ?? null;
+  const [threads, statuses] = await Promise.all([
+    listThreadPosts(c.env.bindings.DB, { domain: c.env.domain.domain, scope: "all", ids, sort: "new", viewerId, limit: 1000, offset: 0 }),
+    listStatusPosts(c.env.bindings.DB, { ids, sort: "new", viewerId, limit: 1000, offset: 0 }),
+  ]);
+  const rootById = new Map([...threads, ...statuses].map((r) => [r.id, asLemmyPost(r)]));
+  const ctxOf = await contextFor(
+    c,
+    comments.map((x) => ({ accountId: x.accountId, communityId: x.communityId, ownerId: rootById.get(x.rootId ?? 0)?.accountId })),
+  );
   return comments.flatMap((x) => {
-    const t = ctxOf(x);
     const root = rootById.get(x.rootId ?? 0);
+    const t = ctxOf({ accountId: x.accountId, communityId: x.communityId, ownerId: root?.accountId });
     return t && root ? [commentView(c.env, x, root, t)] : [];
   });
 }
@@ -168,20 +234,29 @@ async function threadPost(c: C, id: number): Promise<ThreadPost | null> {
     limit: 1,
     offset: 0,
   });
-  return found ?? null;
+  if (found) return found;
+  // Or a status, in its author's person community.
+  const [status] = await listStatusPosts(c.env.bindings.DB, { ids: [id], sort: "new", viewerId: c.get("auth")?.account.id ?? null, limit: 1, offset: 0 });
+  return status ?? null;
 }
 
 async function threadComment(c: C, id: number): Promise<ThreadComment | null> {
+  const viewerId = c.get("auth")?.account.id ?? null;
   const [found] = await listThreadComments(c.env.bindings.DB, {
     domain: c.env.domain.domain,
     scope: "all",
     ids: [id],
     sort: "new",
-    viewerId: c.get("auth")?.account.id ?? null,
+    viewerId,
     limit: 1,
     offset: 0,
   });
-  return found ?? null;
+  if (found) return found;
+  // Or a reply under a status.
+  const root = await statusRootOf(c.env.bindings.DB, id);
+  if (root === null) return null;
+  const replies = await listStatusComments(c.env.bindings.DB, root, { viewerId, sort: "new" });
+  return replies.find((r) => r.id === id) ?? null;
 }
 
 async function postResponse(c: C, id: number) {
@@ -198,6 +273,10 @@ async function commentResponse(c: C, id: number) {
 
 async function communityStats(c: C, community: Community) {
   const viewer = c.get("auth")?.account.id ?? null;
+  if (isPersonCommunityId(community.id)) {
+    const owner = await accountById(c.env.bindings.DB, accountIdOfCommunity(community.id));
+    if (owner) return personCommunityStats(c.env, owner, viewer);
+  }
   const [found] = await listCommunities(c.env.bindings.DB, {
     domain: c.env.domain.domain,
     scope: "all",
@@ -246,8 +325,24 @@ threadRoutes.get("/api/v3/community/list", async (c) => {
     limit,
     offset,
   });
-  return c.json({ communities: found.map((x) => communityView(c.env, x)) } satisfies ListCommunitiesResponse);
+  const views = found.map((x) => communityView(c.env, x));
+  // Subscribed takes in the people followed, as person communities, on the first page.
+  if (type === "Subscribed" && viewer && offset === 0) views.push(...(await followedPeopleCommunities(c, viewer.id)));
+  return c.json({ communities: views } satisfies ListCommunitiesResponse);
 });
+
+/** Person communities for the people an account follows, or has asked to. */
+export async function followedPeople(c: C, accountId: number): Promise<Community[]> {
+  const db = c.env.bindings.DB;
+  const states = await followStates(db, accountId);
+  const people = await accountsByIds(db, [...states.keys()]);
+  return [...people.values()].filter(hasPersonCommunity).map(personCommunity);
+}
+
+async function followedPeopleCommunities(c: C, accountId: number) {
+  const communities = await followedPeople(c, accountId);
+  return Promise.all(communities.map(async (x) => communityView(c.env, await communityStats(c, x))));
+}
 
 threadRoutes.post("/api/v3/community/follow", async (c) => {
   const auth = c.get("auth");
@@ -256,6 +351,10 @@ threadRoutes.post("/api/v3/community/follow", async (c) => {
   const community = await communityFor(c, int(params.community_id), undefined);
   if (!community) return fail(c, "couldnt_find_community", 404);
   const db = c.env.bindings.DB;
+  if (isPersonCommunityId(community.id)) {
+    await followPerson(c, auth.account, accountIdOfCommunity(community.id), params.follow !== false);
+    return c.json({ community_view: communityView(c.env, await communityStats(c, community)), discussion_languages: [] } satisfies CommunityResponse);
+  }
   const existing = await subscription(db, community.id, auth.account.id);
   if (params.follow === false) {
     await unsubscribe(db, community.id, auth.account.id);
@@ -278,6 +377,24 @@ threadRoutes.post("/api/v3/community/follow", async (c) => {
   return c.json({ community_view: communityView(c.env, await communityStats(c, community)), discussion_languages: [] } satisfies CommunityResponse);
 });
 
+/** Subscribing to a person community: following the person, as Mastodon apps do. */
+async function followPerson(c: C, me: Account, targetId: number, on: boolean): Promise<void> {
+  const db = c.env.bindings.DB;
+  const target = await accountById(db, targetId);
+  if (!target || target.id === me.id) return;
+  const existing = await followState(db, me.id, target.id);
+  if (on && !existing) {
+    const followApId = `${urls.user(me.domain, me.username)}#follows/${target.id}-${Date.now()}`;
+    await follow(db, me.id, target.id, target.apId ? { followApId } : undefined);
+    c.env.activities.enqueue({ kind: "followed", accountId: me.id, targetId: target.id, followApId, undo: false });
+  } else if (!on && existing) {
+    await unfollow(db, me.id, target.id);
+    if (target.apId && existing.followApId) {
+      c.env.activities.enqueue({ kind: "followed", accountId: me.id, targetId: target.id, followApId: existing.followApId, undo: true });
+    }
+  }
+}
+
 // --- posts -----------------------------------------------------------------
 
 threadRoutes.get("/api/v3/post/list", async (c) => {
@@ -288,6 +405,20 @@ threadRoutes.get("/api/v3/post/list", async (c) => {
   const type = c.req.query("type_");
   const mine = bool(c.req.query("saved_only")) || bool(c.req.query("liked_only")) || bool(c.req.query("disliked_only"));
   if ((mine || (!community && type === "Subscribed")) && !viewer) return c.json({ posts: [] } satisfies GetPostsResponse);
+  const sort = threadSort(c.req.query("sort"));
+  if (community && isPersonCommunityId(community.id)) {
+    const posts = await listStatusPosts(c.env.bindings.DB, {
+      authorIds: [accountIdOfCommunity(community.id)],
+      sort,
+      viewerId: viewer?.id ?? null,
+      limit,
+      offset,
+    });
+    const response: GetPostsResponse = { posts: await postViews(c, posts) };
+    if (posts.length === limit) response.next_page = `o${offset + limit}`;
+    return c.json(response);
+  }
+  const withStatuses = !community && !mine && type === "Subscribed" && viewer;
   const posts = await listThreadPosts(c.env.bindings.DB, {
     domain: c.env.domain.domain,
     scope: community ? "all" : scopeOf(type),
@@ -298,15 +429,34 @@ threadRoutes.get("/api/v3/post/list", async (c) => {
         ? { accountId: viewer.id, score: bool(c.req.query("liked_only")) ? 1 : -1 }
         : undefined,
     subscribedBy: !community && !mine && type === "Subscribed" ? viewer?.id : undefined,
-    sort: threadSort(c.req.query("sort")),
+    sort,
     viewerId: viewer?.id ?? null,
-    limit,
-    offset,
+    // Merged with followed people's statuses below, so both lists start at the top.
+    limit: withStatuses ? offset + limit : limit,
+    offset: withStatuses ? 0 : offset,
   });
-  const response: GetPostsResponse = { posts: await postViews(c, posts) };
-  if (posts.length === limit) response.next_page = `o${offset + limit}`;
+  let page = posts;
+  if (withStatuses) {
+    const statuses = await listStatusPosts(c.env.bindings.DB, { followedBy: viewer.id, sort, viewerId: viewer.id, limit: offset + limit, offset: 0 });
+    page = mergeSorted(posts, statuses, sort).slice(offset, offset + limit);
+  }
+  const response: GetPostsResponse = { posts: await postViews(c, page) };
+  if (page.length === limit) response.next_page = `o${offset + limit}`;
   return c.json(response);
 });
+
+/** Two lists in the same sort, merged as one would have been sorted. */
+function mergeSorted(a: ThreadPost[], b: ThreadPost[], sort: ThreadSort): ThreadPost[] {
+  const score = (p: ThreadPost) => p.upvotes - p.downvotes;
+  const compare = {
+    new: (x: ThreadPost, y: ThreadPost) => y.id - x.id,
+    old: (x: ThreadPost, y: ThreadPost) => x.id - y.id,
+    top: (x: ThreadPost, y: ThreadPost) => score(y) - score(x) || y.id - x.id,
+    comments: (x: ThreadPost, y: ThreadPost) => y.comments - x.comments || y.id - x.id,
+    active: (x: ThreadPost, y: ThreadPost) => y.activeAt - x.activeAt || y.id - x.id,
+  }[sort];
+  return [...a, ...b].sort(compare);
+}
 
 threadRoutes.get("/api/v3/post", async (c) => {
   let id = int(c.req.query("id"));
@@ -315,7 +465,7 @@ threadRoutes.get("/api/v3/post", async (c) => {
   const found = id === undefined ? null : await threadPost(c, id);
   const [view] = found ? await postViews(c, [found]) : [];
   if (!view) return fail(c, "couldnt_find_post", 404);
-  const community = await communityById(c.env.bindings.DB, view.community.id);
+  const community = await communityFor(c, view.community.id, undefined);
   const body: GetPostResponse = {
     post_view: view,
     community_view: communityView(c.env, await communityStats(c, community!)),
@@ -331,6 +481,8 @@ threadRoutes.post("/api/v3/post", async (c) => {
   const params = await body(c);
   const community = await communityFor(c, int(params.community_id), undefined);
   if (!community) return fail(c, "couldnt_find_community", 404);
+  // A person community holds that person's own statuses.
+  if (isPersonCommunityId(community.id)) return fail(c, "only_mods_can_post_in_community");
   const title = str(params.name)?.trim() ?? "";
   if (!title || title.length > MAX_TITLE) return fail(c, "invalid_post_title");
   const text = str(params.body)?.trim() ?? "";
@@ -442,6 +594,20 @@ threadRoutes.get("/api/v3/comment/list", async (c) => {
     const root = await postByIdAny(c.env.bindings.DB, postId);
     if (root?.apId) await c.env.activities.backfillThread(root.id);
   }
+  const sort = threadSort(c.req.query("sort") === "Hot" ? "Top" : c.req.query("sort"));
+  // Under a status, the replies, threaded by what they reply to.
+  if (postId !== undefined) {
+    const root = await postByIdAny(c.env.bindings.DB, postId);
+    if (root && root.communityId === null && root.rootId === null) {
+      const replies = await listStatusComments(c.env.bindings.DB, root.id, {
+        viewerId: viewer?.id ?? null,
+        maxDepth,
+        parentId: int(c.req.query("parent_id")),
+        sort,
+      });
+      return c.json({ comments: await commentViews(c, replies.slice(offset, offset + limit)) } satisfies GetCommentsResponse);
+    }
+  }
   const comments = await listThreadComments(c.env.bindings.DB, {
     domain: c.env.domain.domain,
     scope: scopeOf(c.req.query("type_")),
@@ -450,7 +616,7 @@ threadRoutes.get("/api/v3/comment/list", async (c) => {
     parentId: int(c.req.query("parent_id")),
     communityId: community?.id,
     maxDepth,
-    sort: threadSort(c.req.query("sort") === "Hot" ? "Top" : c.req.query("sort")),
+    sort,
     viewerId: viewer?.id ?? null,
     limit,
     offset,
@@ -487,10 +653,13 @@ threadRoutes.post("/api/v3/comment", async (c) => {
     language: null,
     inReplyTo: inReplyTo.apId ?? urls.object(parentAuthor?.domain ?? c.env.domain.domain, String(inReplyTo.id)),
     communityId: onPost.communityId,
-    rootId: onPost.id,
+    // A reply to a status stays a status reply, so Mastodon apps see it as one.
+    ...(onPost.communityId !== null ? { rootId: onPost.id } : {}),
     parentId: inReplyTo.id,
   });
   await vote(db, created.id, auth.account.id, 1);
+  // Mastodon notifies a reply's target only when it's mentioned.
+  if (onPost.communityId === null && parentAuthor && parentAuthor.id !== auth.account.id) await addMentions(db, created.id, [parentAuthor.id]);
   c.env.activities.enqueue({ kind: "post_created", postId: created.id });
   return commentResponse(c, created.id);
 });
@@ -513,7 +682,8 @@ threadRoutes.post("/api/v3/comment/delete", async (c) => {
   if (!auth) return fail(c, "not_logged_in", 401);
   const params = await body(c);
   const found = await postByIdAny(c.env.bindings.DB, int(params.comment_id) ?? -1);
-  if (!found || found.accountId !== auth.account.id || found.rootId === null) return fail(c, "no_comment_edit_allowed");
+  const isComment = found && (found.rootId !== null || (await statusRootOf(c.env.bindings.DB, found.id)) !== null);
+  if (!found || found.accountId !== auth.account.id || !isComment) return fail(c, "no_comment_edit_allowed");
   if (params.deleted === false) await restorePost(c.env.bindings.DB, found.id);
   else {
     await deletePost(c.env.bindings.DB, found.id);

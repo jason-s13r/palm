@@ -91,8 +91,19 @@ export {
   upsertRemoteCommunity,
 } from "./communities.ts";
 export type { Community, CommunityFollower, CommunityListing, CommunityStats, RemoteCommunity } from "./communities.ts";
-export { currentVote, listThreadComments, listThreadPosts, siteCounts, threadCounts, threadSort, vote } from "./threads.ts";
-export type { CommentListing, PostListing, Scope, Tally, ThreadComment, ThreadPost, ThreadSort } from "./threads.ts";
+export {
+  currentVote,
+  listStatusComments,
+  listStatusPosts,
+  listThreadComments,
+  listThreadPosts,
+  siteCounts,
+  statusRootOf,
+  threadCounts,
+  threadSort,
+  vote,
+} from "./threads.ts";
+export type { CommentListing, PostListing, Scope, StatusListing, Tally, ThreadComment, ThreadPost, ThreadSort } from "./threads.ts";
 export {
   attachMedia,
   deleteMedia,

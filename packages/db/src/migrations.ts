@@ -404,6 +404,13 @@ CREATE TABLE IF NOT EXISTS remote_keys (
 )
 `,
   },
+  {
+    version: 13,
+    name: "replies by parent",
+    sql: `
+CREATE INDEX IF NOT EXISTS posts_parent ON posts (parent_id) WHERE parent_id IS NOT NULL
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

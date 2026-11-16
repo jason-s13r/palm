@@ -51,7 +51,7 @@ import type {
   SearchResponse,
   SuccessResponse,
 } from "lemmy-js-client";
-import { inboxItems, lemmyInboxCounts, personThreads, resolveObject, searchThreads, threadRoutes } from "./threads.ts";
+import { followedPeople, inboxItems, lemmyInboxCounts, personThreads, resolveObject, searchThreads, threadRoutes } from "./threads.ts";
 import { LEMMY_VERSION, myUserInfo, personView, siteView } from "./views.ts";
 
 export { LEMMY_VERSION };
@@ -162,7 +162,10 @@ app.get("/api/v3/site", async (c) => {
     countAccounts(db, domain),
     admins(db, domain),
     siteCounts(db, domain),
-    auth ? subscriptions(db, auth.account.id) : Promise.resolve([]),
+    // Communities subscribed to, and the people followed as person communities.
+    auth
+      ? Promise.all([subscriptions(db, auth.account.id), followedPeople(c, auth.account.id)]).then(([a, b]) => [...a, ...b])
+      : Promise.resolve([]),
   ]);
   const body: GetSiteResponse = {
     site_view: siteView(c.env, { users, ...counts }),

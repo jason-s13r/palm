@@ -245,3 +245,147 @@ export async function siteCounts(db: D1Database, domain: string): Promise<{ post
     .first<{ posts: number; comments: number; communities: number }>();
   return { posts: row?.posts ?? 0, comments: row?.comments ?? 0, communities: row?.communities ?? 0 };
 }
+
+// --- statuses as Lemmy threads ---------------------------------------------
+//
+// A status (a post with no community and no parent) shows in Lemmy apps as a
+// post in its author's "person community", and the replies under it as its
+// comments. Replies to statuses keep root_id empty, so Mastodon timelines see
+// them as they always did; their Lemmy paths are worked out from parent_id.
+
+/** Statuses Lemmy apps can see: public or unlisted, not boosts, not replies. */
+const STATUS_WHERE = `p.community_id IS NULL AND p.root_id IS NULL AND p.parent_id IS NULL AND p.in_reply_to IS NULL
+  AND p.reblog_of IS NULL AND p.deleted_at IS NULL AND p.visibility IN ('public', 'unlisted')`;
+
+/** Replies below a status that Lemmy apps can see. */
+const REPLY_VISIBLE = "x.reblog_of IS NULL AND x.visibility IN ('public', 'unlisted')";
+
+export interface StatusListing {
+  /** Only these authors' statuses. */
+  authorIds?: number[] | undefined;
+  /** Only statuses by people this account follows. */
+  followedBy?: number | undefined;
+  ids?: number[] | undefined;
+  sort: ThreadSort;
+  viewerId: number | null;
+  limit: number;
+  offset: number;
+}
+
+/** Statuses as Lemmy posts, with their counts. */
+export async function listStatusPosts(db: D1Database, listing: StatusListing): Promise<ThreadPost[]> {
+  const where = [STATUS_WHERE];
+  const params: (string | number)[] = [];
+  // ?1 is the viewer; the filters number from ?2.
+  const bind = (sql: string, ...values: (string | number)[]) => {
+    let next = 2 + params.length;
+    params.push(...values);
+    where.push(sql.replace(/\?/g, () => `?${next++}`));
+  };
+  if (listing.authorIds) {
+    if (!listing.authorIds.length) return [];
+    bind(`p.account_id IN (${listing.authorIds.map(() => "?").join(", ")})`, ...listing.authorIds);
+  }
+  if (listing.followedBy !== undefined) {
+    bind("p.account_id IN (SELECT target_id FROM account_follows WHERE account_id = ? AND state = 'accepted')", listing.followedBy);
+  }
+  if (listing.ids) {
+    if (!listing.ids.length) return [];
+    bind(`p.id IN (${listing.ids.map(() => "?").join(", ")})`, ...listing.ids);
+  }
+  const order = {
+    new: "p.id DESC",
+    old: "p.id ASC",
+    top: "(upvotes - downvotes) DESC, p.id DESC",
+    comments: "comment_count DESC, p.id DESC",
+    active: "active_at DESC, p.id DESC",
+  }[listing.sort];
+  const below = `WITH RECURSIVE d(id, created_at) AS (
+      SELECT x.id, x.created_at FROM posts x WHERE x.parent_id = p.id AND x.deleted_at IS NULL AND ${REPLY_VISIBLE}
+      UNION ALL
+      SELECT x.id, x.created_at FROM posts x JOIN d ON x.parent_id = d.id WHERE x.deleted_at IS NULL AND ${REPLY_VISIBLE}
+    )`;
+  const limitAt = 2 + params.length;
+  const { results } = await db
+    .prepare(
+      `SELECT p.*, ${TALLY},
+         (${below} SELECT COUNT(*) FROM d) AS comment_count,
+         COALESCE((${below} SELECT MAX(created_at) FROM d), p.created_at) AS active_at
+       FROM posts p
+       WHERE ${where.join(" AND ")}
+       ORDER BY ${order} LIMIT ?${limitAt} OFFSET ?${limitAt + 1}`,
+    )
+    .bind(listing.viewerId ?? -1, ...params, listing.limit, listing.offset)
+    .all<PostRow & TallyRow & { comment_count: number; active_at: number }>();
+  return results.map((r) => ({ ...toPost(r), ...tally(r), comments: r.comment_count, activeAt: r.active_at }));
+}
+
+/**
+ * The replies under a status as Lemmy comments, each with the path Lemmy
+ * expects ("0.12.15") and the status as its root. Deleted replies stay in
+ * place with their text blanked, as Lemmy shows them.
+ */
+export async function listStatusComments(
+  db: D1Database,
+  rootId: number,
+  options: { viewerId: number | null; maxDepth?: number | undefined; parentId?: number | undefined; sort: ThreadSort },
+): Promise<ThreadComment[]> {
+  const { results } = await db
+    .prepare(
+      `WITH RECURSIVE t(id, path, depth) AS (
+         SELECT x.id, '0.' || x.id, 1 FROM posts x WHERE x.parent_id = ?2 AND ${REPLY_VISIBLE}
+         UNION ALL
+         SELECT x.id, t.path || '.' || x.id, t.depth + 1 FROM posts x JOIN t ON x.parent_id = t.id WHERE t.depth < 50 AND ${REPLY_VISIBLE}
+       )
+       SELECT p.*, ${TALLY}, t.path AS tree_path, t.depth AS tree_depth
+       FROM t JOIN posts p ON p.id = t.id`,
+    )
+    .bind(options.viewerId ?? -1, rootId)
+    .all<PostRow & TallyRow & { tree_path: string; tree_depth: number; deleted_at: number | null }>();
+  let rows = results;
+  if (options.parentId !== undefined) {
+    const parent = rows.find((r) => r.id === options.parentId);
+    if (!parent) return [];
+    rows = rows.filter((r) => r.tree_path.startsWith(`${parent.tree_path}.`));
+    if (options.maxDepth !== undefined) rows = rows.filter((r) => r.tree_depth <= parent.tree_depth + options.maxDepth!);
+  } else if (options.maxDepth !== undefined) {
+    rows = rows.filter((r) => r.tree_depth <= options.maxDepth!);
+  }
+  const live = results.filter((r) => r.deleted_at === null);
+  const comments = rows.map((r): ThreadComment => {
+    const deleted = r.deleted_at !== null;
+    const post = { ...toPost(r), path: r.tree_path, rootId };
+    if (deleted) {
+      post.contentSource = "";
+      post.contentHtml = "";
+    }
+    const childCount = live.filter((x) => x.tree_path.startsWith(`${r.tree_path}.`)).length;
+    return { ...post, ...tally(r), deleted, childCount };
+  });
+  const score = (x: ThreadComment) => x.upvotes - x.downvotes;
+  const compare = {
+    new: (a: ThreadComment, b: ThreadComment) => b.id - a.id,
+    old: (a: ThreadComment, b: ThreadComment) => a.id - b.id,
+    top: (a: ThreadComment, b: ThreadComment) => score(b) - score(a) || a.id - b.id,
+    comments: (a: ThreadComment, b: ThreadComment) => b.childCount - a.childCount || a.id - b.id,
+    active: (a: ThreadComment, b: ThreadComment) => score(b) - score(a) || a.id - b.id,
+  }[options.sort];
+  return comments.sort(compare);
+}
+
+/** The status a reply sits under, if it sits under one. */
+export async function statusRootOf(db: D1Database, postId: number): Promise<number | null> {
+  const row = await db
+    .prepare(
+      `WITH RECURSIVE up(id, parent_id, depth) AS (
+         SELECT id, parent_id, 0 FROM posts WHERE id = ?
+         UNION ALL
+         SELECT p.id, p.parent_id, up.depth + 1 FROM posts p JOIN up ON p.id = up.parent_id WHERE up.depth < 50
+       )
+       SELECT p.id FROM up JOIN posts p ON p.id = up.id
+       WHERE up.parent_id IS NULL AND up.id != ? AND p.community_id IS NULL AND p.root_id IS NULL AND p.in_reply_to IS NULL`,
+    )
+    .bind(postId, postId)
+    .first<{ id: number }>();
+  return row?.id ?? null;
+}
