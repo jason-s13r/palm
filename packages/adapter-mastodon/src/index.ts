@@ -1,4 +1,4 @@
-import { base64url, utf8, verifyPassword } from "@palm/auth";
+import { base64url, hashPassword, needsRehash, utf8, verifyPassword } from "@palm/auth";
 import type { RequestContext } from "@palm/core";
 import {
   accountById,
@@ -11,6 +11,7 @@ import {
   createCode,
   createToken,
   revokeToken,
+  setPasswordHash,
   tokenGrant,
   type Account,
   type OAuthApp,
@@ -205,6 +206,9 @@ app.post("/oauth/authorize", async (c) => {
       401,
     );
   }
+  if (needsRehash(found.passwordHash)) {
+    c.env.waitUntil(hashPassword(p.password ?? "").then((hash) => setPasswordHash(db, found.account.id, hash)));
+  }
   const code = await createCode(db, {
     appId: request.client.id,
     accountId: found.account.id,
@@ -343,6 +347,21 @@ app.get("/api/v2/notifications", (c) => c.json({ accounts: [], statuses: [], not
 app.get("/api/v2/notifications/unread_count", (c) => c.json({ count: 0 }));
 app.get("/api/v1/notifications/unread_count", (c) => c.json({ count: 0 }));
 app.get("/api/v2/search", (c) => c.json({ accounts: [], statuses: [], hashtags: [] }));
+app.get("/api/v1/instance/translation_languages", (c) => c.json({}));
+app.get("/api/v2/notifications/policy", (c) =>
+  c.json({
+    for_not_following: "accept",
+    for_not_followers: "accept",
+    for_new_accounts: "accept",
+    for_private_mentions: "accept",
+    for_limited_accounts: "filter",
+    summary: { pending_requests_count: 0, pending_notifications_count: 0 },
+  }),
+);
+// Push needs a relay per app (Ivory, Ice Cubes...) and VAPID keys; until then,
+// answer as a Mastodon server with no subscription would, without logging it.
+app.get("/api/v1/push/subscription", (c) => fail(c, "Record not found", 404));
+app.post("/api/v1/push/subscription", (c) => fail(c, "Push notifications aren't available on this server yet", 422));
 
 app.all("/api/*", (c) => {
   console.warn(JSON.stringify({ palm: "unknown_endpoint", api: "mastodon", method: c.req.method, path: c.req.path }));
