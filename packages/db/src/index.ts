@@ -17,3 +17,16 @@ export {
   tokenGrant,
 } from "./sessions.ts";
 export type { CodeGrant, OAuthApp, TokenGrant } from "./sessions.ts";
+export {
+  actorKeys,
+  addFollower,
+  countFollowers,
+  followers,
+  kvDelete,
+  kvGet,
+  kvList,
+  kvPurgeExpired,
+  kvSet,
+  removeFollower,
+} from "./federation.ts";
+export type { Follower, KeyAlgorithm, StoredKeyPair } from "./federation.ts";

@@ -79,6 +79,38 @@ CREATE TABLE IF NOT EXISTS oauth_tokens (
 CREATE INDEX IF NOT EXISTS oauth_tokens_account ON oauth_tokens (account_id)
 `,
   },
+  {
+    version: 2,
+    name: "actor keys, followers and fedify's key-value store",
+    sql: `
+CREATE TABLE IF NOT EXISTS actor_keys (
+  account_id INTEGER NOT NULL REFERENCES accounts (id),
+  algorithm TEXT NOT NULL CHECK (algorithm IN ('RSASSA-PKCS1-v1_5', 'Ed25519')),
+  public_jwk TEXT NOT NULL,
+  private_jwk TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (account_id, algorithm)
+)
+;
+CREATE TABLE IF NOT EXISTS followers (
+  account_id INTEGER NOT NULL REFERENCES accounts (id),
+  actor_id TEXT NOT NULL,
+  inbox TEXT NOT NULL,
+  shared_inbox TEXT,
+  follow_id TEXT,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (account_id, actor_id)
+)
+;
+CREATE TABLE IF NOT EXISTS fedify_kv (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  expires_at INTEGER
+)
+;
+CREATE INDEX IF NOT EXISTS fedify_kv_expires ON fedify_kv (expires_at) WHERE expires_at IS NOT NULL
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;
