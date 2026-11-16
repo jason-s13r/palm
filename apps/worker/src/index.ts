@@ -88,12 +88,27 @@ export async function handle(
     case "mastodon":
       return handleMastodon(request, ctx);
     case "federation":
-      // The Lemmy API answers on the bare domain as well as its own host:
-      // Lemmy apps (Voyager) talk to the handle's domain once signed in.
-      // Mastodon's API stays on its own host only.
+      // Both client APIs answer on the bare domain as well as their own hosts.
+      // Apps show the handle with the host they signed in to (Voyager and the
+      // Mastodon app both do), so signing in with the bare domain gives
+      // @name@domain. Their paths don't overlap: Lemmy's API is /api/v3,
+      // Mastodon's /api/v1 and /api/v2. Discovery (WebFinger, nodeinfo) stays
+      // with federation, which answers nodeinfo as Lemmy.
       if (url.pathname.startsWith("/api/v3/")) return handleLemmy(request, ctx);
+      if (isMastodonPath(url.pathname)) return handleMastodon(request, ctx);
       return handleFederation(request, ctx, (req) => federationFallback(config, req, new URL(req.url)));
   }
+}
+
+/** Paths the Mastodon API owns on the bare domain. */
+function isMastodonPath(path: string): boolean {
+  return (
+    path.startsWith("/api/v1/") ||
+    path.startsWith("/api/v2/") ||
+    path.startsWith("/oauth/") ||
+    path === "/.well-known/oauth-authorization-server" ||
+    /^\/@[^/]+(\/[0-9]+)?$/.test(path)
+  );
 }
 
 function federationFallback(config: PalmConfig, request: Request, url: URL): Response {

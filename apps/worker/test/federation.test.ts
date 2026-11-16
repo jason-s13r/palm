@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createAccount, giveKeys, worker } from "./helpers.ts";
+import { createAccount, giveKeys, mastodonToken, worker } from "./helpers.ts";
 
 const DOMAIN = "https://palm.test";
 const AP = { headers: { accept: "application/activity+json" } };
@@ -60,8 +60,22 @@ describe("federation", () => {
     expect(res.status).toBeGreaterThanOrEqual(400);
   });
 
-  it("serves the Lemmy API on the bare domain, and leaves Mastodon's to its own host", async () => {
+  it("serves both client APIs on the bare domain, and keeps nodeinfo as Lemmy", async () => {
     expect((await worker.fetch(`${DOMAIN}/api/v3/site`)).status).toBe(200);
-    expect((await worker.fetch(`${DOMAIN}/api/v2/instance`)).status).toBe(404);
+    const instance = await (await worker.fetch(`${DOMAIN}/api/v2/instance`)).json<{ domain: string }>();
+    expect(instance.domain).toBe("palm.test");
+    expect((await worker.fetch(`${DOMAIN}/.well-known/oauth-authorization-server`)).status).toBe(200);
+    const links = await (await worker.fetch(`${DOMAIN}/.well-known/nodeinfo`)).json<{ links: { href: string }[] }>();
+    const nodeinfo = await (await worker.fetch(links.links[0]!.href)).json<{ software: { name: string } }>();
+    expect(nodeinfo.software.name).toBe("lemmy");
+  });
+
+  it("gives accounts signed in on the bare domain a url there, so apps show @name@domain", async () => {
+    const id = await createAccount("rua", "pw");
+    const token = await mastodonToken(id);
+    const me = await (
+      await worker.fetch(`${DOMAIN}/api/v1/accounts/verify_credentials`, { headers: { authorization: `Bearer ${token}` } })
+    ).json<{ url: string }>();
+    expect(me.url).toBe("https://palm.test/@rua");
   });
 });
