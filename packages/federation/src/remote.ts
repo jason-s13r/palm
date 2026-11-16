@@ -6,6 +6,7 @@ import {
   traverseCollection,
   Document,
   Group,
+  Hashtag,
   Image,
   Link,
   Mention,
@@ -26,6 +27,7 @@ import {
   accountForLogin,
   markOutboxFetched,
   addMentions,
+  addTags,
   communityByApId,
   communityByName,
   createPost,
@@ -259,6 +261,7 @@ export async function storeRemotePost(
 
   const tags = await collect(object.getTags());
   const localMentions: Account[] = [];
+  const hashtags = tags.filter((t): t is Hashtag => t instanceof Hashtag).map((t) => String(t.name ?? "")).filter(Boolean);
   for (const tag of tags) {
     if (tag instanceof Mention && tag.href) {
       const found = await ensureAccount(fctx, tag.href).catch(() => null);
@@ -323,6 +326,7 @@ export async function storeRemotePost(
   // Lemmy counts an author's own post or comment as upvoted, without sending a vote for it.
   if (post.communityId) await vote(db, post.id, author.id, 1);
   if (localMentions.length) await addMentions(db, post.id, localMentions.map((m) => m.id));
+  if (hashtags.length) await addTags(db, post.id, hashtags);
   for (const m of localMentions) await notify(db, { accountId: m.id, kind: "mention", fromAccountId: author.id, postId: post.id });
   if (parent) {
     const parentAuthorLocal = await accountByIdLocal(db, parent.accountId);

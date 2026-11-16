@@ -1,4 +1,4 @@
-import { Create, Document, Link, Mention, Note, Page, PUBLIC_COLLECTION, Source, Tombstone, type Object as APObject } from "@fedify/fedify/vocab";
+import { Create, Document, Hashtag, Link, Mention, Note, Page, PUBLIC_COLLECTION, Source, Tombstone, type Object as APObject } from "@fedify/fedify/vocab";
 import { urls } from "@palm/core";
 import {
   accountById,
@@ -8,6 +8,7 @@ import {
   mentionedIds,
   postById,
   postByIdAny,
+  tagsFor,
   type Account,
   type Community,
   type Media,
@@ -38,18 +39,20 @@ export interface PostParts {
   parent: { post: Post; author: Account } | null;
   media: Media[];
   mentions: Account[];
+  tags: string[];
 }
 
 /** Loads a post and what its object needs; deleted posts too, for Delete. */
 export async function postParts(db: D1Database, postId: number): Promise<PostParts | null> {
   const post = await postByIdAny(db, postId);
   if (!post) return null;
-  const [author, community, parentPost, media, mentioned] = await Promise.all([
+  const [author, community, parentPost, media, mentioned, tags] = await Promise.all([
     accountById(db, post.accountId),
     post.communityId ? communityById(db, post.communityId) : Promise.resolve(null),
     post.parentId ? postById(db, post.parentId) : Promise.resolve(null),
     mediaForPosts(db, [post.id]),
     mentionedIds(db, [post.id]),
+    tagsFor(db, [post.id]),
   ]);
   if (!author) return null;
   const parentAuthor = parentPost ? await accountById(db, parentPost.accountId) : null;
@@ -61,6 +64,7 @@ export async function postParts(db: D1Database, postId: number): Promise<PostPar
     parent: parentPost && parentAuthor ? { post: parentPost, author: parentAuthor } : null,
     media: media.get(post.id) ?? [],
     mentions,
+    tags: tags.get(post.id) ?? [],
   };
 }
 
@@ -116,7 +120,10 @@ export function objectFor(parts: PostParts): Note | Page {
     ...(post.updatedAt ? { updated: instant(post.updatedAt) } : {}),
     replyTarget: parent ? postUri(parent.post, parent.author) : post.inReplyTo ? new URL(post.inReplyTo) : null,
     attachments,
-    tags: mentions.map((m) => new Mention({ href: actorUri(m), name: `@${m.username}@${m.domain}` })),
+    tags: [
+      ...mentions.map((m) => new Mention({ href: actorUri(m), name: `@${m.username}@${m.domain}` })),
+      ...parts.tags.map((t) => new Hashtag({ href: new URL(urls.tag(author.domain, t)), name: `#${t}` })),
+    ],
   };
   return post.title && post.rootId === null ? new Page({ ...values, name: post.title }) : new Note(values);
 }
