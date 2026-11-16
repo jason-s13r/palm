@@ -1,4 +1,4 @@
-import { textToHtml, urls, type RequestContext } from "@palm/core";
+import { markdownToHtml, urls, type RequestContext } from "@palm/core";
 import {
   accountById,
   accountsByIds,
@@ -341,7 +341,7 @@ threadRoutes.post("/api/v3/post", async (c) => {
   const created = await createPost(db, {
     accountId: auth.account.id,
     contentSource: text,
-    contentHtml: textToHtml(text),
+    contentHtml: markdownToHtml(text),
     spoilerText: "",
     sensitive: bool(params.nsfw),
     visibility: "public",
@@ -372,7 +372,7 @@ threadRoutes.put("/api/v3/post", async (c) => {
   const text = str(params.body) ?? found.contentSource;
   const link = str(params.url)?.trim();
   if (link && !/^https?:\/\/\S+$/.test(link)) return fail(c, "invalid_url");
-  await editPost(c.env.bindings.DB, found.id, { contentSource: text, contentHtml: textToHtml(text), title: title ?? null, linkUrl: link || null });
+  await editPost(c.env.bindings.DB, found.id, { contentSource: text, contentHtml: markdownToHtml(text), title: title ?? null, linkUrl: link || null });
   c.env.activities.enqueue({ kind: "post_updated", postId: found.id });
   return postResponse(c, found.id);
 });
@@ -474,7 +474,7 @@ threadRoutes.post("/api/v3/comment", async (c) => {
   const created = await createPost(db, {
     accountId: auth.account.id,
     contentSource: text,
-    contentHtml: textToHtml(text),
+    contentHtml: markdownToHtml(text),
     spoilerText: "",
     sensitive: false,
     visibility: "public",
@@ -497,7 +497,7 @@ threadRoutes.put("/api/v3/comment", async (c) => {
   if (!found || found.deleted || found.accountId !== auth.account.id) return fail(c, "no_comment_edit_allowed");
   const text = str(params.content)?.trim() ?? "";
   if (!text || text.length > MAX_BODY) return fail(c, "invalid_body_field");
-  await editPost(c.env.bindings.DB, found.id, { contentSource: text, contentHtml: textToHtml(text) });
+  await editPost(c.env.bindings.DB, found.id, { contentSource: text, contentHtml: markdownToHtml(text) });
   c.env.activities.enqueue({ kind: "post_updated", postId: found.id });
   return commentResponse(c, found.id);
 });

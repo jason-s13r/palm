@@ -113,7 +113,10 @@ export function siteView(ctx: RequestContext, counts: SiteCounts): SiteView {
     captcha_enabled: false,
     captcha_difficulty: "medium",
     published,
-    registration_mode: "Closed",
+    // With invites, sign-up asks for the code as Lemmy's "application" answer.
+    ...(ctx.config.registration === "invite"
+      ? { registration_mode: "RequireApplication" as const, application_question: "Your invite code" }
+      : { registration_mode: "Closed" as const }),
     reports_email_admins: false,
     federation_signed_fetch: true,
     default_post_listing_mode: "List",

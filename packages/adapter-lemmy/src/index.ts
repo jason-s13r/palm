@@ -5,6 +5,18 @@ import {
   accountById,
   accountForLogin,
   markNotificationsRead,
+  updateProfile,
+  bannedAccounts,
+  blockedDomains,
+  deletePost,
+  deletePostsBy,
+  knownDomains,
+  openInvite,
+  postByIdAny,
+  redeemInvite,
+  restorePost,
+  setBanned,
+  setBlockedDomains,
   admins,
   countAccounts,
   createSession,
@@ -53,7 +65,7 @@ interface Auth {
 }
 
 /** Lemmy answers every error as {"error": "<snake_case_reason>"}. */
-const fail = (c: C, error: string, status: 400 | 401 | 404 = 400) => c.json({ error }, status);
+const fail = (c: C, error: string, status: 400 | 401 | 403 | 404 = 400) => c.json({ error }, status);
 
 /**
  * The JWT a Lemmy app sends: the Authorization header on 0.19, and the older
@@ -77,7 +89,7 @@ async function authenticate(c: C, token: string | null): Promise<Auth | null> {
   const accountId = await sessionAccount(db, claims.sid);
   if (accountId === null || String(accountId) !== claims.sub) return null;
   const account = await accountById(db, accountId);
-  return account && account.domain === c.env.domain.domain ? { account, sessionId: claims.sid } : null;
+  return account && account.domain === c.env.domain.domain && !account.banned ? { account, sessionId: claims.sid } : null;
 }
 
 const app = new Hono<Env>();
@@ -179,18 +191,99 @@ app.post("/api/v3/user/login", async (c) => {
   if (!found?.passwordHash || !(await verifyPassword(body.password, found.passwordHash))) {
     return fail(c, "incorrect_login");
   }
+  if (found.account.banned) return fail(c, "site_ban");
   if (needsRehash(found.passwordHash)) {
     c.env.waitUntil(hashPassword(body.password).then((hash) => setPasswordHash(db, found.account.id, hash)));
   }
-  const sessionId = await createSession(db, found.account.id, "lemmy");
+  return c.json(await loginResponse(c, found.account));
+});
+
+/** A session and its JWT for an account that has just proved who it is. */
+async function loginResponse(c: C, account: Account): Promise<LoginResponse> {
+  const db = c.env.bindings.DB;
+  const sessionId = await createSession(db, account.id, "lemmy");
   const jwt = await signJwt(
     // iss is the host the app signed in on, as Lemmy does: Voyager reads it to
     // know which server to talk to, so it must be the Lemmy API host.
-    { sub: String(found.account.id), sid: sessionId, iss: c.env.host, iat: Math.floor(Date.now() / 1000) },
+    { sub: String(account.id), sid: sessionId, iss: c.env.host, iat: Math.floor(Date.now() / 1000) },
     await instanceSecret(db, "lemmy-jwt"),
   );
-  const response: LoginResponse = { jwt, registration_created: false, verify_email_sent: false };
-  return c.json(response);
+  return { jwt, registration_created: false, verify_email_sent: false };
+}
+
+// Sign-up with an invite code, which Lemmy apps send as the application answer.
+app.post("/api/v3/user/register", async (c) => {
+  if (c.env.config.registration !== "invite") return fail(c, "registration_closed");
+  const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+  const username = typeof body.username === "string" ? body.username.trim() : "";
+  const password = typeof body.password === "string" ? body.password : "";
+  const code = typeof body.answer === "string" ? body.answer.trim() : "";
+  if (!/^[a-zA-Z0-9_]{1,20}$/.test(username)) return fail(c, "invalid_name");
+  if (password.length < 10 || password.length > 60) return fail(c, "invalid_password");
+  if (body.password_verify !== undefined && body.password_verify !== password) return fail(c, "passwords_dont_match");
+  const db = c.env.bindings.DB;
+  const invite = await openInvite(db, c.env.domain.domain, code);
+  if (!invite) return fail(c, "registration_application_answer_required");
+  const account = await redeemInvite(db, invite, { domain: c.env.domain.domain, username, passwordHash: await hashPassword(password) });
+  if (!account) return fail(c, "user_already_exists");
+  return c.json(await loginResponse(c, account));
+});
+
+// --- moderation, for admins ---------------------------------------------------------
+
+/** The signed-in admin, or null. */
+const adminOf = (c: C) => {
+  const auth = c.get("auth");
+  return auth?.account.role === "admin" ? auth.account : null;
+};
+
+app.post("/api/v3/user/ban", async (c) => {
+  const admin = adminOf(c);
+  if (!admin) return fail(c, "not_an_admin", 403);
+  type Ban = { person_id?: number; ban?: boolean; remove_data?: boolean };
+  const body = await c.req.json<Ban>().catch((): Ban => ({}));
+  const db = c.env.bindings.DB;
+  const target = body.person_id === undefined ? null : await accountById(db, body.person_id);
+  if (!target || target.id === admin.id) return fail(c, "couldnt_find_person", 404);
+  await setBanned(db, target.id, body.ban !== false);
+  if (body.ban !== false && body.remove_data) await deletePostsBy(db, target.id);
+  return c.json({ person_view: personView(c.env, (await accountById(db, target.id))!), banned: body.ban !== false });
+});
+
+app.get("/api/v3/user/banned", async (c) => {
+  if (!adminOf(c)) return fail(c, "not_an_admin", 403);
+  return c.json({ banned: (await bannedAccounts(c.env.bindings.DB)).map((a) => personView(c.env, a)) });
+});
+
+// Removing a post or comment as an admin: it's deleted here, and other servers hear if it was local.
+for (const [path, field] of [
+  ["/api/v3/post/remove", "post_id"],
+  ["/api/v3/comment/remove", "comment_id"],
+] as const) {
+  app.post(path, async (c) => {
+    if (!adminOf(c)) return fail(c, "not_an_admin", 403);
+    const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+    const id = typeof body[field] === "number" ? (body[field] as number) : -1;
+    const db = c.env.bindings.DB;
+    const post = await postByIdAny(db, id);
+    if (!post) return fail(c, field === "post_id" ? "couldnt_find_post" : "couldnt_find_comment", 404);
+    if (body.removed === false) await restorePost(db, post.id);
+    else {
+      await deletePost(db, post.id);
+      if (!post.apId) c.env.activities.enqueue({ kind: "post_deleted", postId: post.id });
+    }
+    return c.json({ success: true });
+  });
+}
+
+// Blocking other servers is Lemmy's site setting blocked_instances.
+app.put("/api/v3/site", async (c) => {
+  if (!adminOf(c)) return fail(c, "not_an_admin", 403);
+  const body = await c.req.json<{ blocked_instances?: unknown }>().catch(() => ({}) as { blocked_instances?: unknown });
+  if (Array.isArray(body.blocked_instances)) await setBlockedDomains(c.env.bindings.DB, body.blocked_instances.map(String));
+  const db = c.env.bindings.DB;
+  const [users, counts] = await Promise.all([countAccounts(db, c.env.domain.domain), siteCounts(db, c.env.domain.domain)]);
+  return c.json({ site_view: siteView(c.env, { users, ...counts }), taglines: [] });
 });
 
 app.post("/api/v3/user/logout", async (c) => {
@@ -217,6 +310,28 @@ app.get("/api/v3/user", async (c) => {
   const [counts, threads] = await Promise.all([threadCounts(db, account.id), personThreads(c, account.id)]);
   const body: GetPersonDetailsResponse = { person_view: personView(c.env, account, counts), ...threads, moderates: [] };
   return c.json(body);
+});
+
+// Profile settings: Lemmy apps edit the display name, bio, avatar and banner here.
+app.put("/api/v3/user/save_user_settings", async (c) => {
+  const auth = c.get("auth");
+  if (!auth) return fail(c, "not_logged_in", 401);
+  const params = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+  const textOf = (name: string) => (typeof params[name] === "string" ? (params[name] as string).trim() : undefined);
+  const imageOf = (name: string) => {
+    const value = textOf(name);
+    return value === undefined ? undefined : /^https?:\/\//.test(value) ? value : null;
+  };
+  const displayName = textOf("display_name");
+  const bio = textOf("bio");
+  await updateProfile(c.env.bindings.DB, auth.account.id, {
+    ...(displayName !== undefined ? { displayName: displayName || null } : {}),
+    ...(bio !== undefined ? { bio: bio || null } : {}),
+    avatarUrl: imageOf("avatar"),
+    headerUrl: imageOf("banner"),
+  });
+  c.env.activities.enqueue({ kind: "profile_updated", accountId: auth.account.id });
+  return c.json({ success: true } satisfies SuccessResponse);
 });
 
 /** A person by name: "jason", "jason@this.domain", or a remote "name@host", fetched if new. */
@@ -287,9 +402,14 @@ app.get("/api/v3/comment/report/list", (c) => c.json({ comment_reports: [] }));
 app.get("/api/v3/post/report/list", (c) => c.json({ post_reports: [] }));
 app.get("/api/v3/private_message/report/list", (c) => c.json({ private_message_reports: [] }));
 app.get("/api/v3/private_message/list", (c) => c.json({ private_messages: [] } satisfies PrivateMessagesResponse));
-app.get("/api/v3/federated_instances", (c) =>
-  c.json({ federated_instances: { linked: [], allowed: [], blocked: [] } } satisfies GetFederatedInstancesResponse),
-);
+app.get("/api/v3/federated_instances", async (c) => {
+  const db = c.env.bindings.DB;
+  const [linked, blocked] = await Promise.all([knownDomains(db), blockedDomains(db)]);
+  const instance = (domain: string, i: number) => ({ id: i + 2, domain, published: new Date(0).toISOString() });
+  return c.json({
+    federated_instances: { linked: linked.map(instance), allowed: [], blocked: blocked.map(instance) },
+  } satisfies GetFederatedInstancesResponse);
+});
 app.get("/api/v3/search", async (c) => {
   const type = c.req.query("type_") ?? "All";
   const query = c.req.query("q")?.trim() ?? "";
