@@ -125,7 +125,7 @@ app.get("/pictrs/image/delete/:token/:file", async (c) => {
 });
 
 app.on(["GET", "HEAD"], "/pictrs/image/:file", async (c) => {
-  const response = await mediaResponse(c.env.bindings.MEDIA, c.req.param("file"), c.req.method);
+  const response = await mediaResponse(c.env.bindings.MEDIA, c.req.param("file"), c.req.raw);
   return response ?? c.json({ msg: "not_found" }, 404);
 });
 
