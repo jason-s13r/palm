@@ -1,4 +1,4 @@
-import { urls, type RequestContext } from "@palm/core";
+import { escapeHtml, textToHtml, urls, type RequestContext } from "@palm/core";
 import {
   accountById,
   countFollowers,
@@ -17,7 +17,7 @@ import {
   type Visibility,
 } from "@palm/db";
 import { Hono, type Context } from "hono";
-import { account, escapeHtml, iso, type AccountStats } from "./views.ts";
+import { account, iso, type AccountStats } from "./views.ts";
 
 type Env = { Bindings: RequestContext; Variables: { account: Account | null; app: OAuthApp | null } };
 type C = Context<Env>;
@@ -38,25 +38,18 @@ function localPostId(ctx: RequestContext, uri: string | null): number | null {
   return /^\d+$/.test(id) ? Number(id) : null;
 }
 
+export { textToHtml };
+
 /**
- * Plain text, as apps send it, to the HTML Mastodon expects: escaped, blank
- * lines become paragraphs, line breaks become <br>, and links are linked.
+ * A post's HTML as a status. A Lemmy post leads with its title and link, as
+ * Mastodon shows a Lemmy post that federates in.
  */
-export function textToHtml(text: string): string {
-  const linkify = (line: string) =>
-    escapeHtml(line).replace(/https?:\/\/[^\s<]+/g, (match) => {
-      // Trailing punctuation usually ends the sentence, not the link.
-      const url = match.replace(/[.,;:!?)\]'"]+$/, "");
-      const rest = match.slice(url.length);
-      const shown = url.replace(/^https?:\/\//, "");
-      return `<a href="${url}" rel="nofollow noopener" target="_blank">${shown}</a>${rest}`;
-    });
-  return text
-    .replaceAll("\r\n", "\n")
-    .trim()
-    .split(/\n{2,}/)
-    .map((para) => `<p>${para.split("\n").map(linkify).join("<br>")}</p>`)
-    .join("");
+export function statusHtml(post: Post): string {
+  if (!post.title) return post.contentHtml;
+  const link = post.linkUrl
+    ? `<p><a href="${escapeHtml(post.linkUrl)}" rel="nofollow noopener" target="_blank">${escapeHtml(post.linkUrl)}</a></p>`
+    : "";
+  return `<p><strong>${escapeHtml(post.title)}</strong></p>${link}${post.contentHtml}`;
 }
 
 /** Whether `viewer` may see `post`. Followers-only needs the follow graph; for now only the author. */
@@ -118,7 +111,7 @@ async function statuses(ctx: RequestContext, posts: Post[]) {
         muted: false,
         bookmarked: false,
         pinned: false,
-        content: post.contentHtml,
+        content: statusHtml(post),
         filtered: [],
         reblog: null,
         application: null,
