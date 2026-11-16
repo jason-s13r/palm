@@ -23,6 +23,8 @@ export interface Account {
   actorType: string | null;
   /** When a remote account was last fetched. */
   fetchedAt: number | null;
+  /** Banned accounts can't sign in, and other servers' banned people are ignored. */
+  banned: boolean;
 }
 
 interface AccountRow {
@@ -42,10 +44,11 @@ interface AccountRow {
   header_url: string | null;
   actor_type: string | null;
   fetched_at: number | null;
+  banned_at?: number | null;
 }
 
 const COLUMNS =
-  "id, domain, username, display_name, bio, password_hash, role, created_at, ap_id, inbox, shared_inbox, profile_url, avatar_url, header_url, actor_type, fetched_at";
+  "id, domain, username, display_name, bio, password_hash, role, created_at, ap_id, inbox, shared_inbox, profile_url, avatar_url, header_url, actor_type, fetched_at, banned_at";
 
 export function toAccount(row: AccountRow): Account {
   return {
@@ -64,6 +67,7 @@ export function toAccount(row: AccountRow): Account {
     headerUrl: row.header_url ?? null,
     actorType: row.actor_type ?? null,
     fetchedAt: row.fetched_at ?? null,
+    banned: row.banned_at != null,
   };
 }
 

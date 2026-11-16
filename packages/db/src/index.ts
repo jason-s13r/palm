@@ -125,3 +125,17 @@ export {
   unfollow,
 } from "./social.ts";
 export type { FollowState, Interactions, Notification, NotificationKind } from "./social.ts";
+export {
+  bannedAccounts,
+  blockedDomains,
+  deletePostsBy,
+  isBanned,
+  isBlockedHost,
+  knownDomains,
+  openInvite,
+  prune,
+  redeemInvite,
+  setBanned,
+  setBlockedDomains,
+} from "./moderation.ts";
+export type { InviteKeyPair } from "./moderation.ts";

@@ -326,6 +326,28 @@ CREATE TABLE IF NOT EXISTS mentions (
 )
 `,
   },
+  {
+    version: 7,
+    name: "moderation and invites",
+    sql: `
+ALTER TABLE accounts ADD COLUMN banned_at INTEGER
+;
+CREATE TABLE IF NOT EXISTS blocked_domains (
+  domain TEXT PRIMARY KEY,
+  reason TEXT,
+  created_at INTEGER NOT NULL
+)
+;
+CREATE TABLE IF NOT EXISTS invites (
+  code TEXT PRIMARY KEY,
+  domain TEXT NOT NULL,
+  key_pairs TEXT NOT NULL,
+  used_by INTEGER REFERENCES accounts (id),
+  used_at INTEGER,
+  created_at INTEGER NOT NULL
+)
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;
