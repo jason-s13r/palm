@@ -81,6 +81,8 @@ export type FederationTask =
 export const urls = {
   user: (domain: string, username: string) => `https://${domain}/users/${encodeURIComponent(username.toLowerCase())}`,
   object: (domain: string, id: string) => `https://${domain}/objects/${encodeURIComponent(id)}`,
+  /** A hashtag's page, as Mastodon names it. */
+  tag: (domain: string, tag: string) => `https://${domain}/tags/${encodeURIComponent(tag)}`,
   /** An uploaded file, at the path Lemmy's image host (pict-rs) uses. */
   media: (domain: string, file: string) => `https://${domain}/pictrs/image/${encodeURIComponent(file)}`,
   /** A community, as Lemmy names them: `!name@domain` lives at /c/name. */

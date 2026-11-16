@@ -6,9 +6,18 @@ const escapeHtml = (text: string) =>
  * blank lines become paragraphs, line breaks become <br>, and links are
  * linked. Lemmy's Markdown reads as plain text here until palm renders it.
  */
-export function textToHtml(text: string, mentions: ReadonlyMap<string, string> = new Map()): string {
+export function textToHtml(
+  text: string,
+  mentions: ReadonlyMap<string, string> = new Map(),
+  tagUrl?: (tag: string) => string,
+): string {
   const linkify = (line: string) =>
     escapeHtml(line)
+      .replace(HASHTAG, (match, before: string, tag: string) =>
+        tagUrl
+          ? `${before}<a href="${escapeHtml(tagUrl(tag.toLowerCase()))}" class="mention hashtag" rel="tag">#<span>${tag}</span></a>`
+          : match,
+      )
       .replace(MENTION, (match, before: string, handle: string) => {
         // A mention palm resolved links to the person's profile, as Mastodon writes it.
         const url = mentions.get(handle.toLowerCase());
@@ -36,6 +45,14 @@ export { escapeHtml };
 
 /** "@name" or "@name@host" in text, not inside an email address or a word. */
 const MENTION = /(^|[^\w@\/])@([a-z0-9_]+(?:[.-][a-z0-9_]+)*(?:@[a-z0-9-]+(?:\.[a-z0-9-]+)+)?)/gi;
+
+/** "#tag" in text, not inside a word or a link's fragment. */
+const HASHTAG = /(^|[^\w&#/])#([\p{L}\p{N}_]*\p{L}[\p{L}\p{N}_]*)/gu;
+
+/** The hashtags in a text, lowercased and without the #. */
+export function hashtagsIn(text: string): string[] {
+  return [...new Set([...text.matchAll(HASHTAG)].map((m) => m[2]!.toLowerCase()))];
+}
 
 /** The handles a text mentions, lowercased: "name" for local, "name@host" for remote. */
 export function mentionsIn(text: string): string[] {
