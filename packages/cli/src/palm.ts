@@ -14,8 +14,14 @@
  *
  * Without --password it generates one and prints it once. Without --db it
  * prints the SQL instead of running it.
+ *
+ * Run from an instance repo, --domain and --db default to the "palm" field of
+ * its package.json ({ "palm": { "domain": "...", "db": "..." } }), or to the
+ * PALM_DOMAIN and PALM_DB environment variables, so `pnpm palm user create
+ * jason --admin` is enough there. Flags win over both.
  */
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { parseArgs } from "node:util";
 import { hashPassword } from "@palm/auth";
@@ -26,7 +32,36 @@ const USAGE = [
   "  pnpm palm user keys <username> --domain <domain> [--db <d1-name>] [--local]",
   "  pnpm palm community create <name> --domain <domain> [--db <d1-name>] [--title <title>] [--description <text>] [--local]",
   "  pnpm palm invite create --domain <domain> [--db <d1-name>] [--count <n>] [--local]",
+  "",
+  "From an instance repo, --domain and --db default to its package.json's",
+  '"palm": { "domain": ..., "db": ... }, or PALM_DOMAIN and PALM_DB.',
 ].join("\n");
+
+/** The instance this directory manages, from its package.json or the environment. */
+function instanceDefaults(): { domain?: string; db?: string } {
+  let fromPackage: { domain?: unknown; db?: unknown } = {};
+  try {
+    const pkg = JSON.parse(readFileSync("package.json", "utf8")) as { palm?: { domain?: unknown; db?: unknown } };
+    fromPackage = pkg.palm ?? {};
+  } catch {
+    // No package.json here, or not JSON: no defaults from it.
+  }
+  const pick = (env: string | undefined, value: unknown) => env || (typeof value === "string" && value ? value : undefined);
+  const domain = pick(process.env.PALM_DOMAIN, fromPackage.domain);
+  const db = pick(process.env.PALM_DB, fromPackage.db);
+  return { ...(domain ? { domain } : {}), ...(db ? { db } : {}) };
+}
+
+/** Command arguments with the instance's --domain and --db filled in when not given. */
+function withDefaults(args: string[]): string[] {
+  const defaults = instanceDefaults();
+  const has = (flag: string) => args.some((a) => a === `--${flag}` || a.startsWith(`--${flag}=`));
+  return [
+    ...args,
+    ...(defaults.domain && !has("domain") ? ["--domain", defaults.domain] : []),
+    ...(defaults.db && !has("db") ? ["--db", defaults.db] : []),
+  ];
+}
 
 const sqlString = (value: string) => `'${value.replaceAll("'", "''")}'`;
 
@@ -173,7 +208,8 @@ async function inviteCreate(args: string[]): Promise<void> {
 }
 
 async function main(argv: string[]): Promise<void> {
-  const [group, command, ...rest] = argv;
+  const [group, command, ...given] = argv;
+  const rest = withDefaults(given);
   if (group === "user" && command === "create") return userCreate(rest);
   if (group === "user" && command === "keys") return userKeys(rest);
   if (group === "community" && command === "create") return communityCreate(rest);

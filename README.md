@@ -102,11 +102,19 @@ Node 22+ and pnpm.
    queue named in `wrangler.jsonc`. Then visit
    `https://your.domain/.well-known/nodeinfo` once so the tables exist.
 
-5. **Make the first account** from a clone of this repo (the CLI talks to D1
-   through wrangler, so be logged in with `npx wrangler login`):
+5. **Make the first account.** The package carries palm's admin CLI as its
+   `palm` bin. Give the instance repo a `palm` script and its defaults:
+
+   ```json
+   "scripts": { "palm": "palm" },
+   "palm": { "domain": "your.domain", "db": "your-palm" }
+   ```
+
+   Then, logged in with `npx wrangler login` (the CLI talks to D1 through
+   wrangler):
 
    ```sh
-   pnpm palm user create you --domain your.domain --db your-palm --admin
+   pnpm palm user create you --admin
    ```
 
    It prints a generated password once. Sign in from Voyager or a Mastodon
@@ -115,12 +123,13 @@ Node 22+ and pnpm.
 6. **Invite people.** Each invite carries signing keys for whoever uses it:
 
    ```sh
-   pnpm palm invite create --domain your.domain --db your-palm --count 3
+   pnpm palm invite create --count 3
    ```
 
    Lemmy apps take the code as the sign-up answer; Mastodon apps as the
    reason. Communities are made the same way:
-   `pnpm palm community create sandbox --domain your.domain --db your-palm`.
+   `pnpm palm community create sandbox --title Sandbox`. `--domain` and `--db`
+   override the defaults, and without a database the CLI prints the SQL.
 
 If the domain already serves a website, palm needs the whole host: put the
 site on `www.` or another domain, and set `browserRedirect` to it.

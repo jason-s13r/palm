@@ -44,7 +44,10 @@ cron prunes old remote posts nobody here touched.
   `pnpm palm user keys ...`, `pnpm palm community create ...`,
   `pnpm palm invite create ...`). Signing keys are generated here, not in the
   Worker, because key generation is too slow for the free CPU limit; invites
-  carry a key pair for whoever signs up with them.
+  carry a key pair for whoever signs up with them. The worker package ships
+  it bundled as its `palm` bin (`dist/cli.js`), so instance repos run
+  `pnpm palm ...`; `--domain` and `--db` default to their package.json's
+  `"palm"` field or `PALM_DOMAIN` / `PALM_DB`.
 
 All of the above are internal and never published.
 
