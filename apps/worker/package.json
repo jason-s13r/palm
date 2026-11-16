@@ -1,0 +1,41 @@
+{
+  "name": "@jason-s13r/palm-worker",
+  "version": "0.0.0",
+  "description": "palm: one ActivityPub identity, used from Lemmy and Mastodon apps, on Cloudflare Workers.",
+  "license": "Unlicense",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jason-s13r/palm.git",
+    "directory": "apps/worker"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "files": [
+    "dist",
+    "migrations",
+    "wrangler.template.jsonc"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "wrangler dev",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.8.2",
+    "@cloudflare/workers-types": "^5.20261116.1",
+    "@palm/core": "workspace:*",
+    "tsup": "^9.0.0",
+    "typescript": "~6.0.3",
+    "vitest": "^5.1.0",
+    "wrangler": "^4.162.0"
+  }
+}

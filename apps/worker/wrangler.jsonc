@@ -1,0 +1,17 @@
+// palm's own staging instance, deployed from `main` by Workers Builds.
+// A real deployment uses its own repo and wrangler.template.jsonc instead.
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "palm-staging",
+  "main": "staging/index.ts",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "observability": { "enabled": true },
+  "version_metadata": { "binding": "CF_VERSION_METADATA" },
+  "vars": {
+    // Until a staging domain is chosen, staging answers on workers.dev only.
+    // With a domain: set these three and add routes for each host.
+    "STAGING_DOMAIN": "palm-staging.jason-2ab.workers.dev"
+  }
+}
