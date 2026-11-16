@@ -111,11 +111,13 @@ export async function accountStats(ctx: RequestContext, a: Account): Promise<Acc
 /** A Mastodon MediaAttachment for an uploaded image. */
 export function mediaAttachment(ctx: RequestContext, m: Media, domain = ctx.domain.domain) {
   const url = urls.media(domain, m.file);
+  const video = m.contentType.startsWith("video/");
   return {
     id: m.id,
-    type: "image",
+    type: video ? "video" : "image",
     url,
-    preview_url: url,
+    // Without a still to show, apps play the video itself as its preview.
+    preview_url: video ? null : url,
     remote_url: null,
     preview_remote_url: null,
     text_url: null,
@@ -616,7 +618,7 @@ async function upload(c: C) {
   );
   if (stored === "no_storage") return fail(c, "Uploads aren't available on this server");
   if (stored === "unsupported_type") return fail(c, "Validation failed: File content type is invalid");
-  if (stored === "too_large") return fail(c, "Validation failed: File file size must be less than 10 MB");
+  if (stored === "too_large") return fail(c, "Validation failed: File file size must be less than 10 MB (40 MB for video)");
   return c.json(mediaAttachment(c.env, stored));
 }
 
