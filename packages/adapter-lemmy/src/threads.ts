@@ -1,6 +1,7 @@
-import { textToHtml, type RequestContext } from "@palm/core";
+import { textToHtml, urls, type RequestContext } from "@palm/core";
 import {
   accountById,
+  attachMedia,
   communitiesByIds,
   communityById,
   communityByName,
@@ -10,6 +11,7 @@ import {
   listCommunities,
   listThreadComments,
   listThreadPosts,
+  mediaById,
   postByIdAny,
   restorePost,
   subscribe,
@@ -298,6 +300,10 @@ threadRoutes.post("/api/v3/post", async (c) => {
   });
   // Lemmy counts your own post as upvoted.
   await vote(db, created.id, auth.account.id, 1);
+  // An image uploaded for this post becomes its attachment, so Mastodon apps
+  // and other servers show the picture rather than a bare link.
+  const uploaded = link?.startsWith(urls.media(c.env.domain.domain, "")) ? await mediaById(db, link.slice(urls.media(c.env.domain.domain, "").length)) : null;
+  if (uploaded && uploaded.accountId === auth.account.id) await attachMedia(db, created.id, auth.account.id, [uploaded.id]);
   c.env.activities.postCreated(created);
   return postResponse(c, created.id);
 });

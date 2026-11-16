@@ -247,6 +247,8 @@ export function post(ctx: RequestContext, p: ThreadPost): Post {
     id: p.id,
     name: p.title ?? "",
     ...(p.linkUrl ? { url: p.linkUrl } : {}),
+    // Apps show an image link as the post's picture.
+    ...(p.linkUrl && /\.(jpe?g|png|gif|webp)(\?|$)/i.test(p.linkUrl) ? { thumbnail_url: p.linkUrl } : {}),
     ...(p.contentSource ? { body: p.contentSource } : {}),
     creator_id: p.accountId,
     community_id: p.communityId ?? 0,

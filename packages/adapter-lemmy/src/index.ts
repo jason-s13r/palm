@@ -13,6 +13,10 @@ import {
   siteCounts,
   subscriptions,
   threadCounts,
+  deleteMedia,
+  mediaById,
+  mediaResponse,
+  storeMedia,
   type Account,
 } from "@palm/db";
 import { Hono, type Context } from "hono";
@@ -75,10 +79,37 @@ const app = new Hono<Env>();
 
 app.use("*", cors({ origin: "*", allowHeaders: ["Authorization", "Content-Type"], maxAge: 86400 }));
 
-// Resolve the caller once, for every API route.
-app.use("/api/v3/*", async (c, next) => {
+// Resolve the caller once, for every API route and image upload.
+const resolveAuth = async (c: C, next: () => Promise<void>) => {
   c.set("auth", await authenticate(c, tokenOf(c)));
   await next();
+};
+app.use("/api/v3/*", resolveAuth);
+app.use("/pictrs/*", resolveAuth);
+
+// --- images, where Lemmy keeps them (pict-rs) ------------------------------
+
+app.post("/pictrs/image", async (c) => {
+  const auth = c.get("auth");
+  if (!auth) return c.json({ msg: "not_logged_in" }, 401);
+  const form = await c.req.formData().catch(() => null);
+  const file = form?.getAll("images[]").find((f): f is File => f instanceof File) ?? (form?.get("images") as File | null);
+  if (!(file instanceof File)) return c.json({ msg: "no_image" }, 400);
+  const stored = await storeMedia(c.env.bindings.DB, c.env.bindings.MEDIA, auth.account.id, file, null);
+  if (typeof stored === "string") return c.json({ msg: stored }, stored === "no_storage" ? 503 : 400);
+  return c.json({ msg: "ok", files: [{ file: stored.file, delete_token: stored.deleteToken }] });
+});
+
+app.get("/pictrs/image/delete/:token/:file", async (c) => {
+  const media = await mediaById(c.env.bindings.DB, c.req.param("file"));
+  if (!media || media.deleteToken !== c.req.param("token")) return c.json({ msg: "not_found" }, 404);
+  await deleteMedia(c.env.bindings.DB, c.env.bindings.MEDIA, media);
+  return c.body(null, 204);
+});
+
+app.on(["GET", "HEAD"], "/pictrs/image/:file", async (c) => {
+  const response = await mediaResponse(c.env.bindings.MEDIA, c.req.param("file"), c.req.method);
+  return response ?? c.json({ msg: "not_found" }, 404);
 });
 
 // A person who opens this host in a browser gets told what it's for.
@@ -193,6 +224,10 @@ app.get("/api/v3/user/report_count", (c) =>
 );
 app.get("/api/v3/user/replies", (c) => c.json({ replies: [] } satisfies GetRepliesResponse));
 app.get("/api/v3/user/mention", (c) => c.json({ mentions: [] } satisfies GetPersonMentionsResponse));
+// Moderation queues: nothing is reported until reports exist.
+app.get("/api/v3/comment/report/list", (c) => c.json({ comment_reports: [] }));
+app.get("/api/v3/post/report/list", (c) => c.json({ post_reports: [] }));
+app.get("/api/v3/private_message/report/list", (c) => c.json({ private_message_reports: [] }));
 app.get("/api/v3/private_message/list", (c) => c.json({ private_messages: [] } satisfies PrivateMessagesResponse));
 app.get("/api/v3/federated_instances", (c) =>
   c.json({ federated_instances: { linked: [], allowed: [], blocked: [] } } satisfies GetFederatedInstancesResponse),
