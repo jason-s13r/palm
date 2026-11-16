@@ -417,7 +417,7 @@ const THREAD_TTL_SECONDS = 15 * 60;
 const THREAD_LIMIT = 100;
 
 /** A person from another server's API, recorded without fetching their actor (palm does that when it needs to). */
-async function personFromApi(
+export async function placeholderAccount(
   db: D1Database,
   person: { apId: string; username: string; displayName: string | null; avatarUrl: string | null },
 ): Promise<Account> {
@@ -509,7 +509,7 @@ export async function backfillThread(fctx: Context<RequestContext>, postId: numb
       const parentApId = ids.length > 2 ? apIdByOriginId.get(ids[ids.length - 2]!) : root.apId;
       const parent = parentApId ? await postByUri(db, parentApId, localDomains(ctx)) : null;
       if (!parent) continue;
-      const author = await personFromApi(db, {
+      const author = await placeholderAccount(db, {
         apId: view.creator.actor_id,
         username: view.creator.name,
         displayName: view.creator.display_name ?? null,
@@ -548,7 +548,7 @@ export async function backfillThread(fctx: Context<RequestContext>, postId: numb
       const parentUri = status.in_reply_to_id ? uriByOriginId.get(status.in_reply_to_id) : null;
       const parent = parentUri ? await postByUri(db, parentUri, localDomains(ctx)) : null;
       if (!parent) continue;
-      const author = await personFromApi(db, {
+      const author = await placeholderAccount(db, {
         apId: status.account.uri ?? status.account.url,
         username: status.account.username,
         displayName: status.account.display_name || null,

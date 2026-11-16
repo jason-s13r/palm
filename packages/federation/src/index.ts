@@ -4,7 +4,8 @@ import "./people.ts";
 import "./communities.ts";
 import { processQueueMessage as processMessage } from "./delivery.ts";
 import type { QueueBody } from "./queue.ts";
-import { irrelevantDelivery } from "./prefilter.ts";
+import { triage } from "./prefilter.ts";
+import { verifySignature } from "./signature.ts";
 import { federationsFor } from "./shared.ts";
 
 const isInboxPath = (path: string) =>
@@ -46,13 +47,18 @@ export async function handleFederation(
   fallback: (request: Request) => Response | Promise<Response>,
 ): Promise<Response> {
   const url = new URL(request.url);
-  // A delivery to an inbox about something palm doesn't hold (a vote on a
-  // post nobody here has seen, a deleted stranger) is dropped before Fedify
-  // parses it and checks its signature, the costly part.
+  // A delivery to an inbox: dropped or handled cheaply when it's only a vote
+  // or a delete (see prefilter.ts), otherwise checked and parsed by Fedify.
   if (request.method === "POST" && isInboxPath(url.pathname)) {
     const body = await request.text();
-    if (await irrelevantDelivery(ctx.bindings.DB, body, ctx.config.domains.map((d) => d.domain.toLowerCase()))) return new Response(null, { status: 202 });
+    const db = ctx.bindings.DB;
+    const hosts = ctx.config.domains.map((d) => d.domain.toLowerCase());
     request = new Request(request.url, { method: "POST", headers: request.headers, body });
+    const outcome = await triage(db, request, body, hosts, (req, text) => verifySignature(db, req, text)).catch((error: unknown) => {
+      console.warn(JSON.stringify({ palm: "triage_failed", error: String(error) }));
+      return "fedify" as const;
+    });
+    if (outcome !== "fedify") return new Response(null, { status: 202 });
   }
   const { people, communities } = await federationsFor(ctx.bindings);
   const options = {

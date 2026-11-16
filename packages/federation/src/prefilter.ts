@@ -1,13 +1,19 @@
+import { vote } from "@palm/db";
+import { placeholderAccount } from "./remote.ts";
+
 /**
  * A cheap first look at a delivery, before Fedify parses it and checks its
- * signature. Most of what a busy Lemmy community relays is votes, and most of
- * those are on posts palm never kept; Mastodon sends a Delete for every
- * account removed anywhere it federates with. Neither can change anything
- * here, so they're answered 202 and dropped.
+ * signature. Most of what a busy Lemmy community relays is votes:
  *
- * Only activities that act on something palm must already hold are dropped
- * this way. Anything that could create a row (Create, Update, Follow,
- * Announce of a post) goes through Fedify as before.
+ * - A vote, undone vote or delete about something palm never kept can't
+ *   change anything here. It's answered 202 and dropped unchecked.
+ * - A vote on a remote post palm keeps only moves a score. Its signature is
+ *   checked here (see verifySignature) and the vote written straight to D1,
+ *   without Fedify parsing it or fetching the voter's profile: a stranger
+ *   voting gets a placeholder account, filled in if they ever matter.
+ *
+ * Everything else, including votes on local posts (which notify their
+ * author), goes through Fedify as before.
  */
 
 type Json = Record<string, unknown>;
@@ -25,42 +31,88 @@ const idOf = (value: unknown): string | null =>
 
 const VOTES = new Set(["Like", "Dislike", "EmojiReact"]);
 
-/** The id an activity acts on, when it can only act on something already held. */
-export function existingTarget(activity: unknown): string | null {
+/** What an activity does to something palm must already hold, if that's all it does. */
+export type Act =
+  | { kind: "vote"; target: string; voter: string | null; score: number }
+  | { kind: "unvote"; target: string; voter: string | null }
+  | { kind: "delete"; target: string }
+  | { kind: "unboost"; target: string };
+
+export function actOf(activity: unknown): Act | null {
   // A community's Announce wraps the activity it relays.
   const inner = typeOf(activity) === "Announce" && isObject((activity as Json).object) ? (activity as Json).object : activity;
-  const type = typeOf(inner);
   if (!isObject(inner)) return null;
-  if (type && VOTES.has(type)) return idOf(inner.object);
-  if (type === "Delete") return idOf(inner.object);
-  if (type === "Undo") {
+  const type = typeOf(inner);
+  const actor = idOf(inner.actor);
+  if (type && VOTES.has(type)) {
+    const target = idOf(inner.object);
+    // An emoji reaction counts as an upvote, as Lemmy shows them.
+    return target ? { kind: "vote", target, voter: actor, score: type === "Dislike" ? -1 : 1 } : null;
+  }
+  if (type === "Delete") {
+    const target = idOf(inner.object);
+    return target ? { kind: "delete", target } : null;
+  }
+  if (type === "Undo" && isObject(inner.object)) {
     const undone = typeOf(inner.object);
-    if (undone && (VOTES.has(undone) || undone === "Announce")) return idOf((inner.object as Json).object);
+    const target = idOf(inner.object.object);
+    if (!target) return null;
+    if (undone && VOTES.has(undone)) return { kind: "unvote", target, voter: idOf(inner.object.actor) ?? actor };
+    if (undone === "Announce") return { kind: "unboost", target };
   }
   return null;
 }
 
-/** Whether a delivery's body can be dropped without checking it. */
-export async function irrelevantDelivery(db: D1Database, body: string, localHosts: readonly string[]): Promise<boolean> {
+export type Triage = "drop" | "handled" | "fedify";
+
+/**
+ * Decides what to do with a delivery: drop it, handle it here (a vote on a
+ * remote post, once its signature checks out), or pass it to Fedify.
+ */
+export async function triage(
+  db: D1Database,
+  request: Request,
+  body: string,
+  localHosts: readonly string[],
+  verify: (request: Request, body: string) => Promise<string | null>,
+): Promise<Triage> {
   let activity: unknown;
   try {
     activity = JSON.parse(body);
   } catch {
-    return false;
+    return "fedify";
   }
-  const target = existingTarget(activity);
-  if (!target) return false;
+  const act = actOf(activity);
+  if (!act) return "fedify";
   let host: string;
   try {
-    host = new URL(target).host.toLowerCase();
+    host = new URL(act.target).host.toLowerCase();
   } catch {
-    return false;
+    return "fedify";
   }
-  // Local posts and people have no ap_id row to look up.
-  if (localHosts.includes(host)) return false;
-  const held = await db
-    .prepare("SELECT 1 FROM posts WHERE ap_id = ?1 UNION ALL SELECT 1 FROM accounts WHERE ap_id = ?1 LIMIT 1")
-    .bind(target)
-    .first();
-  return !held;
+  // Local posts and people have no ap_id to look up, and votes on them notify.
+  if (localHosts.includes(host)) return "fedify";
+  const post = await db.prepare("SELECT id FROM posts WHERE ap_id = ?1").bind(act.target).first<{ id: number }>();
+  if (!post) {
+    if (act.kind !== "delete") return "drop";
+    const account = await db.prepare("SELECT 1 FROM accounts WHERE ap_id = ?1").bind(act.target).first();
+    return account ? "fedify" : "drop";
+  }
+  if ((act.kind !== "vote" && act.kind !== "unvote") || !act.voter) return "fedify";
+  // The signer is the voter, or a community relaying the vote.
+  const signer = await verify(request, body);
+  if (!signer) return "fedify";
+  const signerHost = new URL(signer).host.toLowerCase();
+  const voterHost = new URL(act.voter).host.toLowerCase();
+  const wrapped = typeOf(activity) === "Announce";
+  if (!wrapped && signerHost !== voterHost) return "fedify";
+  if (wrapped && signer !== idOf((activity as Json).actor)) return "fedify";
+  const voter = await placeholderAccount(db, {
+    apId: act.voter,
+    username: decodeURIComponent(new URL(act.voter).pathname.split("/").filter(Boolean).at(-1) ?? "unknown"),
+    displayName: null,
+    avatarUrl: null,
+  });
+  await vote(db, post.id, voter.id, act.kind === "vote" ? act.score : 0);
+  return "handled";
 }

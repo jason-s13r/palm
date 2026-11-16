@@ -79,6 +79,52 @@ describe("federation", () => {
     expect((await post({ ...like, object: "https://palm.test/objects/1" })).status).toBeGreaterThanOrEqual(400);
   });
 
+  it("counts a community's relayed vote on a remote post without Fedify, once its signature checks out", async () => {
+    const author = await createAccount("votee", "pw");
+    const target = "https://elsewhere.test/post/77";
+    const post = await db
+      .prepare(
+        "INSERT INTO posts (account_id, content_source, content_html, visibility, created_at, ap_id) VALUES (?, 'x', 'x', 'public', ?, ?) RETURNING id",
+      )
+      .bind(author, Date.now(), target)
+      .first<{ id: number }>();
+    const pair = (await crypto.subtle.generateKey(
+      { name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
+      true,
+      ["sign", "verify"],
+    )) as CryptoKeyPair;
+    const spki = new Uint8Array((await crypto.subtle.exportKey("spki", pair.publicKey)) as ArrayBuffer);
+    const pem = `-----BEGIN PUBLIC KEY-----\n${btoa(String.fromCharCode(...spki))}\n-----END PUBLIC KEY-----`;
+    const community = "https://elsewhere.test/c/things";
+    const keyId = `${community}#main-key`;
+    await db.prepare("INSERT INTO remote_keys (key_id, owner, pem, fetched_at) VALUES (?, ?, ?, ?)").bind(keyId, community, pem, Date.now()).run();
+
+    const deliver = async (activity: object, tamper = false) => {
+      const body = JSON.stringify(activity);
+      const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body)));
+      const digest = `SHA-256=${btoa(String.fromCharCode(...hash))}`;
+      const date = new Date().toUTCString();
+      const text = `(request-target): post /inbox\nhost: palm.test\ndate: ${date}\ndigest: ${digest}`;
+      const sig = new Uint8Array(await crypto.subtle.sign("RSASSA-PKCS1-v1_5", pair.privateKey, new TextEncoder().encode(text)));
+      const signature = `keyId="${keyId}",algorithm="rsa-sha256",headers="(request-target) host date digest",signature="${btoa(String.fromCharCode(...sig))}"`;
+      return worker.fetch(`${DOMAIN}/inbox`, {
+        method: "POST",
+        headers: { "content-type": "application/activity+json", host: "palm.test", date, digest, signature },
+        body: tamper ? body.replace("Like", "Dislike") : body,
+      });
+    };
+    const like = { type: "Like", actor: "https://elsewhere.test/u/fan", object: target };
+    const score = () => db.prepare("SELECT COALESCE(SUM(score), 0) AS s FROM votes WHERE post_id = ?").bind(post!.id).first<{ s: number }>();
+
+    expect((await deliver({ type: "Announce", actor: community, object: like })).status).toBe(202);
+    expect((await score())?.s).toBe(1);
+    expect((await deliver({ type: "Announce", actor: community, object: { type: "Undo", actor: like.actor, object: like } })).status).toBe(202);
+    expect((await score())?.s).toBe(0);
+    // A body that doesn't match its digest isn't counted here; Fedify refuses it.
+    expect((await deliver({ type: "Announce", actor: community, object: like }, true)).status).toBeGreaterThanOrEqual(400);
+    expect((await score())?.s).toBe(0);
+  });
+
   it("serves both client APIs on the bare domain, and keeps nodeinfo as Lemmy", async () => {
     expect((await worker.fetch(`${DOMAIN}/api/v3/site`)).status).toBe(200);
     const instance = await (await worker.fetch(`${DOMAIN}/api/v2/instance`)).json<{ domain: string }>();

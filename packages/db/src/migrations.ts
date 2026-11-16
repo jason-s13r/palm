@@ -392,6 +392,18 @@ CREATE INDEX IF NOT EXISTS post_tags_tag ON post_tags (tag, post_id)
 ALTER TABLE posts ADD COLUMN thread_fetched_at INTEGER
 `,
   },
+  {
+    version: 12,
+    name: "remote signing keys",
+    sql: `
+CREATE TABLE IF NOT EXISTS remote_keys (
+  key_id TEXT PRIMARY KEY,
+  owner TEXT NOT NULL,
+  pem TEXT NOT NULL,
+  fetched_at INTEGER NOT NULL
+)
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;
