@@ -97,6 +97,19 @@ describe("Following, favourites and notifications", () => {
     expect(note.status?.id).toBe(dm.id);
   });
 
+  it("links hashtags, federates them and lists posts by tag", async () => {
+    const tam = await mastodonUser("tam");
+    const post = await (await tam.post("/api/v1/statuses", { status: "hello #PalmTest" })).json<Status & { tags: { name: string }[]; uri: string }>();
+    expect(post.tags.map((t) => t.name)).toEqual(["palmtest"]);
+    expect(post.content).toContain('href="https://palm.test/tags/palmtest"');
+    const tagged = await (await tam.get("/api/v1/timelines/tag/palmtest")).json<Status[]>();
+    expect(tagged.map((s) => s.id)).toEqual([post.id]);
+    const note = await (await worker.fetch(post.uri, AP)).json<{ tag: { type: string; name: string } | { type: string; name: string }[] }>();
+    expect([note.tag].flat()).toContainEqual(expect.objectContaining({ type: "Hashtag", name: "#palmtest" }));
+    const found = await (await tam.get("/api/v2/search?q=%23palm&type=hashtags")).json<{ hashtags: { name: string }[] }>();
+    expect(found.hashtags.map((h) => h.name)).toContain("palmtest");
+  });
+
   it("edits a profile", async () => {
     const fay = await mastodonUser("fay");
     const res = await worker.fetch(`${MASTODON}/api/v1/accounts/update_credentials`, {
