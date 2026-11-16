@@ -1,0 +1,19 @@
+{
+  "name": "@palm/auth",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Password hashing, tokens and JWTs for palm, on Web Crypto so the Worker and the CLI share them.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261116.1",
+    "typescript": "~6.0.3",
+    "vitest": "^5.1.0"
+  }
+}
