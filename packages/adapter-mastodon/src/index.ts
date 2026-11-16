@@ -296,7 +296,12 @@ app.get("/api/v1/accounts/lookup", async (c) => {
   return found ? c.json(account(c.env, found.account, await accountStats(c.env, found.account))) : fail(c, "Record not found", 404);
 });
 
-app.get("/api/v1/accounts/:id", async (c) => {
+// Followers of an account that the signed-in account also follows: none yet.
+app.get("/api/v1/accounts/familiar_followers", (c) =>
+  c.json(c.req.queries("id[]")?.concat(c.req.queries("id") ?? []).map((id) => ({ id, accounts: [] })) ?? []),
+);
+
+app.get("/api/v1/accounts/:id{[0-9]+}", async (c) => {
   const found = await accountById(c.env.bindings.DB, Number(c.req.param("id")));
   return found && found.domain === c.env.domain.domain
     ? c.json(account(c.env, found, await accountStats(c.env, found)))
@@ -326,6 +331,10 @@ for (const path of [
   "/api/v1/notifications",
   "/api/v1/accounts/:id/followers",
   "/api/v1/accounts/:id/following",
+  "/api/v1/accounts/:id/endorsements",
+  "/api/v1/accounts/:id/featured_tags",
+  "/api/v1/accounts/:id/lists",
+  "/api/v1/endorsements",
   "/api/v1/conversations",
   "/api/v1/lists",
   "/api/v1/filters",
@@ -372,6 +381,7 @@ app.get("/api/v2/notifications/policy", (c) =>
 // answer as a Mastodon server with no subscription would, without logging it.
 app.get("/api/v1/push/subscription", (c) => fail(c, "Record not found", 404));
 app.post("/api/v1/push/subscription", (c) => fail(c, "Push notifications aren't available on this server yet", 422));
+app.delete("/api/v1/push/subscription", (c) => c.json({}));
 
 app.all("/api/*", (c) => {
   console.warn(JSON.stringify({ palm: "unknown_endpoint", api: "mastodon", method: c.req.method, path: c.req.path }));
