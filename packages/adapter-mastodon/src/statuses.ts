@@ -88,9 +88,17 @@ async function canSee(db: D1Database, post: Post, viewer: Account | null): Promi
   return follows !== null;
 }
 
-/** Profile counts for an account. Remote accounts' totals live on their servers; palm shows what it has. */
+/** Profile counts for an account: palm's own for local ones, the remote server's (as last fetched) for remote ones. */
 export async function accountStats(ctx: RequestContext, a: Account): Promise<AccountStats> {
   const db = ctx.bindings.DB;
+  if (a.apId) {
+    return {
+      statuses: a.remoteCounts.statuses ?? (await countPosts(db, a.id)),
+      followers: a.remoteCounts.followers ?? 0,
+      following: a.remoteCounts.following ?? 0,
+      lastStatusAt: await lastPostAt(db, a.id),
+    };
+  }
   const [statuses, followers, following, lastStatusAt] = await Promise.all([
     countPosts(db, a.id),
     countFollowers(db, a.id),
@@ -153,11 +161,10 @@ export async function statuses(ctx: RequestContext, posts: Post[], viewer: Accou
     ...[...mentioned.values()].flat(),
     ...[...parents.values()].map((p) => p.accountId),
   ]);
-  // Profile counts cost a few queries each; local authors get them, remote ones show palm's view.
   const statsFor = new Map<number, AccountStats>();
   for (const id of new Set(posts.map((p) => p.accountId))) {
     const a = people.get(id);
-    if (a && a.apId === null) statsFor.set(id, await accountStats(ctx, a));
+    if (a) statsFor.set(id, await accountStats(ctx, a));
   }
 
   return posts.flatMap((post) => {
@@ -526,6 +533,8 @@ statusRoutes.get("/api/v1/accounts/:id/statuses", async (c) => {
   // Pinned posts and media filters have nothing to show yet.
   if (truthy(c.req.query("pinned")) || truthy(c.req.query("only_media"))) return c.json([]);
   const me = c.get("account");
+  // A remote person's profile, opened from here: fetch their recent posts the first time.
+  if (author.apId && !c.req.query("max_id")) await c.env.activities.backfillProfile(author.id);
   const visibilities: Visibility[] = me?.id === author.id ? ["public", "unlisted", "private", "direct"] : ["public", "unlisted"];
   let posts = await postsByAccount(db, author.id, visibilities, page(c));
   if (truthy(c.req.query("exclude_replies"))) posts = posts.filter((p) => !p.inReplyTo);

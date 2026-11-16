@@ -111,8 +111,16 @@ peopleRoutes.get("/api/v1/accounts", async (c) => {
 peopleRoutes.get("/api/v1/accounts/familiar_followers", (c) => c.json(idsFrom(c).map((id) => ({ id: String(id), accounts: [] }))));
 
 peopleRoutes.get("/api/v1/accounts/:id{[0-9]+}", async (c) => {
-  const found = showable(c, await accountById(c.env.bindings.DB, Number(c.req.param("id"))));
-  return found ? c.json(await accountView(c, found)) : fail(c, "Record not found", 404);
+  const db = c.env.bindings.DB;
+  const id = Number(c.req.param("id"));
+  let found = showable(c, await accountById(db, id));
+  if (!found) return fail(c, "Record not found", 404);
+  // Opening a remote profile: bring its counts and recent posts up to date first.
+  if (found.apId) {
+    await c.env.activities.backfillProfile(found.id);
+    found = (await accountById(db, id)) ?? found;
+  }
+  return c.json(await accountView(c, found));
 });
 
 peopleRoutes.post("/api/v1/accounts/:id{[0-9]+}/follow", async (c) => {
