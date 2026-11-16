@@ -19,7 +19,11 @@ outside this repo (the Palm project's `palm-decisions.md`).
   `{"palm":"unknown_endpoint"}` so the next one to build shows in the logs.
 - `packages/federation`: ActivityPub on Fedify: WebFinger, Person actors,
   followers, the inboxes and nodeinfo, with Fedify's key-value store on D1
-  (`D1KvStore`).
+  (`D1KvStore`) and its message queue on a Cloudflare Queue
+  (`CloudflareMessageQueue`). Delivery runs as queue jobs, which the same
+  Worker consumes, so a request only enqueues. Deliveries are signed with the
+  RSA key alone: the Ed25519 Object Integrity Proof costs several times the
+  rest of signing.
 - `packages/cli`: admin commands run locally (`pnpm palm user create ...`,
   `pnpm palm user keys ...`). Signing keys are generated here, not in the
   Worker, because key generation is too slow for the free CPU limit.
