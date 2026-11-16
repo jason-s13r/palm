@@ -5,7 +5,7 @@
  * palm repository: a deployment repo passes its config to `createPalm`.
  */
 
-/** The client APIs palm can serve. Each one gets its own host. */
+/** The client APIs palm can serve. */
 export type ApiKind = "lemmy" | "mastodon";
 
 export interface DomainConfig {
@@ -17,11 +17,12 @@ export interface DomainConfig {
    */
   domain: string;
   /**
-   * The host each client API is served on. Apps expect an API at the root of
-   * a host, so each API needs its own. Keep them one level below a domain you
-   * control (`lemmy.1j.nz`), which Cloudflare's free certificate covers.
+   * Extra hosts for the client APIs, if wanted. Both APIs already answer on
+   * the domain itself, which is where people should sign in: apps show the
+   * handle with the host they signed in to. A separate host serves its one
+   * API at its root.
    */
-  hosts: Partial<Record<ApiKind, string>>;
+  hosts?: Partial<Record<ApiKind, string>>;
 }
 
 export interface InstanceConfig {
@@ -79,7 +80,7 @@ export function defineConfig(config: PalmConfig): PalmConfig {
 
   for (const { domain, hosts } of config.domains) {
     claim(domain, `domain ${domain}`);
-    for (const [kind, host] of Object.entries(hosts)) {
+    for (const [kind, host] of Object.entries(hosts ?? {})) {
       if (host !== undefined) claim(host, `${kind} host for ${domain}`);
     }
   }

@@ -5,6 +5,7 @@ const config = defineConfig({
   domains: [
     { domain: "one.example", hosts: { lemmy: "lemmy.one.example", mastodon: "mastodon.one.example" } },
     { domain: "two.example", hosts: { lemmy: "lemmy.two.example" } },
+    { domain: "three.example" },
   ],
   instance: { name: "Test" },
 });
@@ -12,6 +13,7 @@ const config = defineConfig({
 describe("resolveSurface", () => {
   it("maps the bare domain to federation", () => {
     expect(resolveSurface(config, "one.example")).toMatchObject({ kind: "federation", domain: { domain: "one.example" } });
+    expect(resolveSurface(config, "three.example")).toMatchObject({ kind: "federation", domain: { domain: "three.example" } });
   });
 
   it("maps API hosts to their API and domain", () => {

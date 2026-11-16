@@ -13,7 +13,7 @@ export function resolveSurface(config: PalmConfig, host: string): Surface | null
   const name = normaliseHost(host);
   for (const domain of config.domains) {
     if (domain.domain === name) return { kind: "federation", domain };
-    for (const [kind, apiHost] of Object.entries(domain.hosts) as [ApiKind, string | undefined][]) {
+    for (const [kind, apiHost] of Object.entries(domain.hosts ?? {}) as [ApiKind, string | undefined][]) {
       if (apiHost === name) return { kind, domain };
     }
   }
