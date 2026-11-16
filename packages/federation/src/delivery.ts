@@ -25,7 +25,7 @@ import {
 } from "@palm/db";
 import { actorUri, communityUri, createFor, followersUri, objectFor, postParts, postUri, tombstoneFor, type PostParts } from "./objects.ts";
 import type { QueueBody } from "./queue.ts";
-import { backfillProfile, resolve as resolveRemote, storeRemotePost } from "./remote.ts";
+import { backfillProfile, backfillThread, resolve as resolveRemote, storeRemotePost } from "./remote.ts";
 import { communitySenderKeys, contextsFor, federationsFor, logProblem, personKeys, recipient, recipientOf } from "./shared.ts";
 import { personFor } from "./people.ts";
 
@@ -285,6 +285,10 @@ export function activitySink(ctx: RequestContext): ActivitySink {
     async resolve(query): Promise<Resolved | null> {
       const { people } = await contextsFor(ctx);
       return resolveRemote(people, query);
+    },
+    async backfillThread(postId) {
+      const { people } = await contextsFor(ctx);
+      await backfillThread(people, postId).catch((error: unknown) => logProblem("thread_backfill_failed", { postId, error: String(error) }));
     },
     async backfillProfile(accountId) {
       const { people } = await contextsFor(ctx);

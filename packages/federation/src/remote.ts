@@ -20,12 +20,14 @@ import {
   Video,
   type Object as APObject,
 } from "@fedify/fedify/vocab";
-import { htmlToText, sanitizeHtml, type RequestContext } from "@palm/core";
+import { htmlToText, markdownToHtml, sanitizeHtml, type RequestContext } from "@palm/core";
 import {
   accountByApId,
   accountById,
   accountForLogin,
+  claimThreadRefresh,
   markOutboxFetched,
+  postById,
   addMentions,
   addTags,
   communityByApId,
@@ -406,5 +408,183 @@ export async function backfillProfile(fctx: Context<RequestContext>, accountId: 
     }
   } catch (error) {
     logProblem("outbox_fetch_failed", { account: account.apId, error: String(error) });
+  }
+}
+
+/** How long a remote thread's comments stay fresh before palm reads them again. */
+const THREAD_TTL_SECONDS = 15 * 60;
+/** The most comments palm takes in one refresh. */
+const THREAD_LIMIT = 100;
+
+/** A person from another server's API, recorded without fetching their actor (palm does that when it needs to). */
+async function personFromApi(
+  db: D1Database,
+  person: { apId: string; username: string; displayName: string | null; avatarUrl: string | null },
+): Promise<Account> {
+  const known = await accountByApId(db, person.apId);
+  if (known) return known;
+  const url = new URL(person.apId);
+  const account = await upsertRemoteAccount(db, {
+    apId: person.apId,
+    domain: url.host,
+    username: person.username,
+    displayName: person.displayName,
+    bio: null,
+    // Lemmy and Mastodon both put inboxes here; the actor's own refresh corrects it if not.
+    inbox: `${person.apId}/inbox`,
+    sharedInbox: `https://${url.host}/inbox`,
+    profileUrl: person.apId,
+    avatarUrl: person.avatarUrl,
+    headerUrl: null,
+    actorType: "Person",
+    outboxUrl: null,
+    followersCount: null,
+    followingCount: null,
+    statusesCount: null,
+  });
+  // Marked stale, so the next look at them fetches the real thing.
+  await db.prepare("UPDATE accounts SET fetched_at = 0 WHERE id = ?").bind(account.id).run();
+  return account;
+}
+
+async function fetchJson<T>(url: string): Promise<T | null> {
+  try {
+    const res = await fetch(url, { headers: { accept: "application/json", "user-agent": "palm (+https://github.com/jason-s13r/palm)" } });
+    return res.ok ? ((await res.json()) as T) : null;
+  } catch {
+    return null;
+  }
+}
+
+interface LemmyCommentView {
+  comment: { id: number; ap_id: string; content: string; published: string; updated?: string; deleted: boolean; removed: boolean; path: string };
+  creator: { actor_id: string; name: string; display_name?: string; avatar?: string };
+}
+
+interface MastodonStatus {
+  id: string;
+  uri: string;
+  url: string | null;
+  in_reply_to_id: string | null;
+  content: string;
+  created_at: string;
+  edited_at: string | null;
+  spoiler_text: string;
+  sensitive: boolean;
+  visibility: "public" | "unlisted" | "private" | "direct";
+  account: { uri?: string; url: string; username: string; display_name: string; avatar: string };
+}
+
+const seconds = (iso: string) => Math.floor(Date.parse(iso) / 1000);
+
+/**
+ * Fills in a remote thread's comments that arrived before anyone here was
+ * following along. Lemmy doesn't publish a post's replies over ActivityPub,
+ * so palm asks the post's own server, as Lemmy apps do: Lemmy's comment list,
+ * or Mastodon's context. Anything else, it walks the object's replies.
+ */
+export async function backfillThread(fctx: Context<RequestContext>, postId: number): Promise<void> {
+  const ctx = fctx.data;
+  const db = ctx.bindings.DB;
+  const root = await postById(db, postId);
+  if (!root?.apId || root.rootId !== null) return;
+  if (!(await claimThreadRefresh(db, root.id, THREAD_TTL_SECONDS))) return;
+  const origin = new URL(root.apId);
+  if (await isBlockedHost(db, origin.host)) return;
+
+  const lemmyPost = origin.pathname.match(/^\/post\/(\d+)$/);
+  const mastodonStatus = origin.pathname.match(/^\/users\/[^/]+\/statuses\/(\d+)$/);
+
+  if (lemmyPost) {
+    const data = await fetchJson<{ comments: LemmyCommentView[] }>(
+      `https://${origin.host}/api/v3/comment/list?post_id=${lemmyPost[1]}&max_depth=8&limit=${THREAD_LIMIT}&sort=Old&type_=All`,
+    );
+    // Parents first: Lemmy's path is "0.<ancestors>.<id>", so sort by depth.
+    const comments = (data?.comments ?? []).sort((a, b) => a.comment.path.split(".").length - b.comment.path.split(".").length);
+    const apIdByOriginId = new Map(comments.map((c) => [String(c.comment.id), c.comment.ap_id]));
+    for (const view of comments) {
+      const c = view.comment;
+      if (c.deleted || c.removed || (await postByUri(db, c.ap_id, localDomains(ctx)))) continue;
+      const ids = c.path.split(".");
+      const parentApId = ids.length > 2 ? apIdByOriginId.get(ids[ids.length - 2]!) : root.apId;
+      const parent = parentApId ? await postByUri(db, parentApId, localDomains(ctx)) : null;
+      if (!parent) continue;
+      const author = await personFromApi(db, {
+        apId: view.creator.actor_id,
+        username: view.creator.name,
+        displayName: view.creator.display_name ?? null,
+        avatarUrl: view.creator.avatar ?? null,
+      });
+      const created = await createPost(db, {
+        accountId: author.id,
+        contentSource: c.content,
+        contentHtml: sanitizeHtml(markdownToHtml(c.content)),
+        spoilerText: "",
+        sensitive: false,
+        visibility: "public",
+        language: null,
+        inReplyTo: parentApId!,
+        communityId: root.communityId,
+        rootId: root.id,
+        parentId: parent.id,
+        apId: c.ap_id,
+        url: c.ap_id,
+        createdAt: seconds(c.published),
+        ...(c.updated ? { updatedAt: seconds(c.updated) } : {}),
+      }).catch(() => null);
+      if (created) await vote(db, created.id, author.id, 1);
+    }
+    return;
+  }
+
+  if (mastodonStatus) {
+    const data = await fetchJson<{ descendants: MastodonStatus[] }>(`https://${origin.host}/api/v1/statuses/${mastodonStatus[1]}/context`);
+    const statuses = data?.descendants ?? [];
+    const uriByOriginId = new Map(statuses.map((s) => [s.id, s.uri]));
+    uriByOriginId.set(mastodonStatus[1]!, root.apId);
+    for (const status of statuses.slice(0, THREAD_LIMIT)) {
+      if (status.visibility !== "public" && status.visibility !== "unlisted") continue;
+      if (await postByUri(db, status.uri, localDomains(ctx))) continue;
+      const parentUri = status.in_reply_to_id ? uriByOriginId.get(status.in_reply_to_id) : null;
+      const parent = parentUri ? await postByUri(db, parentUri, localDomains(ctx)) : null;
+      if (!parent) continue;
+      const author = await personFromApi(db, {
+        apId: status.account.uri ?? status.account.url,
+        username: status.account.username,
+        displayName: status.account.display_name || null,
+        avatarUrl: status.account.avatar || null,
+      });
+      const html = sanitizeHtml(status.content);
+      await createPost(db, {
+        accountId: author.id,
+        contentSource: htmlToText(html),
+        contentHtml: html,
+        spoilerText: status.spoiler_text,
+        sensitive: status.sensitive,
+        visibility: status.visibility,
+        language: null,
+        inReplyTo: parentUri!,
+        parentId: parent.id,
+        // In a Lemmy community's thread, a reply is a comment there too.
+        ...(root.communityId ? { communityId: root.communityId, rootId: root.id } : {}),
+        apId: status.uri,
+        url: status.url ?? status.uri,
+        createdAt: seconds(status.created_at),
+        ...(status.edited_at ? { updatedAt: seconds(status.edited_at) } : {}),
+      }).catch(() => null);
+    }
+    return;
+  }
+
+  // Other software: the object's own replies collection, as far as it goes.
+  const object = await fctx.lookupObject(root.apId).catch(() => null);
+  if (!object || !("getReplies" in object)) return;
+  const replies = await (object as Note).getReplies().catch(() => null);
+  if (!replies) return;
+  let count = 0;
+  for await (const item of traverseCollection(replies, { documentLoader: fctx.documentLoader, contextLoader: fctx.contextLoader })) {
+    if (++count > 30) break;
+    const reply = item instanceof Note ? item : item.id ? await fctx.lookupObject(item.id).catch(() => null) : null;
+    if (reply && !(reply instanceof Link)) await storeRemotePost(fctx, reply, { required: true }).catch(() => null);
   }
 }
