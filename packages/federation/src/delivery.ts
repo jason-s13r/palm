@@ -15,6 +15,7 @@ import {
 import type { ActivitySink, FederationTask, RequestContext, Resolved } from "@palm/core";
 import {
   accountById,
+  blockedDomains,
   communityById,
   communityFollowers,
   followers,
@@ -40,18 +41,28 @@ function unique(recipients: (Recipient | null)[]): Recipient[] {
   });
 }
 
+/** Leaves out recipients on blocked servers. */
+async function allowed(db: D1Database, recipients: Recipient[]): Promise<Recipient[]> {
+  const blocked = await blockedDomains(db);
+  if (!blocked.length) return recipients;
+  return recipients.filter((r) => {
+    const host = r.id?.host.toLowerCase() ?? "";
+    return !blocked.some((d) => host === d || host.endsWith(`.${d}`));
+  });
+}
+
 /**
  * A local community passes an activity on to its followers on other servers,
  * wrapped in an Announce, as Lemmy communities do.
  */
 export async function announceToCommunity(ctx: RequestContext, community: Community, activity: Activity): Promise<void> {
-  const members = await communityFollowers(ctx.bindings.DB, community.id);
+  const members = await allowed(ctx.bindings.DB, (await communityFollowers(ctx.bindings.DB, community.id)).map(recipient));
   if (!members.length) return;
   const { communities } = await contextsFor(ctx);
   const id = communityUri(community);
   await communities.sendActivity(
     await communitySenderKeys(communities, community),
-    members.map(recipient),
+    members,
     new Announce({
       id: new URL(`${id.href}#announces/${crypto.randomUUID()}`),
       actor: id,
@@ -85,7 +96,7 @@ async function sendAboutPost(ctx: RequestContext, parts: PostParts, activity: Ac
   } else if (post.visibility !== "direct") {
     recipients = [...(await followers(db, parts.author.id)).map(recipient), ...recipients];
   }
-  const to = unique(recipients);
+  const to = await allowed(db, unique(recipients));
   if (to.length) await people.sendActivity(keys, to, activity, { preferSharedInbox: true });
 }
 
@@ -154,10 +165,10 @@ export async function runTask(ctx: RequestContext, task: FederationTask): Promis
       const keys = await personKeys(people, voter);
       for (const activity of activities) {
         if (parts.community && isLocal(parts.community)) await announceToCommunity(ctx, parts.community, activity);
-        const to = unique([
+        const to = await allowed(db, unique([
           parts.community && !isLocal(parts.community) ? recipientOf(parts.community) : null,
           isLocal(parts.author) ? null : recipientOf(parts.author),
-        ]);
+        ]));
         if (to.length) await people.sendActivity(keys, to, activity, { preferSharedInbox: true });
       }
       return;
@@ -178,7 +189,7 @@ export async function runTask(ctx: RequestContext, task: FederationTask): Promis
       const activity = task.undo
         ? new Undo({ id: new URL(`${announce.id!.href}/undo/${Date.now()}`), actor: actorUri(booster), object: announce, tos: [PUBLIC_COLLECTION] })
         : announce;
-      const to = unique([...(await followers(db, booster.id)).map(recipient), isLocal(parts.author) ? null : recipientOf(parts.author)]);
+      const to = await allowed(db, unique([...(await followers(db, booster.id)).map(recipient), isLocal(parts.author) ? null : recipientOf(parts.author)]));
       if (to.length) await people.sendActivity(await personKeys(people, booster), to, activity, { preferSharedInbox: true });
       return;
     }
@@ -208,7 +219,7 @@ export async function runTask(ctx: RequestContext, task: FederationTask): Promis
       const account = await accountById(db, task.accountId);
       if (!account || !isLocal(account)) return;
       const person = await personFor(people, account);
-      const to = (await followers(db, account.id)).map(recipient);
+      const to = await allowed(db, (await followers(db, account.id)).map(recipient));
       if (person && to.length) {
         await people.sendActivity(
           await personKeys(people, account),

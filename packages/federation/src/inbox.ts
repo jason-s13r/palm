@@ -16,6 +16,8 @@ import {
 import type { RequestContext } from "@palm/core";
 import {
   acceptFollow,
+  accountByApId,
+  isBlockedHost,
   acceptSubscription,
   addCommunityFollower,
   addFollower,
@@ -193,7 +195,7 @@ async function onAnnounce(ctx: Ctx, announce: Announce): Promise<void> {
   if ("community" in actor) {
     // A Lemmy community passing on something that happened in it.
     const inner = await announce.getObject({ crossOrigin: "trust" }).catch(() => null);
-    if (inner instanceof Activity) await dispatch(ctx, inner, { community: actor.community });
+    if (inner instanceof Activity && !(await refused(ctx, inner))) await dispatch(ctx, inner, { community: actor.community });
     return;
   }
   // A boost. Keep it if someone here follows the booster, or it's a local post.
@@ -248,6 +250,27 @@ async function dispatch(ctx: Ctx, activity: Activity, via: Via): Promise<void> {
 
 const direct: Via = { community: null };
 
+/**
+ * Activities from blocked servers, or from people banned here, are dropped
+ * before palm reads them further.
+ */
+async function refused(ctx: Ctx, activity: Activity): Promise<boolean> {
+  const actor = activity.actorId;
+  if (!actor) return true;
+  const db = ctx.data.bindings.DB;
+  if (await isBlockedHost(db, actor.host)) return true;
+  const known = await accountByApId(db, actor.href);
+  return known?.banned ?? false;
+}
+
+/** Wraps a listener so refused activities never reach it. */
+const gated =
+  <A extends Activity>(handler: (ctx: InboxContext<RequestContext>, activity: A) => Promise<void>) =>
+  async (ctx: InboxContext<RequestContext>, activity: A) => {
+    if (await refused(ctx, activity)) return;
+    await handler(ctx, activity);
+  };
+
 /** Registers palm's inbox listeners on a federation builder. */
 export function registerInbox(
   builder: FederationBuilder<RequestContext>,
@@ -256,14 +279,14 @@ export function registerInbox(
 ): void {
   const listeners = sharedInboxPath ? builder.setInboxListeners(inboxPath, sharedInboxPath) : builder.setInboxListeners(inboxPath);
   listeners
-    .on(Follow, (ctx: InboxContext<RequestContext>, follow) => onFollow(ctx, follow))
-    .on(Accept, (ctx, accept) => onAccept(ctx, accept))
-    .on(Reject, (ctx, reject) => onReject(ctx, reject))
-    .on(Create, (ctx, create) => dispatch(ctx, create, direct))
-    .on(Update, (ctx, update) => dispatch(ctx, update, direct))
-    .on(Delete, (ctx, del) => dispatch(ctx, del, direct))
-    .on(Like, (ctx, like) => dispatch(ctx, like, direct))
-    .on(Dislike, (ctx, dislike) => dispatch(ctx, dislike, direct))
-    .on(Undo, (ctx, undo) => dispatch(ctx, undo, direct))
-    .on(Announce, (ctx, announce) => onAnnounce(ctx, announce));
+    .on(Follow, gated<Follow>((ctx, follow) => onFollow(ctx, follow)))
+    .on(Accept, gated<Accept>((ctx, accept) => onAccept(ctx, accept)))
+    .on(Reject, gated<Reject>((ctx, reject) => onReject(ctx, reject)))
+    .on(Create, gated<Create>((ctx, create) => dispatch(ctx, create, direct)))
+    .on(Update, gated<Update>((ctx, update) => dispatch(ctx, update, direct)))
+    .on(Delete, gated<Delete>((ctx, del) => dispatch(ctx, del, direct)))
+    .on(Like, gated<Like>((ctx, like) => dispatch(ctx, like, direct)))
+    .on(Dislike, gated<Dislike>((ctx, dislike) => dispatch(ctx, dislike, direct)))
+    .on(Undo, gated<Undo>((ctx, undo) => dispatch(ctx, undo, direct)))
+    .on(Announce, gated<Announce>((ctx, announce) => onAnnounce(ctx, announce)));
 }

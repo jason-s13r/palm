@@ -27,6 +27,7 @@ import {
   createPost,
   hasLocalFollowers,
   hasLocalSubscribers,
+  isBlockedHost,
   notify,
   postByApId,
   postByUri,
@@ -329,6 +330,8 @@ export async function resolve(
   if (handle) lookup = `@${handle[2]}@${handle[3]}`;
   else if (/^https?:\/\/\S+$/.test(q)) lookup = q;
   if (!lookup) return null;
+  const host = handle ? handle[3]! : new URL(q).host;
+  if (await isBlockedHost(fctx.data.bindings.DB, host)) return null;
   try {
     const object = await fctx.lookupObject(lookup);
     if (!object) return null;
