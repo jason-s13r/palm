@@ -64,7 +64,7 @@ describe("Mastodon API", () => {
       url: string;
       source: unknown;
     }>();
-    expect(me).toMatchObject({ username: "dee", acct: "dee", url: "https://palm.test/users/dee" });
+    expect(me).toMatchObject({ username: "dee", acct: "dee", url: "https://mastodon.palm.test/@dee", uri: "https://palm.test/users/dee" });
     expect(me.source).toBeDefined();
 
     // A code works once.
