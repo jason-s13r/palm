@@ -23,6 +23,7 @@ import {
 import { htmlToText, markdownToHtml, sanitizeHtml, type RequestContext } from "@palm/core";
 import {
   accountByApId,
+  accountByHandle,
   accountById,
   accountForLogin,
   claimThreadRefresh,
@@ -362,6 +363,9 @@ export async function resolve(
   else if (/^https?:\/\/\S+$/.test(q)) lookup = q;
   if (!lookup) return null;
   const host = handle ? handle[3]! : new URL(q).host;
+  // Something on this domain is read from the database: fetching it would mean
+  // the Worker fetching itself, which fails.
+  if (localDomains(fctx.data).includes(host.toLowerCase())) return resolveLocal(fctx.data, handle ? handle : null, q);
   if (await isBlockedHost(fctx.data.bindings.DB, host)) return null;
   try {
     const object = await fctx.lookupObject(lookup);
@@ -374,6 +378,38 @@ export async function resolve(
     logProblem("resolve_failed", { query: q, error: String(error) });
     return null;
   }
+}
+
+type Resolved = { kind: "account"; id: number } | { kind: "community"; id: number } | { kind: "post"; id: number };
+
+/** A handle or URL on this domain: a person, a community or a post palm holds. */
+async function resolveLocal(ctx: RequestContext, handle: RegExpMatchArray | null, q: string): Promise<Resolved | null> {
+  const db = ctx.bindings.DB;
+  const person = async (name: string, host: string) => {
+    const account = await accountByHandle(db, decodeURIComponent(name), host);
+    return account && !account.apId && !account.banned ? ({ kind: "account", id: account.id } as const) : null;
+  };
+  const community = async (name: string, host: string) => {
+    const found = await communityByName(db, host, decodeURIComponent(name).toLowerCase());
+    return found && !found.apId ? ({ kind: "community", id: found.id } as const) : null;
+  };
+  if (handle) {
+    const [, sigil, name, host] = handle;
+    const domain = host!.toLowerCase();
+    if (sigil === "!") return community(name!, domain);
+    return (await person(name!, domain)) ?? (sigil === "@" ? null : community(name!, domain));
+  }
+  const url = new URL(q);
+  const domain = url.host.toLowerCase();
+  const path = url.pathname.replace(/\/+$/, "");
+  let m: RegExpMatchArray | null;
+  if ((m = path.match(/^\/(?:objects|post|comment)\/(\d+)$/)) || (m = path.match(/^\/@[^/]+\/(\d+)$/))) {
+    const post = await postById(db, Number(m[1]));
+    return post && !post.apId && post.reblogOf === null && (post.visibility === "public" || post.visibility === "unlisted") ? { kind: "post", id: post.id } : null;
+  }
+  if ((m = path.match(/^\/(?:users|u)\/([^/]+)$/)) || (m = path.match(/^\/@([^/]+)$/))) return person(m[1]!, domain);
+  if ((m = path.match(/^\/c\/([^/]+)$/))) return community(m[1]!, domain);
+  return null;
 }
 
 /** How long a remote profile's posts stay fresh before palm reads its outbox again. */

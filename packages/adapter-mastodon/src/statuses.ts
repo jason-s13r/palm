@@ -463,6 +463,16 @@ statusRoutes.put("/api/v1/statuses/:id", async (c) => {
 
 statusRoutes.get("/api/v1/statuses/:id/history", (c) => c.json([]));
 
+// Who may quote a status (Mastodon 4.5). palm has no quotes yet, so the
+// policy isn't kept; the author gets their status back unchanged.
+statusRoutes.put("/api/v1/statuses/:id/interaction_policy", async (c) => {
+  const me = c.get("account");
+  if (!me) return fail(c, "The access token is invalid", 401);
+  const post = await visiblePost(c);
+  if (!post || post.accountId !== me.id) return fail(c, "Record not found", 404);
+  return statusResponse(c, post.id);
+});
+
 statusRoutes.delete("/api/v1/statuses/:id", async (c) => {
   const me = c.get("account");
   if (!me) return fail(c, "The access token is invalid", 401);

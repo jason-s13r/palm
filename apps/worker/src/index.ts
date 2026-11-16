@@ -127,6 +127,8 @@ export async function handle(
     });
   }
   if (url.pathname === "/palm/avatar.png") return avatarResponse();
+  if (url.pathname === "/favicon.ico") return avatarResponse();
+  if (url.pathname === "/robots.txt") return robotsResponse();
 
   if (!surface) {
     return json({ error: "unknown_host" }, 421);
@@ -180,6 +182,13 @@ async function federationFallback(config: PalmConfig, request: Request, url: URL
     return Response.redirect(new URL(url.pathname + url.search, config.browserRedirect).toString(), 302);
   }
   return json({ error: "not_found" }, 404);
+}
+
+/** Crawlers may read the web pages; the APIs and sign-in aren't for them. */
+function robotsResponse(): Response {
+  return new Response("User-agent: *\nDisallow: /api/\nDisallow: /oauth/\nDisallow: /pictrs/\nAllow: /\n", {
+    headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=86400" },
+  });
 }
 
 function wantsHtml(request: Request): boolean {
