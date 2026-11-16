@@ -97,21 +97,12 @@ Node 22+ and pnpm.
 
    then in the instance repo, `"@jason-s13r/palm-worker": "file:./vendor/palm-worker.tgz"`.
 
-4. **Create the database** and put its ID in `wrangler.jsonc`:
+4. **Deploy**, with `npx wrangler deploy` or by connecting the repo to
+   Workers Builds. The first deploy creates the D1 database, R2 bucket and
+   queue named in `wrangler.jsonc`. Then visit
+   `https://your.domain/.well-known/nodeinfo` once so the tables exist.
 
-   ```sh
-   npx wrangler d1 create your-palm
-   ```
-
-   The R2 bucket and the queue named in `wrangler.jsonc` are created by the
-   first `wrangler deploy`. palm creates and migrates its own tables on its
-   first request; there's no migration step.
-
-5. **Deploy**, with `npx wrangler deploy` or by connecting the repo to
-   Workers Builds. Then visit `https://your.domain/.well-known/nodeinfo` once
-   so the tables exist.
-
-6. **Make the first account** from a clone of this repo (the CLI talks to D1
+5. **Make the first account** from a clone of this repo (the CLI talks to D1
    through wrangler, so be logged in with `npx wrangler login`):
 
    ```sh
@@ -121,7 +112,7 @@ Node 22+ and pnpm.
    It prints a generated password once. Sign in from Voyager or a Mastodon
    app with `your.domain` as the server.
 
-7. **Invite people.** Each invite carries signing keys for whoever uses it:
+6. **Invite people.** Each invite carries signing keys for whoever uses it:
 
    ```sh
    pnpm palm invite create --domain your.domain --db your-palm --count 3
