@@ -539,6 +539,62 @@ CREATE TABLE IF NOT EXISTS spare_keys (
 )
 `,
   },
+  {
+    version: 18,
+    name: "lists, followed tags, filters, read and hidden posts",
+    sql: `
+CREATE TABLE IF NOT EXISTS lists (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  account_id INTEGER NOT NULL REFERENCES accounts (id),
+  title TEXT NOT NULL,
+  replies_policy TEXT NOT NULL DEFAULT 'list',
+  exclusive INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+)
+;
+CREATE TABLE IF NOT EXISTS list_members (
+  list_id INTEGER NOT NULL REFERENCES lists (id),
+  account_id INTEGER NOT NULL REFERENCES accounts (id),
+  PRIMARY KEY (list_id, account_id)
+)
+;
+CREATE TABLE IF NOT EXISTS followed_tags (
+  account_id INTEGER NOT NULL REFERENCES accounts (id),
+  tag TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (account_id, tag)
+)
+;
+CREATE TABLE IF NOT EXISTS filters (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  account_id INTEGER NOT NULL REFERENCES accounts (id),
+  title TEXT NOT NULL,
+  context TEXT NOT NULL,
+  action TEXT NOT NULL DEFAULT 'warn',
+  expires_at INTEGER,
+  created_at INTEGER NOT NULL
+)
+;
+CREATE TABLE IF NOT EXISTS filter_keywords (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  filter_id INTEGER NOT NULL REFERENCES filters (id),
+  keyword TEXT NOT NULL,
+  whole_word INTEGER NOT NULL DEFAULT 1
+)
+;
+CREATE TABLE IF NOT EXISTS post_reads (
+  account_id INTEGER NOT NULL,
+  post_id INTEGER NOT NULL,
+  PRIMARY KEY (account_id, post_id)
+)
+;
+CREATE TABLE IF NOT EXISTS post_hides (
+  account_id INTEGER NOT NULL,
+  post_id INTEGER NOT NULL,
+  PRIMARY KEY (account_id, post_id)
+)
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

@@ -35,13 +35,14 @@ const TALLY = `
 const tally = (r: TallyRow): Tally => ({ upvotes: r.upvotes, downvotes: r.downvotes, myVote: r.my_vote ?? 0, saved: r.saved === 1 });
 
 /** Lemmy's sorts, reduced to what palm can order by. */
-export type ThreadSort = "new" | "old" | "top" | "active" | "comments";
+export type ThreadSort = "new" | "old" | "top" | "active" | "comments" | "controversial";
 
 export function threadSort(sort: string | undefined): ThreadSort {
   if (!sort) return "active";
   if (sort === "New") return "new";
   if (sort === "Old") return "old";
-  if (sort.startsWith("Top") || sort === "Controversial") return "top";
+  if (sort === "Controversial") return "controversial";
+  if (sort.startsWith("Top")) return "top";
   if (sort === "MostComments") return "comments";
   return "active";
 }
@@ -98,6 +99,7 @@ export async function listThreadPosts(db: D1Database, listing: PostListing): Pro
     new: "p.id DESC",
     old: "p.id ASC",
     top: "(upvotes - downvotes) DESC, p.id DESC",
+    controversial: "MIN(upvotes, downvotes) DESC, (upvotes + downvotes) DESC, p.id DESC",
     comments: "comment_count DESC, p.id DESC",
     active: "active_at DESC, p.id DESC",
   }[listing.sort];
@@ -174,6 +176,7 @@ export async function listThreadComments(db: D1Database, listing: CommentListing
     new: "p.id DESC",
     old: "p.id ASC",
     top: "(upvotes - downvotes) DESC, p.id",
+    controversial: "MIN(upvotes, downvotes) DESC, (upvotes + downvotes) DESC, p.id",
     comments: "child_count DESC, p.id",
     active: "(upvotes - downvotes) DESC, p.id",
   }[listing.sort];
@@ -299,6 +302,7 @@ export async function listStatusPosts(db: D1Database, listing: StatusListing): P
     new: "p.id DESC",
     old: "p.id ASC",
     top: "(upvotes - downvotes) DESC, p.id DESC",
+    controversial: "MIN(upvotes, downvotes) DESC, (upvotes + downvotes) DESC, p.id DESC",
     comments: "comment_count DESC, p.id DESC",
     active: "active_at DESC, p.id DESC",
   }[listing.sort];
@@ -369,6 +373,7 @@ export async function listStatusComments(
     new: (a: ThreadComment, b: ThreadComment) => b.id - a.id,
     old: (a: ThreadComment, b: ThreadComment) => a.id - b.id,
     top: (a: ThreadComment, b: ThreadComment) => score(b) - score(a) || a.id - b.id,
+    controversial: (a: ThreadComment, b: ThreadComment) => Math.min(b.upvotes, b.downvotes) - Math.min(a.upvotes, a.downvotes) || a.id - b.id,
     comments: (a: ThreadComment, b: ThreadComment) => b.childCount - a.childCount || a.id - b.id,
     active: (a: ThreadComment, b: ThreadComment) => score(b) - score(a) || a.id - b.id,
   }[options.sort];

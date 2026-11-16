@@ -41,6 +41,8 @@ import {
   hiddenFor,
   isHidden,
   cardsFor,
+  postMarks,
+  setPostMarks,
   isCommunityBanned,
   moderatorIds,
 } from "@palm/db";
@@ -204,16 +206,19 @@ function asLemmyPost<T extends ThreadPost>(p: T): T {
 export async function postViews(c: C, posts: ThreadPost[]) {
   const viewer = c.get("auth")?.account ?? null;
   const shown = posts.map(asLemmyPost);
-  const [ctxOf, hidden, cards] = await Promise.all([
+  const [ctxOf, hidden, cards, marks] = await Promise.all([
     contextFor(c, posts),
     hiddenFor(c.env.bindings.DB, viewer?.id),
     cardsFor(c.env.bindings.DB, shown.flatMap((p) => (p.linkUrl ? [p.linkUrl] : []))),
+    postMarks(c.env.bindings.DB, viewer?.id, posts.map((p) => p.id)),
   ]);
   return shown.flatMap((p) => {
     const t = ctxOf(p);
     // Blocked people, communities and instances drop out; your own posts stay.
     if (!t || (p.accountId !== viewer?.id && isHidden(hidden, t.creator, t.community.id))) return [];
     const view = postView(c.env, p, t);
+    view.read = marks.read.has(p.id);
+    view.hidden = marks.hidden.has(p.id);
     // A link's preview: its title, description and picture.
     const card = p.linkUrl ? cards.get(p.linkUrl) : undefined;
     if (card) {
@@ -302,6 +307,25 @@ export async function moderatorViews(c: C, community: Community) {
   const people = await accountsByIds(c.env.bindings.DB, await moderatorIds(c.env.bindings.DB, community.id));
   const view = communityView(c.env, { ...community, subscribers: 0, posts: 0, comments: 0, subscribed: false, pending: false }).community;
   return [...people.values()].map((p) => ({ community: view, moderator: personView(c.env, p).person }));
+}
+
+/** The same link posted in other communities, as Lemmy lists cross-posts. */
+async function crossPosts(c: C, post: ThreadPost): Promise<ThreadPost[]> {
+  const { results } = await c.env.bindings.DB.prepare(
+    "SELECT id FROM posts WHERE link_url = ? AND id != ? AND root_id IS NULL AND community_id IS NOT NULL AND deleted_at IS NULL ORDER BY id DESC LIMIT 10",
+  )
+    .bind(post.linkUrl, post.id)
+    .all<{ id: number }>();
+  if (!results.length) return [];
+  return listThreadPosts(c.env.bindings.DB, {
+    domain: c.env.domain.domain,
+    scope: "all",
+    ids: results.map((r) => r.id),
+    sort: "new",
+    viewerId: c.get("auth")?.account.id ?? null,
+    limit: 10,
+    offset: 0,
+  });
 }
 
 export async function communityStats(c: C, community: Community) {
@@ -473,7 +497,11 @@ threadRoutes.get("/api/v3/post/list", async (c) => {
     const statuses = await listStatusPosts(c.env.bindings.DB, { followedBy: viewer.id, sort, viewerId: viewer.id, limit: offset + limit, offset: 0 });
     page = mergeSorted(posts, statuses, sort).slice(offset, offset + limit);
   }
-  const response: GetPostsResponse = { posts: await postViews(c, page) };
+  // Read posts drop out when asked (show_read=false); hidden ones unless asked for.
+  const showRead = c.req.query("show_read") !== "false";
+  const showHidden = bool(c.req.query("show_hidden"));
+  const views = (await postViews(c, page)).filter((v) => (showRead || !v.read) && (showHidden || !v.hidden));
+  const response: GetPostsResponse = { posts: views };
   if (page.length === limit) response.next_page = `o${offset + limit}`;
   return c.json(response);
 });
@@ -485,6 +513,7 @@ function mergeSorted(a: ThreadPost[], b: ThreadPost[], sort: ThreadSort): Thread
     new: (x: ThreadPost, y: ThreadPost) => y.id - x.id,
     old: (x: ThreadPost, y: ThreadPost) => x.id - y.id,
     top: (x: ThreadPost, y: ThreadPost) => score(y) - score(x) || y.id - x.id,
+    controversial: (x: ThreadPost, y: ThreadPost) => Math.min(y.upvotes, y.downvotes) - Math.min(x.upvotes, x.downvotes) || y.id - x.id,
     comments: (x: ThreadPost, y: ThreadPost) => y.comments - x.comments || y.id - x.id,
     active: (x: ThreadPost, y: ThreadPost) => y.activeAt - x.activeAt || y.id - x.id,
   }[sort];
@@ -503,7 +532,7 @@ threadRoutes.get("/api/v3/post", async (c) => {
     post_view: view,
     community_view: communityView(c.env, await communityStats(c, community!)),
     moderators: community ? await moderatorViews(c, community) : [],
-    cross_posts: [],
+    cross_posts: found?.linkUrl ? (await postViews(c, await crossPosts(c, found))).filter((v) => v.post.id !== found.id) : [],
   };
   return c.json(body);
 });
@@ -607,8 +636,20 @@ threadRoutes.put("/api/v3/post/save", async (c) => {
 });
 
 // Hiding posts isn't kept yet.
-threadRoutes.post("/api/v3/post/hide", (c) => c.json({ success: true } satisfies SuccessResponse));
-threadRoutes.post("/api/v3/post/mark_as_read", (c) => c.json({ success: true } satisfies SuccessResponse));
+// Read and hidden posts, per person.
+for (const [path, mark, flag] of [
+  ["/api/v3/post/hide", "hidden", "hide"],
+  ["/api/v3/post/mark_as_read", "read", "read"],
+] as const) {
+  threadRoutes.post(path, async (c) => {
+    const auth = c.get("auth");
+    if (!auth) return fail(c, "not_logged_in", 401);
+    const params = await body(c);
+    const ids = [...(Array.isArray(params.post_ids) ? params.post_ids : []), params.post_id].map((x) => int(x)).filter((x): x is number => x !== undefined);
+    await setPostMarks(c.env.bindings.DB, auth.account.id, ids.slice(0, 100), mark, params[flag] !== false);
+    return c.json({ success: true } satisfies SuccessResponse);
+  });
+}
 
 // --- comments --------------------------------------------------------------
 
@@ -809,7 +850,7 @@ export async function lemmyInboxCounts(db: D1Database, accountId: number): Promi
          SUM(n.kind = 'reply') AS replies,
          SUM(n.kind = 'mention') AS mentions
        FROM notifications n JOIN posts p ON p.id = n.post_id
-       WHERE n.account_id = ? AND n.read = 0 AND p.root_id IS NOT NULL AND p.deleted_at IS NULL`,
+       WHERE n.account_id = ? AND n.read = 0 AND (p.root_id IS NOT NULL OR (p.parent_id IS NOT NULL AND p.community_id IS NULL AND p.visibility IN ('public', 'unlisted'))) AND p.deleted_at IS NULL`,
     )
     .bind(accountId)
     .first<{ replies: number | null; mentions: number | null }>();
@@ -828,7 +869,7 @@ export async function inboxItems(c: C, recipient: Account, kind: "reply" | "ment
   const { results } = await db
     .prepare(
       `SELECT n.id, n.post_id, n.read, n.created_at FROM notifications n JOIN posts p ON p.id = n.post_id
-       WHERE n.account_id = ? AND n.kind = ? AND p.root_id IS NOT NULL AND p.deleted_at IS NULL${unreadOnly ? " AND n.read = 0" : ""}
+       WHERE n.account_id = ? AND n.kind = ? AND (p.root_id IS NOT NULL OR (p.parent_id IS NOT NULL AND p.community_id IS NULL AND p.visibility IN ('public', 'unlisted'))) AND p.deleted_at IS NULL${unreadOnly ? " AND n.read = 0" : ""}
        ORDER BY n.id DESC LIMIT ? OFFSET ?`,
     )
     .bind(recipient.id, kind, limit, offset)
@@ -843,6 +884,13 @@ export async function inboxItems(c: C, recipient: Account, kind: "reply" | "ment
     limit: results.length,
     offset: 0,
   });
+  // Replies under statuses aren't Lemmy comments in the table; find them in their threads.
+  const found = new Set(comments.map((x) => x.id));
+  for (const r of results) {
+    if (found.has(r.post_id)) continue;
+    const reply = await threadComment(c, r.post_id);
+    if (reply) comments.push(reply);
+  }
   const views = new Map((await commentViews(c, comments)).map((v) => [v.comment.id, v]));
   const me = personView(c.env, recipient).person;
   return results.flatMap((r) => {

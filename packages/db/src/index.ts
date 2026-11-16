@@ -202,3 +202,23 @@ export {
   updateCommunity,
 } from "./community-mod.ts";
 export type { ModAction, ModLogEntry, PostFlag, Report } from "./community-mod.ts";
+export {
+  createList,
+  deleteFilter,
+  deleteList,
+  filtersOf,
+  followedTags,
+  listById,
+  listMemberIds,
+  listsContaining,
+  listsOf,
+  listTimeline,
+  matchFilters,
+  postMarks,
+  saveFilter,
+  setListMembers,
+  setPostMarks,
+  setTagFollow,
+  updateList,
+} from "./curation.ts";
+export type { Filter, List } from "./curation.ts";

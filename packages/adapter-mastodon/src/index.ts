@@ -22,6 +22,7 @@ import {
 import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 import { authorizePage, codePage } from "./oauth-page.ts";
+import { curationRoutes } from "./curation.ts";
 import { peopleRoutes } from "./people.ts";
 import { accountStats, statusRoutes } from "./statuses.ts";
 import { account, credentialAccount, instanceV1, instanceV2, MASTODON_VERSION } from "./views.ts";
@@ -328,22 +329,18 @@ app.get("/api/v1/preferences", (c) =>
 
 // --- statuses and timelines ------------------------------------------------
 
+app.route("/", curationRoutes);
 app.route("/", statusRoutes);
 
 // --- lists that stay empty until federation brings content (M2, M6) --------
 
 const empty = (c: C) => c.json([]);
 for (const path of [
-  "/api/v1/timelines/list/:id",
   "/api/v1/accounts/:id/endorsements",
-  "/api/v1/accounts/:id/lists",
   "/api/v1/endorsements",
-  "/api/v1/lists",
   "/api/v1/filters",
-  "/api/v2/filters",
   "/api/v1/custom_emojis",
   "/api/v1/announcements",
-  "/api/v1/followed_tags",
   "/api/v1/blocks",
   "/api/v1/mutes",
   "/api/v1/domain_blocks",

@@ -1,5 +1,7 @@
-import { escapeHtml, hashtagsIn, mentionsIn, previewLink, textToHtml, urls, type RequestContext } from "@palm/core";
+import { escapeHtml, hashtagsIn, htmlToText, mentionsIn, previewLink, textToHtml, urls, type RequestContext } from "@palm/core";
 import {
+  filtersOf,
+  matchFilters,
   pinnedIds,
   pinnedPosts,
   pinPost,
@@ -188,7 +190,8 @@ export async function statuses(ctx: RequestContext, rows: Post[], viewer: Accoun
   const plain = await renderStatuses(ctx, rows.filter((r) => r.reblogOf === null), viewer);
   const plainById = new Map(plain.map((s) => [s.id, s]));
   const boosters = await accountsByIds(db, rows.filter((r) => r.reblogOf !== null).map((r) => r.accountId));
-  return rows.flatMap((row) => {
+  const filters = viewer ? await filtersOf(db, viewer.id) : [];
+  const shown = rows.flatMap((row) => {
     if (row.reblogOf === null) return plainById.has(String(row.id)) ? [plainById.get(String(row.id))!] : [];
     const original = innerById.get(String(row.reblogOf));
     const booster = boosters.get(row.accountId);
@@ -213,6 +216,31 @@ export async function statuses(ctx: RequestContext, rows: Post[], viewer: Accoun
         favourited: false,
         bookmarked: false,
         reblogged: original.reblogged,
+      },
+    ];
+  });
+  if (!filters.length) return shown;
+  // Keyword filters: "hide" drops the status, "warn" marks it for the app to fold.
+  return shown.flatMap((status) => {
+    const inner = (status.reblog ?? status) as { content: string; spoiler_text: string; account: { id: string } };
+    if (inner.account.id === String(viewer!.id)) return [status];
+    const matched = matchFilters(filters, `${inner.spoiler_text} ${htmlToText(inner.content)}`);
+    if (matched.some((m) => m.filter.action === "hide")) return [];
+    if (!matched.length) return [status];
+    return [
+      {
+        ...status,
+        filtered: matched.map((m) => ({
+          filter: {
+            id: String(m.filter.id),
+            title: m.filter.title,
+            context: m.filter.context,
+            expires_at: m.filter.expiresAt ? new Date(m.filter.expiresAt * 1000).toISOString() : null,
+            filter_action: m.filter.action,
+          },
+          keyword_matches: m.matches,
+          status_matches: [],
+        })),
       },
     ];
   });
@@ -327,7 +355,7 @@ function cardView(ctx: RequestContext, card: LinkCard | undefined) {
 }
 
 /** Mastodon's paging parameters. since_id and min_id both mean "newer than"; palm treats them alike. */
-function page(c: C): Page {
+export function page(c: C): Page {
   const num = (name: string) => {
     const value = c.req.query(name);
     return value && /^\d+$/.test(value) ? Number(value) : undefined;
@@ -353,7 +381,7 @@ function linkHeader(c: C, posts: Post[]): void {
 }
 
 /** A list of statuses, newest first, with paging links. */
-async function statusList(c: C, posts: Post[]) {
+export async function statusList(c: C, posts: Post[]) {
   const sorted = posts.sort((a, b) => b.id - a.id);
   linkHeader(c, sorted);
   return c.json(await statuses(c.env, sorted, c.get("account")));
