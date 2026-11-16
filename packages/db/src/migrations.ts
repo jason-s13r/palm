@@ -111,6 +111,31 @@ CREATE TABLE IF NOT EXISTS fedify_kv (
 CREATE INDEX IF NOT EXISTS fedify_kv_expires ON fedify_kv (expires_at) WHERE expires_at IS NOT NULL
 `,
   },
+  {
+    version: 3,
+    name: "local posts",
+    sql: `
+CREATE TABLE IF NOT EXISTS posts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  account_id INTEGER NOT NULL REFERENCES accounts (id),
+  content_source TEXT NOT NULL,
+  content_html TEXT NOT NULL,
+  spoiler_text TEXT NOT NULL DEFAULT '',
+  sensitive INTEGER NOT NULL DEFAULT 0,
+  visibility TEXT NOT NULL CHECK (visibility IN ('public', 'unlisted', 'private', 'direct')),
+  language TEXT,
+  in_reply_to TEXT,
+  created_at INTEGER NOT NULL,
+  deleted_at INTEGER
+)
+;
+CREATE INDEX IF NOT EXISTS posts_account ON posts (account_id, id)
+;
+CREATE INDEX IF NOT EXISTS posts_public ON posts (visibility, id) WHERE deleted_at IS NULL
+;
+CREATE INDEX IF NOT EXISTS posts_in_reply_to ON posts (in_reply_to) WHERE in_reply_to IS NOT NULL
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

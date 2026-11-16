@@ -30,3 +30,5 @@ export {
   removeFollower,
 } from "./federation.ts";
 export type { Follower, KeyAlgorithm, StoredKeyPair } from "./federation.ts";
+export { countLocalPosts, countPosts, createPost, deletePost, lastPostAt, localPublicPosts, postById, postsByAccount, repliesTo } from "./posts.ts";
+export type { Page, Post, Visibility } from "./posts.ts";
