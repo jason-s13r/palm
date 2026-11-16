@@ -1,7 +1,7 @@
 import { handleLemmy } from "@palm/adapter-lemmy";
 import { handleMastodon } from "@palm/adapter-mastodon";
-import { activitySink, handleFederation } from "@palm/federation";
-import { defineConfig, normaliseHost, resolveSurface, type PalmBindings, type PalmConfig, type RequestContext } from "@palm/core";
+import { activitySink, handleFederation, processQueueMessage, type QueueBody } from "@palm/federation";
+import { defineConfig, normaliseHost, resolveSurface, type DomainConfig, type PalmBindings, type PalmConfig, type RequestContext } from "@palm/core";
 import { migrate } from "@palm/db";
 import { avatarResponse } from "./assets.ts";
 import { VERSION } from "./version.ts";
@@ -11,8 +11,8 @@ export type { ApiKind, DomainConfig, InstanceConfig, PalmBindings, PalmConfig, S
 export { VERSION };
 
 /**
- * The bindings a deployment gives the Worker: a D1 database bound as `DB`.
- * R2, the Queue and so on arrive with the milestones that need them.
+ * The bindings a deployment gives the Worker: a D1 database bound as `DB`,
+ * and optionally an R2 bucket as `MEDIA` and a Queue as `QUEUE`.
  */
 export interface PalmEnv extends PalmBindings {}
 
@@ -33,12 +33,64 @@ export function createPalm<Env extends PalmEnv = PalmEnv>(source: ConfigSource<E
   // fails the deploy rather than the first request.
   let config: PalmConfig | undefined = typeof source === "function" ? undefined : defineConfig(source);
 
+  const configFor = (env: Env) => (config ??= defineConfig((source as (env: Env) => PalmConfig)(env)));
+
   return {
     fetch(request, env, ctx) {
-      config ??= defineConfig((source as (env: Env) => PalmConfig)(env));
-      return handle(config, request, env, ctx);
+      return handle(configFor(env), request, env, ctx);
+    },
+    // The same Worker consumes its queue: deliveries and received activities.
+    async queue(batch, env, ctx) {
+      await consume(configFor(env), batch as MessageBatch<QueueBody>, env, ctx);
     },
   };
+}
+
+/** Builds the context palm's code runs with, for a request or a queued job. */
+function requestContext(
+  config: PalmConfig,
+  domain: DomainConfig,
+  host: string,
+  env: PalmEnv,
+  executionCtx: Pick<ExecutionContext, "waitUntil">,
+): RequestContext {
+  const ctx = {
+    config,
+    domain,
+    host,
+    bindings: env,
+    version: VERSION,
+    waitUntil: (promise: Promise<unknown>) => executionCtx.waitUntil(promise),
+  } as RequestContext;
+  // The sink delivers with the finished context, so it's attached after.
+  ctx.activities = activitySink(ctx);
+  return ctx;
+}
+
+/**
+ * Runs a batch from palm's queue, one message at a time. A message that
+ * throws is retried by the queue; Fedify's own messages retry themselves.
+ */
+export async function consume(
+  config: PalmConfig,
+  batch: MessageBatch<QueueBody>,
+  env: PalmEnv,
+  executionCtx: Pick<ExecutionContext, "waitUntil">,
+): Promise<void> {
+  await migrate(env.DB);
+  const contextFor = (host: string) => {
+    const domain = config.domains.find((d) => d.domain === normaliseHost(host));
+    return domain ? requestContext(config, domain, domain.domain, env, executionCtx) : null;
+  };
+  for (const message of batch.messages) {
+    try {
+      await processQueueMessage(message.body, contextFor);
+      message.ack();
+    } catch (error) {
+      console.error(JSON.stringify({ palm: "queue_failed", body: message.body.palm, attempts: message.attempts, error: String(error) }));
+      message.retry({ delaySeconds: Math.min(60 * 2 ** message.attempts, 3600) });
+    }
+  }
 }
 
 /** Routes one request by its host, then by its path. */
@@ -71,16 +123,7 @@ export async function handle(
   // schema first (a no-op after the first request in each isolate).
   await migrate(env.DB);
 
-  const ctx = {
-    config,
-    domain: surface.domain,
-    host: normaliseHost(url.host),
-    bindings: env,
-    version: VERSION,
-    waitUntil: (promise: Promise<unknown>) => executionCtx.waitUntil(promise),
-  } as RequestContext;
-  // The sink delivers with the finished context, so it's attached after.
-  ctx.activities = activitySink(ctx);
+  const ctx = requestContext(config, surface.domain, normaliseHost(url.host), env, executionCtx);
 
   switch (surface.kind) {
     case "lemmy":

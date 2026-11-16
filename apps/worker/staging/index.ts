@@ -12,7 +12,8 @@ interface StagingEnv extends PalmEnv {
   STAGING_BROWSER_REDIRECT?: string;
 }
 
-export default createPalm<StagingEnv>((env) => ({
+/** Staging's config, from its wrangler vars. */
+export const stagingConfig = (env: StagingEnv) => ({
   domains: [
     {
       domain: env.STAGING_DOMAIN,
@@ -24,4 +25,6 @@ export default createPalm<StagingEnv>((env) => ({
   ],
   instance: { name: "palm staging", description: "palm's test instance. Accounts here are wiped without notice." },
   ...(env.STAGING_BROWSER_REDIRECT ? { browserRedirect: env.STAGING_BROWSER_REDIRECT } : {}),
-}));
+});
+
+export default createPalm<StagingEnv>(stagingConfig);

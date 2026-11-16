@@ -13,6 +13,12 @@
   "d1_databases": [{ "binding": "DB", "database_name": "palm-staging", "database_id": "a34ddc76-6aaf-4ece-bd52-8bedbc10b95c" }],
   // Uploaded images. wrangler deploy creates the bucket if it doesn't exist.
   "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "palm-staging-media" }],
+  // Deliveries and received activities run as queue jobs, each with its own
+  // CPU budget. The Worker consumes its own queue; deploy creates it.
+  "queues": {
+    "producers": [{ "binding": "QUEUE", "queue": "palm-staging" }],
+    "consumers": [{ "queue": "palm-staging", "max_batch_size": 5, "max_retries": 5 }]
+  },
   // Staging lives on a throwaway host under 1j.nz. Anything staging mints is
   // disposable; 1j.nz itself is not.
   "vars": {

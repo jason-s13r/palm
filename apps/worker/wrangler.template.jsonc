@@ -15,6 +15,13 @@
   // An R2 bucket for uploaded images (optional; without it uploads are
   // refused). wrangler deploy creates it if it doesn't exist.
   "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "<bucket-name>" }],
+  // A queue for deliveries and received activities (optional, but needed to
+  // stay inside the free plan's CPU budget once people have followers). The
+  // Worker consumes its own queue; wrangler deploy creates it.
+  "queues": {
+    "producers": [{ "binding": "QUEUE", "queue": "<queue-name>" }],
+    "consumers": [{ "queue": "<queue-name>", "max_batch_size": 5, "max_retries": 5 }]
+  },
   // One route per host in palm.config.ts: the domain, plus any API hosts.
   "routes": [
     { "pattern": "<domain>/*", "zone_name": "<domain>" }
