@@ -1,0 +1,22 @@
+{
+  "name": "@palm/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "palm's D1 schema, its self-applying migrations, and the queries over it.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@palm/auth": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261116.1",
+    "typescript": "~6.0.3",
+    "vitest": "^5.1.0"
+  }
+}
