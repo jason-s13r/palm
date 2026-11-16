@@ -122,6 +122,7 @@ function noteFor(ctx: Context<RequestContext>, account: Account, post: Post): No
     url: id,
     attribution: ctx.getActorUri(identifierOf(account)),
     ...audience(ctx, account, post.visibility),
+    name: post.title,
     content: post.contentHtml,
     summary: post.spoilerText || null,
     sensitive: post.sensitive,
@@ -285,7 +286,9 @@ export function activitySink(ctx: RequestContext): ActivitySink {
 
   return {
     postCreated(ref) {
-      if (ref.visibility === "direct") return;
+      // Lemmy posts and comments go through their community, once
+      // communities federate; until then they stay on this server.
+      if (ref.visibility === "direct" || ref.communityId) return;
       run("Create", async () => {
         const ready = await prepare(ref);
         const post = await postById(ctx.bindings.DB, ref.id);
@@ -296,7 +299,7 @@ export function activitySink(ctx: RequestContext): ActivitySink {
       });
     },
     postDeleted(ref) {
-      if (ref.visibility === "direct") return;
+      if (ref.visibility === "direct" || ref.communityId) return;
       run("Delete", async () => {
         const ready = await prepare(ref);
         if (!ready) return;
