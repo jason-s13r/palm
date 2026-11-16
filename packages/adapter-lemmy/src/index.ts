@@ -1,5 +1,5 @@
 import { hashPassword, needsRehash, signJwt, verifyJwt, verifyPassword } from "@palm/auth";
-import type { RequestContext } from "@palm/core";
+import { nodeinfoVersion, type RequestContext } from "@palm/core";
 import {
   accountById,
   accountForLogin,
@@ -95,12 +95,12 @@ app.get("/.well-known/nodeinfo", (c) =>
 app.get("/nodeinfo/2.1", async (c) =>
   c.json({
     version: "2.1",
-    software: { name: "lemmy", version: LEMMY_VERSION, repository: "https://github.com/jason-s13r/palm" },
+    software: { name: "lemmy", version: nodeinfoVersion(c.env.version), repository: "https://github.com/jason-s13r/palm", homepage: "https://github.com/jason-s13r/palm" },
     protocols: ["activitypub"],
     services: { inbound: [], outbound: [] },
     openRegistrations: false,
     usage: { users: { total: await countAccounts(c.env.bindings.DB, c.env.domain.domain) }, localPosts: 0, localComments: 0 },
-    metadata: {},
+    metadata: { nodeName: c.env.config.instance.name, palm: { version: c.env.version } },
   }),
 );
 

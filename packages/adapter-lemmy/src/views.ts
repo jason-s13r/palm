@@ -17,8 +17,8 @@ import type {
  * missing field fails the typecheck rather than an app.
  */
 
-/** The Lemmy version palm reports. Apps gate features on it. */
-export const LEMMY_VERSION = "0.19.9";
+/** The Lemmy version palm reports in the site. Apps gate features on it. */
+export { LEMMY_COMPAT_VERSION as LEMMY_VERSION } from "@palm/core";
 
 /** palm is one Lemmy "instance" per domain; Lemmy numbers its own as 1. */
 const LOCAL_INSTANCE_ID = 1;
