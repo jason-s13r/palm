@@ -93,7 +93,9 @@ don't overlap: Lemmy's API is `/api/v3`, Mastodon's `/api/v1`, `/api/v2` and
   `fix(worker):`, `feat(core,worker)!:`. Repo-wide changes use `repo`
   (`chore(repo):`, `ci(repo):`, `docs(repo):`). dispat computes versions from
   these, so a wrong scope means a wrong release; see `dispat.yaml` for what
-  counts as breaking.
+  counts as breaking. A change in an internal package only reaches deployments
+  when the worker is released too, so scope it as well (`fix(federation,worker):`)
+  or use `^` to reach consumers (`fix(federation)^:`).
 - **Never hand-edit versions** in `package.json` or `apps/worker/src/version.ts`.
   dispat writes them.
 - **Nothing deployment-specific in this repo.** No real domains, IDs or names

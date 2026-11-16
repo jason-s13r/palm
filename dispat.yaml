@@ -8,9 +8,11 @@
 # feat(core,worker)!:. Repository-wide changes use the repo scope
 # (chore(repo):, ci(repo):, docs(repo):) and release nothing.
 #
-# THE PALM VERSION IS THE WORKER'S VERSION. apps/worker depends on every
-# package, so any package release bumps it too; worker@X.Y.Z is what the
-# changelog, nodeinfo and the support matrix call "palm X.Y.Z".
+# THE PALM VERSION IS THE WORKER'S VERSION: worker@X.Y.Z is what the
+# changelog, nodeinfo and the support matrix call "palm X.Y.Z". apps/worker
+# bundles every package, but dispat releases a consumer only when a commit
+# reaches it: scope the worker too (fix(federation,worker):) or add ^ to reach
+# direct consumers (fix(federation)^:). A package released alone ships nothing.
 #
 # What counts as breaking (feat!: / fix!:), beyond API signatures:
 #   * any change to how ActivityPub IDs are minted or addressed — they are
@@ -76,6 +78,9 @@ dependencies:
     - db
   cli:
     - auth
+  web:
+    - core
+    - db
   worker:
     - core
     - auth
@@ -83,6 +88,8 @@ dependencies:
     - adapter-lemmy
     - adapter-mastodon
     - federation
+    - web
+    - cli
 
 # Scopes that are deliberately not packages.
 #   release  dispat's own release-commit scope
