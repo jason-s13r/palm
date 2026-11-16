@@ -1,0 +1,81 @@
+# Release configuration. Conventional commits drive the versions: dispat reads
+# them, works out which packages changed and their next versions, propagates
+# bumps to dependents, and releases in dependency order. Same pattern as
+# tessera (grid-games).
+#
+# Commit scopes name packages, by folder: feat(core):, fix(worker):,
+# feat(core,worker)!:. Repository-wide changes use the repo scope
+# (chore(repo):, ci(repo):, docs(repo):) and release nothing.
+#
+# THE PALM VERSION IS THE WORKER'S VERSION. apps/worker depends on every
+# package, so any package release bumps it too; worker@X.Y.Z is what the
+# changelog, nodeinfo and the support matrix call "palm X.Y.Z".
+#
+# What counts as breaking (feat!: / fix!:), beyond API signatures:
+#   * any change to how ActivityPub IDs are minted or addressed — they are
+#     permanent once another server has seen them;
+#   * a D1 migration that drops or renames something the previous release
+#     still reads (the contract half of expand-then-contract);
+#   * a config field or secret an existing deployment has to act on;
+#   * an endpoint removed from an adapter's supported set.
+
+scripts:
+  # Regenerates pnpm-lock.yaml after the version stage, so the release commit
+  # never carries a lockfile that disagrees with the manifests beside it.
+  sync-lock: pnpm install --lockfile-only
+  build-worker: pnpm build
+  # The worker is the one published package: a self-contained bundle with
+  # @palm/* inlined, on GitHub Packages. The registry comes from the package's
+  # publishConfig; the token from NODE_AUTH_TOKEN, which the release workflow
+  # sets to its GITHUB_TOKEN.
+  publish-worker: pnpm publish --no-git-checks
+
+spaces:
+  # Internal libraries. Versioned and changelogged so their history reads
+  # well, but never published: the worker bundles them.
+  packages:
+    path: packages
+    autoVersion:
+      manifests: root
+      # Keep workspace ranges as they are; rewriting workspace:* to a semver
+      # range breaks the local link and leaves pnpm-lock.yaml stale.
+      match: ["workspace:*"]
+      range: "workspace:*"
+      syncLock: [sync-lock]
+  # The deployable: the Worker package that deployments install.
+  apps:
+    path: apps
+    autoVersion:
+      manifests: root
+      match: ["workspace:*"]
+      range: "workspace:*"
+      syncLock: [sync-lock]
+      # The version the Worker reports about itself at runtime.
+      replace:
+        - files: ["src/version.ts"]
+          find: 'VERSION = "{previous}"'
+          write: 'VERSION = "{version}"'
+    flow:
+      build: build-worker
+      publish: publish-worker
+
+dependencies:
+  worker:
+    - core
+
+# Scopes that are deliberately not packages.
+#   release  dispat's own release-commit scope
+#   repo     repository-wide changes that release nothing
+nonPackageScopes: [release, repo]
+
+changelog:
+  enabled: true
+commit:
+  enabled: true
+  push: true
+  include: [pnpm-lock.yaml]
+  name: github-actions[bot]
+  email: github-actions[bot]@users.noreply.github.com
+github:
+  enabled: true
+  allPackages: true

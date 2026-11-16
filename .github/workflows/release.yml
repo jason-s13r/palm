@@ -1,0 +1,94 @@
+name: Release
+
+# dispat computes the release from the conventional commits, writes the
+# changelogs, rewrites the manifests and src/version.ts, makes one release
+# commit, tags every released package ({name}@{version}), publishes the worker
+# package to GitHub Packages and creates the GitHub releases.
+#
+# A palm release deploys nothing to production. Deployments (palm-1jnz, or
+# anyone else's) pin a published worker version and deploy it themselves.
+# Staging follows main through Workers Builds, not this workflow.
+#
+# Manual, not on push: a release is a decision, and dispat's own commits would
+# otherwise re-enter the trigger.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# dispat takes a release-lock tag on the remote and refuses a concurrent run.
+# Queueing here means a second dispatch waits instead of being refused.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Is there anything to release
+    runs-on: ubuntu-latest
+    outputs:
+      releasing: ${{ steps.status.outputs.releasing }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: yohimik/dispat@v1
+
+      # --require-release exits 3 when the plan releases nothing and 1 when
+      # something is wrong, so a broken config fails rather than reading as
+      # "nothing to release".
+      - name: Compute the plan
+        id: status
+        run: |
+          rc=0
+          dispat status --require-release || rc=$?
+          case "$rc" in
+            0) echo "releasing=true" >> "$GITHUB_OUTPUT" ;;
+            3)
+              echo "releasing=false" >> "$GITHUB_OUTPUT"
+              echo "### Nothing to release" >> "$GITHUB_STEP_SUMMARY"
+              echo "" >> "$GITHUB_STEP_SUMMARY"
+              echo "No package has commits since its last tag." >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            *) exit "$rc" ;;
+          esac
+
+  test:
+    name: Test
+    needs: plan
+    if: needs.plan.outputs.releasing == 'true'
+    uses: ./.github/workflows/test.yml
+
+  release:
+    name: Release
+    needs: [plan, test]
+    if: needs.plan.outputs.releasing == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # the release lock, the release commit, tags and releases
+      packages: write # publishing the worker to GitHub Packages
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          # Writes an .npmrc that authenticates the @jason-s13r scope against
+          # GitHub Packages with NODE_AUTH_TOKEN.
+          registry-url: https://npm.pkg.github.com
+          scope: "@jason-s13r"
+      - run: pnpm install --frozen-lockfile
+
+      - uses: yohimik/dispat@v1
+
+      - name: Run the release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: dispat --log-format json

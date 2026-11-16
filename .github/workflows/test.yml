@@ -1,0 +1,41 @@
+name: Test
+
+# Callable as well as triggered, so the release workflow gates on exactly this
+# job instead of keeping a second copy of the same steps that could drift.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: Types, tests and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      # The worker's suites run inside the Workers runtime (workerd).
+      - name: Run the suites
+        run: pnpm test
+
+      # The published artefact has to build; a deployment installs exactly it.
+      - name: Build the worker package
+        run: pnpm --filter @jason-s13r/palm-worker build
