@@ -1,5 +1,21 @@
 # Changelog
 
+## federation@0.1.1 (2026-11-16)
+
+### Fixes
+
+- send at once when the queue refuses, and to one recipient always
+  Once the free plan's daily queue operations were used up (they're shared
+  by every Worker on the account), nothing palm sent got out: accepting a
+  follow threw inside the inbox handler, so the follower's server got a
+  500, and new posts went nowhere.
+
+  Activities now go through one helper. A single recipient (accepting a
+  follow, notifying a reply's author) is sent straight away, since it's
+  one cheap request. Several still go through the queue, and if it
+  refuses, they're sent in the request instead of being lost.
+
+
 ## federation@0.1.0 (2026-11-16)
 
 ### Features
