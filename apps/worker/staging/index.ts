@@ -1,6 +1,7 @@
 // The entry point of palm's own staging instance, deployed from `main` by
-// Workers Builds. Its hosts come from wrangler vars, so the staging domain is
-// set in wrangler.jsonc rather than in code.
+// Workers Builds. Its domain comes from wrangler vars, so it's set in
+// wrangler.jsonc rather than in code. The API hosts are optional; the tests
+// set them to cover separate hosts.
 import { createPalm, type PalmEnv } from "../src/index.ts";
 
 interface StagingEnv extends PalmEnv {

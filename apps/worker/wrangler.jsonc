@@ -15,13 +15,9 @@
   // (palm-test-lemmy, not lemmy.palm-test) so Cloudflare's free certificate
   // covers them. Anything staging mints is disposable; 1j.nz itself is not.
   "vars": {
-    "STAGING_DOMAIN": "palm-test.1j.nz",
-    "STAGING_LEMMY_HOST": "palm-test-lemmy.1j.nz",
-    "STAGING_MASTODON_HOST": "palm-test-mastodon.1j.nz"
+    "STAGING_DOMAIN": "palm-test.1j.nz"
   },
   "routes": [
-    { "pattern": "palm-test.1j.nz", "custom_domain": true },
-    { "pattern": "palm-test-lemmy.1j.nz", "custom_domain": true },
-    { "pattern": "palm-test-mastodon.1j.nz", "custom_domain": true }
+    { "pattern": "palm-test.1j.nz", "custom_domain": true }
   ]
 }
