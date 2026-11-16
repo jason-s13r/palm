@@ -1,6 +1,6 @@
 import { createFederationBuilder, importJwk, type Federation } from "@fedify/fedify";
 import { Accept, Endpoints, Follow, Image, Person, Undo } from "@fedify/fedify/vocab";
-import { type RequestContext } from "@palm/core";
+import { nodeinfoVersion, type RequestContext } from "@palm/core";
 import { accountForLogin, actorKeys, addFollower, countAccounts, countFollowers, followers, removeFollower } from "@palm/db";
 import { D1KvStore } from "./kv.ts";
 
@@ -122,11 +122,15 @@ builder
     if (account) await removeFollower(ctx.data.bindings.DB, account.id, undo.actorId.href);
   });
 
+// palm answers as Lemmy, because Lemmy apps (Voyager) check the handle's
+// domain for a Lemmy server before they'll use it. The version carries palm's
+// own as build metadata ("0.19.9+palm.0.2.0"); see nodeinfoVersion.
 builder.setNodeInfoDispatcher("/nodeinfo/2.1", async (ctx) => ({
   software: {
-    name: "palm",
-    version: ctx.data.version,
+    name: "lemmy",
+    version: nodeinfoVersion(ctx.data.version),
     repository: new URL("https://github.com/jason-s13r/palm"),
+    homepage: new URL("https://github.com/jason-s13r/palm"),
   },
   protocols: ["activitypub"],
   openRegistrations: false,
@@ -135,6 +139,7 @@ builder.setNodeInfoDispatcher("/nodeinfo/2.1", async (ctx) => ({
     localPosts: 0,
     localComments: 0,
   },
+  metadata: { nodeName: ctx.data.config.instance.name, palm: { version: ctx.data.version } },
 }));
 
 // One Federation per database per isolate: building it is the costly part.
