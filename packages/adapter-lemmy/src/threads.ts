@@ -41,6 +41,8 @@ import {
   hiddenFor,
   isHidden,
   cardsFor,
+  isCommunityBanned,
+  moderatorIds,
 } from "@palm/db";
 import { Hono, type Context } from "hono";
 import type {
@@ -142,7 +144,7 @@ async function personCommunityById(c: C, id: number): Promise<Community | null> 
 const visible = (c: C, community: Community | null) =>
   community && (community.apId !== null || community.domain === c.env.domain.domain) ? community : null;
 
-async function communityFor(c: C, id: number | undefined, name: string | undefined): Promise<Community | null | undefined> {
+export async function communityFor(c: C, id: number | undefined, name: string | undefined): Promise<Community | null | undefined> {
   if (id !== undefined) {
     if (isPersonCommunityId(id)) return personCommunityById(c, id);
     return visible(c, await communityById(c.env.bindings.DB, id));
@@ -199,7 +201,7 @@ function asLemmyPost<T extends ThreadPost>(p: T): T {
   return { ...p, title: statusTitle(p), linkUrl: p.linkUrl ?? picture?.url ?? null };
 }
 
-async function postViews(c: C, posts: ThreadPost[]) {
+export async function postViews(c: C, posts: ThreadPost[]) {
   const viewer = c.get("auth")?.account ?? null;
   const shown = posts.map(asLemmyPost);
   const [ctxOf, hidden, cards] = await Promise.all([
@@ -223,7 +225,7 @@ async function postViews(c: C, posts: ThreadPost[]) {
   });
 }
 
-async function commentViews(c: C, comments: ThreadComment[]) {
+export async function commentViews(c: C, comments: ThreadComment[]) {
   const ids = [...new Set(comments.map((x) => x.rootId ?? 0))];
   const viewerId = c.get("auth")?.account.id ?? null;
   const [threads, statuses] = await Promise.all([
@@ -247,7 +249,7 @@ async function commentViews(c: C, comments: ThreadComment[]) {
 }
 
 /** One Lemmy post as the viewer sees it, or null. */
-async function threadPost(c: C, id: number): Promise<ThreadPost | null> {
+export async function threadPost(c: C, id: number): Promise<ThreadPost | null> {
   const [found] = await listThreadPosts(c.env.bindings.DB, {
     domain: c.env.domain.domain,
     scope: "all",
@@ -263,7 +265,7 @@ async function threadPost(c: C, id: number): Promise<ThreadPost | null> {
   return status ?? null;
 }
 
-async function threadComment(c: C, id: number): Promise<ThreadComment | null> {
+export async function threadComment(c: C, id: number): Promise<ThreadComment | null> {
   const viewerId = c.get("auth")?.account.id ?? null;
   const [found] = await listThreadComments(c.env.bindings.DB, {
     domain: c.env.domain.domain,
@@ -282,19 +284,27 @@ async function threadComment(c: C, id: number): Promise<ThreadComment | null> {
   return replies.find((r) => r.id === id) ?? null;
 }
 
-async function postResponse(c: C, id: number) {
+export async function postResponse(c: C, id: number) {
   const found = await threadPost(c, id);
   const [view] = found ? await postViews(c, [found]) : [];
   return view ? c.json({ post_view: view } satisfies PostResponse) : fail(c, "couldnt_find_post", 404);
 }
 
-async function commentResponse(c: C, id: number) {
+export async function commentResponse(c: C, id: number) {
   const found = await threadComment(c, id);
   const [view] = found ? await commentViews(c, [found]) : [];
   return view ? c.json({ comment_view: view, recipient_ids: [] } satisfies CommentResponse) : fail(c, "couldnt_find_comment", 404);
 }
 
-async function communityStats(c: C, community: Community) {
+/** A community's moderators, as Lemmy lists them. */
+export async function moderatorViews(c: C, community: Community) {
+  if (isPersonCommunityId(community.id) || community.apId) return [];
+  const people = await accountsByIds(c.env.bindings.DB, await moderatorIds(c.env.bindings.DB, community.id));
+  const view = communityView(c.env, { ...community, subscribers: 0, posts: 0, comments: 0, subscribed: false, pending: false }).community;
+  return [...people.values()].map((p) => ({ community: view, moderator: personView(c.env, p).person }));
+}
+
+export async function communityStats(c: C, community: Community) {
   const viewer = c.get("auth")?.account.id ?? null;
   if (isPersonCommunityId(community.id)) {
     const owner = await accountById(c.env.bindings.DB, accountIdOfCommunity(community.id));
@@ -329,7 +339,7 @@ threadRoutes.get("/api/v3/community", async (c) => {
   if (!community) return fail(c, "couldnt_find_community", 404);
   const body: GetCommunityResponse = {
     community_view: communityView(c.env, await communityStats(c, community)),
-    moderators: [],
+    moderators: await moderatorViews(c, community),
     discussion_languages: [],
   };
   return c.json(body);
@@ -492,7 +502,7 @@ threadRoutes.get("/api/v3/post", async (c) => {
   const body: GetPostResponse = {
     post_view: view,
     community_view: communityView(c.env, await communityStats(c, community!)),
-    moderators: [],
+    moderators: community ? await moderatorViews(c, community) : [],
     cross_posts: [],
   };
   return c.json(body);
@@ -506,6 +516,7 @@ threadRoutes.post("/api/v3/post", async (c) => {
   if (!community) return fail(c, "couldnt_find_community", 404);
   // A person community holds that person's own statuses.
   if (isPersonCommunityId(community.id)) return fail(c, "only_mods_can_post_in_community");
+  if (await isCommunityBanned(c.env.bindings.DB, community.id, auth.account.id)) return fail(c, "banned_from_community");
   const title = str(params.name)?.trim() ?? "";
   if (!title || title.length > MAX_TITLE) return fail(c, "invalid_post_title");
   const text = str(params.body)?.trim() ?? "";
@@ -657,6 +668,8 @@ threadRoutes.post("/api/v3/comment", async (c) => {
   if (!text || text.length > MAX_BODY) return fail(c, "invalid_body_field");
   const onPost = await threadPost(c, int(params.post_id) ?? -1);
   if (!onPost) return fail(c, "couldnt_find_post", 404);
+  if (onPost.locked) return fail(c, "locked");
+  if (onPost.communityId !== null && (await isCommunityBanned(c.env.bindings.DB, onPost.communityId, auth.account.id))) return fail(c, "banned_from_community");
   const parentId = int(params.parent_id);
   let inReplyTo: { id: number; apId: string | null; accountId: number } = onPost;
   if (parentId !== undefined) {

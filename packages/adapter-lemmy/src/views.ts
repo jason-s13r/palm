@@ -293,7 +293,7 @@ export function post(ctx: RequestContext, p: ThreadPost, creator?: Account): Pos
     creator_id: p.accountId,
     community_id: p.communityId ?? 0,
     removed: false,
-    locked: false,
+    locked: p.locked,
     published: iso(p.createdAt),
     ...(p.updatedAt ? { updated: iso(p.updatedAt) } : {}),
     deleted: false,
@@ -301,8 +301,8 @@ export function post(ctx: RequestContext, p: ThreadPost, creator?: Account): Pos
     ap_id: creator ? apIdOf(p, creator) : (p.apId ?? urls.object(ctx.domain.domain, String(p.id))),
     local: p.apId === null,
     language_id: 0,
-    featured_community: false,
-    featured_local: false,
+    featured_community: p.featuredCommunity,
+    featured_local: p.featuredLocal,
   };
 }
 

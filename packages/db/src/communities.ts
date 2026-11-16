@@ -24,7 +24,7 @@ export interface Community {
   fetchedAt: number | null;
 }
 
-interface CommunityRow {
+export interface CommunityRow {
   id: number;
   domain: string;
   name: string;
@@ -42,7 +42,7 @@ interface CommunityRow {
   fetched_at: number | null;
 }
 
-const toCommunity = (r: CommunityRow): Community => ({
+export const toCommunity = (r: CommunityRow): Community => ({
   id: r.id,
   domain: r.domain,
   name: r.name,

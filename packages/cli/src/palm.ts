@@ -32,6 +32,7 @@ const USAGE = [
   "  pnpm palm user keys <username> --domain <domain> [--db <d1-name>] [--local]",
   "  pnpm palm community create <name> --domain <domain> [--db <d1-name>] [--title <title>] [--description <text>] [--local]",
   "  pnpm palm invite create --domain <domain> [--db <d1-name>] [--count <n>] [--local]",
+  "  pnpm palm keys stock [--db <d1-name>] [--count <n>] [--local]   (keys for communities made in apps)",
   "",
   "From an instance repo, --domain and --db default to its package.json's",
   '"palm": { "domain": ..., "db": ... }, or PALM_DOMAIN and PALM_DB.',
@@ -183,18 +184,7 @@ async function inviteCreate(args: string[]): Promise<void> {
     // Short enough to type on a phone: 12 characters, no look-alikes.
     const alphabet = "abcdefghjkmnpqrstuvwxyz23456789";
     const code = [...crypto.getRandomValues(new Uint8Array(12))].map((b) => alphabet[b % alphabet.length]).join("");
-    const rsa = (await crypto.subtle.generateKey(
-      { name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
-      true,
-      ["sign", "verify"],
-    )) as CryptoKeyPair;
-    const ed = (await crypto.subtle.generateKey("Ed25519", true, ["sign", "verify"])) as CryptoKeyPair;
-    const pair = async (algorithm: string, keys: CryptoKeyPair) => ({
-      algorithm,
-      publicJwk: await crypto.subtle.exportKey("jwk", keys.publicKey),
-      privateJwk: await crypto.subtle.exportKey("jwk", keys.privateKey),
-    });
-    const keyPairs = JSON.stringify([await pair("RSASSA-PKCS1-v1_5", rsa), await pair("Ed25519", ed)]);
+    const keyPairs = await keyPairsJson();
     rows.push(
       `INSERT INTO invites (code, domain, key_pairs, created_at) VALUES (${sqlString(code)}, ${sqlString(values.domain)}, ${sqlString(keyPairs)}, ${Math.floor(Date.now() / 1000)});`,
     );
@@ -207,6 +197,36 @@ async function inviteCreate(args: string[]): Promise<void> {
   }
 }
 
+/** A fresh RSA and Ed25519 key pair, as the JSON invites and spare keys carry. */
+async function keyPairsJson(): Promise<string> {
+  const rsa = (await crypto.subtle.generateKey(
+    { name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
+    true,
+    ["sign", "verify"],
+  )) as CryptoKeyPair;
+  const ed = (await crypto.subtle.generateKey("Ed25519", true, ["sign", "verify"])) as CryptoKeyPair;
+  const pair = async (algorithm: string, keys: CryptoKeyPair) => ({
+    algorithm,
+    publicJwk: await crypto.subtle.exportKey("jwk", keys.publicKey),
+    privateJwk: await crypto.subtle.exportKey("jwk", keys.privateKey),
+  });
+  return JSON.stringify([await pair("RSASSA-PKCS1-v1_5", rsa), await pair("Ed25519", ed)]);
+}
+
+/** Spare key pairs, for communities people create from Lemmy apps. */
+async function keysStock(args: string[]): Promise<void> {
+  const { values } = parseArgs({
+    args,
+    options: { domain: { type: "string" }, db: { type: "string" }, count: { type: "string" }, local: { type: "boolean", default: false } },
+  });
+  const count = Math.min(Math.max(Number(values.count ?? 5) || 5, 1), 50);
+  const now = Math.floor(Date.now() / 1000);
+  const rows: string[] = [];
+  for (let i = 0; i < count; i++) rows.push(`INSERT INTO spare_keys (key_pairs, created_at) VALUES (${sqlString(await keyPairsJson())}, ${now});`);
+  run(values.db, values.local ?? false, rows.join("\n"));
+  if (values.db) console.log(`\nAdded ${count} spare key pairs: people can create that many communities from Lemmy apps.`);
+}
+
 async function main(argv: string[]): Promise<void> {
   const [group, command, ...given] = argv;
   const rest = withDefaults(given);
@@ -214,6 +234,7 @@ async function main(argv: string[]): Promise<void> {
   if (group === "user" && command === "keys") return userKeys(rest);
   if (group === "community" && command === "create") return communityCreate(rest);
   if (group === "invite" && command === "create") return inviteCreate(rest);
+  if (group === "keys" && command === "stock") return keysStock(rest);
   throw new Error(USAGE);
 }
 

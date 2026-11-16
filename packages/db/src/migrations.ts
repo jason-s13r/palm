@@ -479,6 +479,66 @@ CREATE TABLE IF NOT EXISTS featured_tags (
 )
 `,
   },
+  {
+    version: 17,
+    name: "reports and community moderation",
+    sql: `
+ALTER TABLE posts ADD COLUMN locked INTEGER NOT NULL DEFAULT 0
+;
+ALTER TABLE posts ADD COLUMN featured_community INTEGER NOT NULL DEFAULT 0
+;
+ALTER TABLE posts ADD COLUMN featured_local INTEGER NOT NULL DEFAULT 0
+;
+CREATE TABLE IF NOT EXISTS community_mods (
+  community_id INTEGER NOT NULL REFERENCES communities (id),
+  account_id INTEGER NOT NULL REFERENCES accounts (id),
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (community_id, account_id)
+)
+;
+CREATE TABLE IF NOT EXISTS community_bans (
+  community_id INTEGER NOT NULL REFERENCES communities (id),
+  account_id INTEGER NOT NULL REFERENCES accounts (id),
+  reason TEXT,
+  expires_at INTEGER,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (community_id, account_id)
+)
+;
+CREATE TABLE IF NOT EXISTS reports (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  reporter_id INTEGER NOT NULL REFERENCES accounts (id),
+  post_id INTEGER REFERENCES posts (id),
+  account_id INTEGER NOT NULL REFERENCES accounts (id),
+  reason TEXT NOT NULL,
+  resolved INTEGER NOT NULL DEFAULT 0,
+  resolver_id INTEGER REFERENCES accounts (id),
+  ap_id TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER
+)
+;
+CREATE INDEX IF NOT EXISTS reports_open ON reports (resolved, id)
+;
+CREATE TABLE IF NOT EXISTS mod_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL,
+  mod_id INTEGER NOT NULL REFERENCES accounts (id),
+  post_id INTEGER,
+  account_id INTEGER,
+  community_id INTEGER,
+  reason TEXT,
+  value INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL
+)
+;
+CREATE TABLE IF NOT EXISTS spare_keys (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  key_pairs TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+)
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

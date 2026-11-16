@@ -20,6 +20,7 @@ import {
   admins,
   countAccounts,
   countUnreadMessages,
+  logMod,
   createSession,
   instanceSecret,
   setPasswordHash,
@@ -54,6 +55,7 @@ import type {
 } from "lemmy-js-client";
 import { blockRoutes, blocksOf } from "./blocks.ts";
 import { messageRoutes } from "./messages.ts";
+import { moderationRoutes } from "./moderation.ts";
 import { followedPeople, inboxItems, lemmyInboxCounts, personThreads, resolveObject, searchThreads, threadRoutes } from "./threads.ts";
 import { LEMMY_VERSION, myUserInfo, personView, siteView } from "./views.ts";
 
@@ -252,6 +254,7 @@ app.post("/api/v3/user/ban", async (c) => {
   const target = body.person_id === undefined ? null : await accountById(db, body.person_id);
   if (!target || target.id === admin.id) return fail(c, "couldnt_find_person", 404);
   await setBanned(db, target.id, body.ban !== false);
+  await logMod(db, { kind: "ban", modId: admin.id, accountId: target.id, value: body.ban !== false });
   if (body.ban !== false && body.remove_data) await deletePostsBy(db, target.id);
   return c.json({ person_view: personView(c.env, (await accountById(db, target.id))!), banned: body.ban !== false });
 });
@@ -260,27 +263,6 @@ app.get("/api/v3/user/banned", async (c) => {
   if (!adminOf(c)) return fail(c, "not_an_admin", 403);
   return c.json({ banned: (await bannedAccounts(c.env.bindings.DB)).map((a) => personView(c.env, a)) });
 });
-
-// Removing a post or comment as an admin: it's deleted here, and other servers hear if it was local.
-for (const [path, field] of [
-  ["/api/v3/post/remove", "post_id"],
-  ["/api/v3/comment/remove", "comment_id"],
-] as const) {
-  app.post(path, async (c) => {
-    if (!adminOf(c)) return fail(c, "not_an_admin", 403);
-    const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
-    const id = typeof body[field] === "number" ? (body[field] as number) : -1;
-    const db = c.env.bindings.DB;
-    const post = await postByIdAny(db, id);
-    if (!post) return fail(c, field === "post_id" ? "couldnt_find_post" : "couldnt_find_comment", 404);
-    if (body.removed === false) await restorePost(db, post.id);
-    else {
-      await deletePost(db, post.id);
-      if (!post.apId) c.env.activities.enqueue({ kind: "post_deleted", postId: post.id });
-    }
-    return c.json({ success: true });
-  });
-}
 
 // Blocking other servers is Lemmy's site setting blocked_instances.
 app.put("/api/v3/site", async (c) => {
@@ -355,6 +337,7 @@ async function personNamed(c: C, name: string): Promise<Account | null> {
 
 app.route("/", blockRoutes);
 app.route("/", messageRoutes);
+app.route("/", moderationRoutes);
 app.route("/", threadRoutes);
 
 // --- the inbox: replies to and mentions of the signed-in account -------------
@@ -403,38 +386,13 @@ app.post("/api/v3/user/mark_all_as_read", async (c) => {
   await markNotificationsRead(c.env.bindings.DB, auth.account.id);
   return c.json({ replies: [] } satisfies GetRepliesResponse);
 });
-app.get("/api/v3/user/report_count", (c) =>
-  c.json({ comment_reports: 0, post_reports: 0, private_message_reports: 0 } satisfies GetReportCountResponse),
-);
 app.get("/api/v3/user/replies", (c) => c.json({ replies: [] } satisfies GetRepliesResponse));
 app.get("/api/v3/user/mention", (c) => c.json({ mentions: [] } satisfies GetPersonMentionsResponse));
 // Moderation queues: nothing is reported until reports exist.
-app.get("/api/v3/comment/report/list", (c) => c.json({ comment_reports: [] }));
-app.get("/api/v3/post/report/list", (c) => c.json({ post_reports: [] }));
 app.get("/api/v3/private_message/report/list", (c) => c.json({ private_message_reports: [] }));
 // Sign-up is by invite, so there are no applications to review.
 app.get("/api/v3/admin/registration_application/list", (c) => c.json({ registration_applications: [] }));
 app.get("/api/v3/admin/registration_application/count", (c) => c.json({ registration_applications: 0 }));
-// Bans and removals aren't logged yet.
-app.get("/api/v3/modlog", (c) =>
-  c.json({
-    removed_posts: [],
-    locked_posts: [],
-    featured_posts: [],
-    removed_comments: [],
-    removed_communities: [],
-    banned_from_community: [],
-    banned: [],
-    added_to_community: [],
-    transferred_to_community: [],
-    added: [],
-    admin_purged_persons: [],
-    admin_purged_communities: [],
-    admin_purged_posts: [],
-    admin_purged_comments: [],
-    hidden_communities: [],
-  }),
-);
 app.get("/api/v3/federated_instances", async (c) => {
   const db = c.env.bindings.DB;
   const [linked, blocked] = await Promise.all([knownDomains(db), blockedDomains(db)]);

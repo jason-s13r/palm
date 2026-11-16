@@ -75,6 +75,8 @@ export type FederationTask =
   /** Following a person. `followApId` names the Follow, so it can be undone or accepted. */
   | { kind: "followed"; accountId: number; targetId: number; followApId: string; undo: boolean }
   | { kind: "blocked"; accountId: number; targetId: number; blockApId: string; undo: boolean }
+  /** A report about another server's post, sent there as a Flag. */
+  | { kind: "reported"; reportId: number }
   /** A locked account answering a follow request from another server. */
   | { kind: "follow_answered"; accountId: number; followerId: number; followId: string; accept: boolean }
   | { kind: "subscribed"; accountId: number; communityId: number; followApId: string; undo: boolean }

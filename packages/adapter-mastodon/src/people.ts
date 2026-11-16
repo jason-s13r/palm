@@ -1,5 +1,7 @@
 import { type RequestContext, urls } from "@palm/core";
 import {
+  createReport,
+  postByIdAny,
   accountByHandle,
   accountById,
   accountForLogin,
@@ -414,6 +416,47 @@ peopleRoutes.get("/api/v1/featured_tags/suggestions", async (c) => {
   const me = c.get("account");
   if (!me) return fail(c, "The access token is invalid", 401);
   return c.json((await usedTags(c.env.bindings.DB, me.id)).map((t) => ({ name: t, url: urls.tag(me.domain, t), history: [], following: false })));
+});
+
+// --- reports ------------------------------------------------------------------------
+
+peopleRoutes.post("/api/v1/reports", async (c) => {
+  const me = c.get("account");
+  if (!me) return fail(c, "The access token is invalid", 401);
+  const db = c.env.bindings.DB;
+  const type = c.req.header("content-type") ?? "";
+  const params = (type.includes("json") ? await c.req.json().catch(() => ({})) : await c.req.parseBody({ all: true }).catch(() => ({}))) as Record<string, unknown>;
+  const target = await accountById(db, Number(params.account_id));
+  if (!target) return fail(c, "Record not found", 404);
+  const raw = params.status_ids ?? params["status_ids[]"] ?? [];
+  const statusIds = (Array.isArray(raw) ? raw : [raw]).map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 20);
+  const reason = String(params.comment ?? "").trim() || String(params.category ?? "other");
+  const forward = params.forward === true || params.forward === "true";
+  const reports = [];
+  // One report per post, so Lemmy moderators see each; one for the account if no posts are named.
+  for (const postId of statusIds.length ? statusIds : [null]) {
+    if (postId !== null) {
+      const post = await postByIdAny(db, postId);
+      if (!post || post.accountId !== target.id) continue;
+    }
+    const report = await createReport(db, { reporterId: me.id, postId, accountId: target.id, reason });
+    if (forward && target.apId && postId !== null) c.env.activities.enqueue({ kind: "reported", reportId: report.id });
+    reports.push(report);
+  }
+  const first = reports[0];
+  if (!first) return fail(c, "Validation failed: Status can't be reported", 422);
+  return c.json({
+    id: String(first.id),
+    action_taken: false,
+    action_taken_at: null,
+    category: String(params.category ?? "other"),
+    comment: reason,
+    forwarded: forward && target.apId !== null,
+    created_at: new Date(first.createdAt * 1000).toISOString(),
+    status_ids: statusIds.map(String),
+    rule_ids: null,
+    target_account: await accountView(c, target),
+  });
 });
 
 // --- search ------------------------------------------------------------------------

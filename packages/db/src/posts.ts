@@ -38,6 +38,11 @@ export interface Post {
    * their own, as Mastodon keeps them, so they sort and page with posts.
    */
   reblogOf: number | null;
+  /** Lemmy: no new comments. */
+  locked: boolean;
+  /** Lemmy: pinned to the top of its community, or of the instance. */
+  featuredCommunity: boolean;
+  featuredLocal: boolean;
 }
 
 /** A remote post's image or other file, kept as a link to where it lives. */
@@ -69,6 +74,9 @@ interface PostRow {
   url: string | null;
   attachments: string | null;
   reblog_of?: number | null;
+  locked?: number | null;
+  featured_community?: number | null;
+  featured_local?: number | null;
 }
 
 export const toPost = (r: PostRow): Post => ({
@@ -93,6 +101,9 @@ export const toPost = (r: PostRow): Post => ({
   url: r.url ?? null,
   attachments: r.attachments ? (JSON.parse(r.attachments) as RemoteAttachment[]) : [],
   reblogOf: r.reblog_of ?? null,
+  locked: r.locked === 1,
+  featuredCommunity: r.featured_community === 1,
+  featuredLocal: r.featured_local === 1,
 });
 
 export type { PostRow };
@@ -100,7 +111,7 @@ export type { PostRow };
 /** What a new post needs; the thread fields default to a plain status. */
 export type NewPost = Omit<
   Post,
-  "id" | "createdAt" | "updatedAt" | "communityId" | "title" | "linkUrl" | "rootId" | "parentId" | "path" | "apId" | "url" | "attachments" | "reblogOf"
+  "id" | "createdAt" | "updatedAt" | "communityId" | "title" | "linkUrl" | "rootId" | "parentId" | "path" | "apId" | "url" | "attachments" | "reblogOf" | "locked" | "featuredCommunity" | "featuredLocal"
 > &
   Partial<Pick<Post, "communityId" | "title" | "linkUrl" | "rootId" | "parentId" | "apId" | "url" | "createdAt" | "updatedAt" | "attachments">>;
 

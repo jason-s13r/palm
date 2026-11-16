@@ -101,6 +101,8 @@ export async function listThreadPosts(db: D1Database, listing: PostListing): Pro
     comments: "comment_count DESC, p.id DESC",
     active: "active_at DESC, p.id DESC",
   }[listing.sort];
+  // Pinned posts lead: a community's in the community, the instance's on the front page.
+  const pinned = listing.communityId !== undefined ? "p.featured_community DESC, " : listing.scope === "local" && !listing.ids ? "p.featured_local DESC, " : "";
   const limitAt = 3 + params.length;
   const { results } = await db
     .prepare(
@@ -109,7 +111,7 @@ export async function listThreadPosts(db: D1Database, listing: PostListing): Pro
          COALESCE((SELECT MAX(x.created_at) FROM posts x WHERE x.root_id = p.id AND x.deleted_at IS NULL), p.created_at) AS active_at
        FROM posts p JOIN communities c ON c.id = p.community_id
        WHERE ${where.join(" AND ")}
-       ORDER BY ${order} LIMIT ?${limitAt} OFFSET ?${limitAt + 1}`,
+       ORDER BY ${pinned}${order} LIMIT ?${limitAt} OFFSET ?${limitAt + 1}`,
     )
     .bind(listing.viewerId ?? -1, listing.domain, ...params, listing.limit, listing.offset)
     .all<PostRow & TallyRow & { comment_count: number; active_at: number }>();

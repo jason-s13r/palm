@@ -181,3 +181,24 @@ export { countUnreadMessages, directMessages, markMessagesRead } from "./message
 export type { DirectMessage } from "./messages.ts";
 export { featuredTags, featureTag, MAX_PINS, pinnedIds, pinnedPosts, pinPost, unfeatureTag, unpinPost, usedTags } from "./featured.ts";
 export type { FeaturedTag } from "./featured.ts";
+export {
+  addSpareKeys,
+  countOpenReports,
+  countSpareKeys,
+  createLocalCommunity,
+  createReport,
+  isCommunityBanned,
+  isModerator,
+  listModLog,
+  listReports,
+  logMod,
+  moderatedCommunityIds,
+  moderatorIds,
+  reportById,
+  resolveReport,
+  setCommunityBan,
+  setModerator,
+  setPostFlag,
+  updateCommunity,
+} from "./community-mod.ts";
+export type { ModAction, ModLogEntry, PostFlag, Report } from "./community-mod.ts";

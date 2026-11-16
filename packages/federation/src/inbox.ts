@@ -1,5 +1,6 @@
 import type { Context, FederationBuilder, InboxContext } from "@fedify/fedify";
 import {
+  Flag,
   Accept,
   Activity,
   Announce,
@@ -15,6 +16,7 @@ import {
 } from "@fedify/fedify/vocab";
 import type { RequestContext } from "@palm/core";
 import {
+  createReport,
   acceptFollow,
   accountByApId,
   isBlockedHost,
@@ -171,7 +173,7 @@ async function onDelete(ctx: Ctx, del: Delete, via: Via): Promise<void> {
   if (!post?.apId) return;
   const actor = await ensureAccount(ctx, del.actorId);
   // Its author, or (through a community's Announce) the community's moderators, may delete it.
-  if (actor?.id !== post.accountId && !via.community) return;
+  if (actor?.id !== post.accountId && (!via.community || via.community.id !== post.communityId)) return;
   await deletePost(ctx.data.bindings.DB, post.id);
   if (!via.community) await relayIfLocalCommunity(ctx, post, del);
 }
@@ -291,5 +293,24 @@ export function registerInbox(
     .on(Like, gated<Like>((ctx, like) => dispatch(ctx, like, direct)))
     .on(Dislike, gated<Dislike>((ctx, dislike) => dispatch(ctx, dislike, direct)))
     .on(Undo, gated<Undo>((ctx, undo) => dispatch(ctx, undo, direct)))
-    .on(Announce, gated<Announce>((ctx, announce) => onAnnounce(ctx, announce)));
+    .on(Announce, gated<Announce>((ctx, announce) => onAnnounce(ctx, announce)))
+    .on(Flag, gated<Flag>((ctx, flag) => onFlag(ctx, flag)));
+}
+
+/**
+ * A report from another server about posts here: each local post it names
+ * becomes a report for the admins and the community's moderators.
+ */
+async function onFlag(ctx: Ctx, flag: Flag): Promise<void> {
+  if (!flag.actorId) return;
+  const reporter = await ensureAccount(ctx, flag.actorId).catch(() => null);
+  if (!reporter) return;
+  const db = ctx.data.bindings.DB;
+  const reason = String(flag.content ?? "").slice(0, 2000) || "(no reason given)";
+  for (const id of flag.objectIds) {
+    const post = await postFor(ctx, id);
+    if (post && post.apId === null) {
+      await createReport(db, { reporterId: reporter.id, postId: post.id, accountId: post.accountId, reason, apId: flag.id?.href ?? null });
+    }
+  }
 }

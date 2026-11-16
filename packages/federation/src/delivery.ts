@@ -6,6 +6,7 @@ import {
   Delete,
   Dislike,
   Block,
+  Flag,
   Follow,
   Like,
   Reject,
@@ -17,6 +18,7 @@ import {
 } from "@fedify/fedify/vocab";
 import type { ActivitySink, FederationTask, RequestContext, Resolved } from "@palm/core";
 import {
+  reportById,
   followState,
   accountById,
   blockedDomains,
@@ -213,6 +215,23 @@ export async function runTask(ctx: RequestContext, task: FederationTask): Promis
       const activity = task.undo ? new Undo({ id: new URL(`${task.followApId}/undo`), actor: actorUri(account), object: follow }) : follow;
       const to = recipientOf(target);
       if (to) await send(people, await personKeys(people, account), to, activity);
+      return;
+    }
+    case "reported": {
+      const report = await reportById(db, task.reportId);
+      const [reporter, parts] = report?.postId ? await Promise.all([accountById(db, report.reporterId), postParts(db, report.postId)]) : [null, null];
+      if (!report || !reporter || !parts || !isLocal(reporter) || isLocal(parts.author)) return;
+      // Lemmy wants reports at the community; Mastodon at the author's server.
+      const to = parts.community && !isLocal(parts.community) ? recipientOf(parts.community) : recipientOf(parts.author);
+      if (!to) return;
+      const flag = new Flag({
+        id: new URL(`${actorUri(reporter).href}#reports/${report.id}`),
+        actor: actorUri(reporter),
+        objects: [postUri(parts.post, parts.author), actorUri(parts.author)],
+        content: report.reason,
+        ...(parts.community ? { audience: communityUri(parts.community) } : {}),
+      });
+      await send(people, await personKeys(people, reporter), to, flag);
       return;
     }
     case "follow_answered": {

@@ -1,4 +1,4 @@
-import { vote } from "@palm/db";
+import { setPostFlag, vote } from "@palm/db";
 import { placeholderAccount } from "./remote.ts";
 
 /**
@@ -36,7 +36,9 @@ export type Act =
   | { kind: "vote"; target: string; voter: string | null; score: number }
   | { kind: "unvote"; target: string; voter: string | null }
   | { kind: "delete"; target: string }
-  | { kind: "unboost"; target: string };
+  | { kind: "unboost"; target: string }
+  /** A Lemmy community's moderators locking or pinning a post (Fedify doesn't know Lock). */
+  | { kind: "lock" | "feature"; target: string; value: boolean };
 
 export function actOf(activity: unknown): Act | null {
   // A community's Announce wraps the activity it relays.
@@ -49,6 +51,14 @@ export function actOf(activity: unknown): Act | null {
     // An emoji reaction counts as an upvote, as Lemmy shows them.
     return target ? { kind: "vote", target, voter: actor, score: type === "Dislike" ? -1 : 1 } : null;
   }
+  if (type === "Lock") {
+    const target = idOf(inner.object);
+    return target ? { kind: "lock", target, value: true } : null;
+  }
+  if ((type === "Add" || type === "Remove") && /\/featured$/.test(idOf(inner.target) ?? "")) {
+    const target = idOf(inner.object);
+    return target ? { kind: "feature", target, value: type === "Add" } : null;
+  }
   if (type === "Delete") {
     const target = idOf(inner.object);
     return target ? { kind: "delete", target } : null;
@@ -59,6 +69,7 @@ export function actOf(activity: unknown): Act | null {
     if (!target) return null;
     if (undone && VOTES.has(undone)) return { kind: "unvote", target, voter: idOf(inner.object.actor) ?? actor };
     if (undone === "Announce") return { kind: "unboost", target };
+    if (undone === "Lock") return { kind: "lock", target, value: false };
   }
   return null;
 }
@@ -92,11 +103,24 @@ export async function triage(
   }
   // Local posts and people have no ap_id to look up, and votes on them notify.
   if (localHosts.includes(host)) return "fedify";
-  const post = await db.prepare("SELECT id FROM posts WHERE ap_id = ?1").bind(act.target).first<{ id: number }>();
+  const post = await db.prepare("SELECT id, community_id FROM posts WHERE ap_id = ?1").bind(act.target).first<{ id: number; community_id: number | null }>();
   if (!post) {
     if (act.kind !== "delete") return "drop";
     const account = await db.prepare("SELECT 1 FROM accounts WHERE ap_id = ?1").bind(act.target).first();
     return account ? "fedify" : "drop";
+  }
+  if (act.kind === "lock" || act.kind === "feature") {
+    // Only the post's own community (or a moderator on its server) may.
+    const community = post.community_id
+      ? await db.prepare("SELECT ap_id FROM communities WHERE id = ?").bind(post.community_id).first<{ ap_id: string | null }>()
+      : null;
+    if (!community?.ap_id) return "drop";
+    const signer = await verify(request, body);
+    if (!signer) return "drop";
+    const allowed = signer === community.ap_id || new URL(signer).host === new URL(community.ap_id).host;
+    if (!allowed) return "drop";
+    await setPostFlag(db, post.id, act.kind === "lock" ? "locked" : "featured_community", act.value);
+    return "handled";
   }
   if ((act.kind !== "vote" && act.kind !== "unvote") || !act.voter) return "fedify";
   // The signer is the voter, or a community relaying the vote.

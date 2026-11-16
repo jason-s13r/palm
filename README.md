@@ -128,7 +128,8 @@ Node 22+ and pnpm.
 
    Lemmy apps take the code as the sign-up answer; Mastodon apps as the
    reason. Communities are made the same way:
-   `pnpm palm community create sandbox --title Sandbox`. `--domain` and `--db`
+   `pnpm palm community create sandbox --title Sandbox`. To let people create communities from Lemmy apps, stock
+   signing keys for them: `pnpm palm keys stock --count 5`. `--domain` and `--db`
    override the defaults, and without a database the CLI prints the SQL.
 
 If the domain already serves a website, palm needs the whole host: put the
