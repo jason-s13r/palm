@@ -1,5 +1,13 @@
-import { createFederationBuilder, importJwk, type Context, type Federation, type FederationBuilder, type SenderKeyPair } from "@fedify/fedify";
-import type { Recipient } from "@fedify/fedify/vocab";
+import {
+  createFederationBuilder,
+  importJwk,
+  type Context,
+  type Federation,
+  type FederationBuilder,
+  type SendActivityOptions,
+  type SenderKeyPair,
+} from "@fedify/fedify";
+import type { Activity, Recipient } from "@fedify/fedify/vocab";
 import { type RequestContext } from "@palm/core";
 import { communityKeys, type Account, type Community } from "@palm/db";
 import { D1KvStore } from "./kv.ts";
@@ -108,6 +116,34 @@ export const recipientOf = (actor: { apId: string | null; inbox: string | null; 
   actor.apId && actor.inbox ? recipient({ actorId: actor.apId, inbox: actor.inbox, sharedInbox: actor.sharedInbox }) : null;
 
 /** Logs a problem with federation without failing the request or job around it. */
+/**
+ * Sends an activity, through the queue when it can and straight away when it
+ * can't. One recipient (accepting a follow, a reply's author) is sent at once:
+ * it's a single cheap request, and waiting on the queue only delays it. More
+ * go through the queue, and if the queue refuses (the free plan's daily
+ * operations used up), they're sent now instead of lost.
+ */
+export async function send(
+  ctx: Context<RequestContext>,
+  keys: SenderKeyPair[],
+  recipients: Recipient | Recipient[],
+  activity: Activity,
+  options: SendActivityOptions = {},
+): Promise<void> {
+  const many = Array.isArray(recipients) && recipients.length > 1;
+  if (!many || options.immediate) {
+    await ctx.sendActivity(keys, recipients, activity, { ...options, immediate: true });
+    return;
+  }
+  try {
+    await ctx.sendActivity(keys, recipients, activity, options);
+  } catch (error) {
+    // With a queue, sending only enqueues, so a failure here is the queue's.
+    logProblem("queue_refused_sending_now", { activity: activity.id?.href ?? null, recipients: Array.isArray(recipients) ? recipients.length : 1, error: String(error) });
+    await ctx.sendActivity(keys, recipients, activity, { ...options, immediate: true });
+  }
+}
+
 export function logProblem(event: string, details: Record<string, unknown>): void {
   console.warn(JSON.stringify({ palm: event, ...details }));
 }

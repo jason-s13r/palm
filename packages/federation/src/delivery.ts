@@ -26,7 +26,7 @@ import {
 import { actorUri, communityUri, createFor, followersUri, objectFor, postParts, postUri, tombstoneFor, type PostParts } from "./objects.ts";
 import type { QueueBody } from "./queue.ts";
 import { backfillProfile, backfillThread, resolve as resolveRemote, storeRemotePost } from "./remote.ts";
-import { communitySenderKeys, contextsFor, federationsFor, logProblem, personKeys, recipient, recipientOf } from "./shared.ts";
+import { communitySenderKeys, contextsFor, federationsFor, logProblem, personKeys, recipient, recipientOf, send } from "./shared.ts";
 import { personFor } from "./people.ts";
 
 const isLocal = (a: { apId: string | null }) => a.apId === null;
@@ -60,7 +60,7 @@ export async function announceToCommunity(ctx: RequestContext, community: Commun
   if (!members.length) return;
   const { communities } = await contextsFor(ctx);
   const id = communityUri(community);
-  await communities.sendActivity(
+  await send(communities, 
     await communitySenderKeys(communities, community),
     members,
     new Announce({
@@ -97,7 +97,7 @@ async function sendAboutPost(ctx: RequestContext, parts: PostParts, activity: Ac
     recipients = [...(await followers(db, parts.author.id)).map(recipient), ...recipients];
   }
   const to = await allowed(db, unique(recipients));
-  if (to.length) await people.sendActivity(keys, to, activity, { preferSharedInbox: true });
+  if (to.length) await send(people, keys, to, activity, { preferSharedInbox: true });
 }
 
 /** Local notifications for a local post: replies to and mentions of local accounts. */
@@ -169,7 +169,7 @@ export async function runTask(ctx: RequestContext, task: FederationTask): Promis
           parts.community && !isLocal(parts.community) ? recipientOf(parts.community) : null,
           isLocal(parts.author) ? null : recipientOf(parts.author),
         ]));
-        if (to.length) await people.sendActivity(keys, to, activity, { preferSharedInbox: true });
+        if (to.length) await send(people, keys, to, activity, { preferSharedInbox: true });
       }
       return;
     }
@@ -190,7 +190,7 @@ export async function runTask(ctx: RequestContext, task: FederationTask): Promis
         ? new Undo({ id: new URL(`${announce.id!.href}/undo/${Date.now()}`), actor: actorUri(booster), object: announce, tos: [PUBLIC_COLLECTION] })
         : announce;
       const to = await allowed(db, unique([...(await followers(db, booster.id)).map(recipient), isLocal(parts.author) ? null : recipientOf(parts.author)]));
-      if (to.length) await people.sendActivity(await personKeys(people, booster), to, activity, { preferSharedInbox: true });
+      if (to.length) await send(people, await personKeys(people, booster), to, activity, { preferSharedInbox: true });
       return;
     }
     case "followed": {
@@ -203,7 +203,7 @@ export async function runTask(ctx: RequestContext, task: FederationTask): Promis
       const follow = new Follow({ id: new URL(task.followApId), actor: actorUri(account), object: actorUri(target) });
       const activity = task.undo ? new Undo({ id: new URL(`${task.followApId}/undo`), actor: actorUri(account), object: follow }) : follow;
       const to = recipientOf(target);
-      if (to) await people.sendActivity(await personKeys(people, account), to, activity);
+      if (to) await send(people, await personKeys(people, account), to, activity);
       return;
     }
     case "subscribed": {
@@ -212,7 +212,7 @@ export async function runTask(ctx: RequestContext, task: FederationTask): Promis
       const follow = new Follow({ id: new URL(task.followApId), actor: actorUri(account), object: communityUri(community) });
       const activity = task.undo ? new Undo({ id: new URL(`${task.followApId}/undo`), actor: actorUri(account), object: follow }) : follow;
       const to = recipientOf(community);
-      if (to) await people.sendActivity(await personKeys(people, account), to, activity);
+      if (to) await send(people, await personKeys(people, account), to, activity);
       return;
     }
     case "profile_updated": {
@@ -221,7 +221,7 @@ export async function runTask(ctx: RequestContext, task: FederationTask): Promis
       const person = await personFor(people, account);
       const to = await allowed(db, (await followers(db, account.id)).map(recipient));
       if (person && to.length) {
-        await people.sendActivity(
+        await send(people, 
           await personKeys(people, account),
           to,
           new Update({ id: new URL(`${actorUri(account).href}#updates/${Date.now()}`), actor: actorUri(account), tos: [PUBLIC_COLLECTION], object: person }),

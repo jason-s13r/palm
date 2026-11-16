@@ -20,8 +20,10 @@ outside this repo (the Palm project's `palm-decisions.md`).
 - `packages/federation`: ActivityPub on Fedify: WebFinger, Person actors,
   followers, the inboxes and nodeinfo, with Fedify's key-value store on D1
   (`D1KvStore`) and its message queue on a Cloudflare Queue
-  (`CloudflareMessageQueue`). Outgoing delivery runs as queue jobs, which the
-  same Worker consumes. Received activities are handled in the request, not
+  (`CloudflareMessageQueue`). Outgoing delivery to several inboxes runs as queue
+  jobs, which the same Worker consumes; a single recipient is sent at once, and
+  anything the queue refuses (the daily quota is account-wide) is sent at once
+  too (`send` in `shared.ts`). Received activities are handled in the request, not
   queued: a busy Lemmy community sends over a thousand an hour, and each queue
   message costs three of the free plan's 10,000 daily operations. Votes and
   deletes about things palm doesn't hold are dropped before Fedify parses them

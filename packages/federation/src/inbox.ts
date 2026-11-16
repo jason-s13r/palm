@@ -42,7 +42,7 @@ import {
 import { htmlToText, sanitizeHtml } from "@palm/core";
 import { announceToCommunity } from "./delivery.ts";
 import { ensureAccount, ensureActor, ensureCommunity, storeRemotePost } from "./remote.ts";
-import { communitySenderKeys, contextsFor, localDomains, logProblem, personKeys } from "./shared.ts";
+import { communitySenderKeys, contextsFor, localDomains, logProblem, personKeys, send } from "./shared.ts";
 
 type Ctx = Context<RequestContext>;
 
@@ -84,14 +84,14 @@ async function onFollow(ctx: Ctx, follow: Follow): Promise<void> {
     await addFollower(db, target.account.id, row);
     const from = await ensureAccount(ctx, follower);
     if (from) await notify(db, { accountId: target.account.id, kind: "follow", fromAccountId: from.id });
-    await people.sendActivity(
+    await send(people, 
       await personKeys(people, target.account),
       follower,
       new Accept({ id: new URL(`#accepts/${crypto.randomUUID()}`, follow.objectId), actor: follow.objectId, object: follow.id }),
     );
   } else if ("community" in target && isLocalCommunity(target.community)) {
     await addCommunityFollower(db, target.community.id, row);
-    await communities.sendActivity(
+    await send(communities, 
       await communitySenderKeys(communities, target.community),
       follower,
       // Lemmy wants the Follow itself inside the Accept.
