@@ -296,6 +296,14 @@ app.get("/api/v1/accounts/lookup", async (c) => {
   return found ? c.json(account(c.env, found.account, await accountStats(c.env, found.account))) : fail(c, "Record not found", 404);
 });
 
+// Several accounts at once, by ID; unknown ones are left out.
+app.get("/api/v1/accounts", async (c) => {
+  const ids = [...(c.req.queries("id[]") ?? []), ...(c.req.queries("id") ?? [])].filter((id) => /^\d+$/.test(id)).slice(0, 40);
+  const found = await Promise.all(ids.map((id) => accountById(c.env.bindings.DB, Number(id))));
+  const local = found.filter((a): a is Account => a !== null && a.domain === c.env.domain.domain);
+  return c.json(await Promise.all(local.map(async (a) => account(c.env, a, await accountStats(c.env, a)))));
+});
+
 // Followers of an account that the signed-in account also follows: none yet.
 app.get("/api/v1/accounts/familiar_followers", (c) =>
   c.json(c.req.queries("id[]")?.concat(c.req.queries("id") ?? []).map((id) => ({ id, accounts: [] })) ?? []),

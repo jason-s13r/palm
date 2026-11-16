@@ -6,11 +6,17 @@ import {
   createPost,
   deletePost,
   lastPostAt,
+  attachMedia,
+  describeMedia,
   localPublicPosts,
+  mediaById,
+  mediaForPosts,
+  storeMedia,
   postById,
   postsByAccount,
   repliesTo,
   type Account,
+  type Media,
   type OAuthApp,
   type Page,
   type Post,
@@ -71,9 +77,27 @@ async function stats(ctx: RequestContext, a: Account): Promise<AccountStats> {
 /** Profile counts for an account, for the account endpoints. */
 export const accountStats = stats;
 
+/** A Mastodon MediaAttachment for an uploaded image. */
+export function mediaAttachment(ctx: RequestContext, m: Media) {
+  const url = urls.media(ctx.domain.domain, m.file);
+  return {
+    id: m.id,
+    type: "image",
+    url,
+    preview_url: url,
+    remote_url: null,
+    preview_remote_url: null,
+    text_url: null,
+    meta: {},
+    description: m.description,
+    blurhash: null,
+  };
+}
+
 /** Mastodon Status entities for posts, with their authors and reply targets looked up once each. */
 async function statuses(ctx: RequestContext, posts: Post[]) {
   const db = ctx.bindings.DB;
+  const media = await mediaForPosts(db, posts.map((p) => p.id));
   const authors = new Map<number, Promise<ReturnType<typeof account> | null>>();
   const authorOf = (id: number) => {
     let found = authors.get(id);
@@ -116,7 +140,7 @@ async function statuses(ctx: RequestContext, posts: Post[]) {
         reblog: null,
         application: null,
         account: author,
-        media_attachments: [],
+        media_attachments: (media.get(post.id) ?? []).map((m) => mediaAttachment(ctx, m)),
         mentions: [],
         tags: [],
         emojis: [],
@@ -173,7 +197,11 @@ async function body(c: C): Promise<Record<string, unknown>> {
 
 const truthy = (value: unknown) => value === true || value === "true" || value === "1";
 const text = (value: unknown) => (typeof value === "string" ? value : "");
-const nonEmptyList = (value: unknown) => (Array.isArray(value) ? value.length > 0 : typeof value === "string" && value !== "");
+/** A list parameter, sent as a JSON array or repeated form fields (one field arrives as a string). */
+const list = (value: unknown): string[] =>
+  (Array.isArray(value) ? value : value === undefined || value === null || value === "" ? [] : [value]).map(String);
+
+export const MAX_ATTACHMENTS = 4;
 
 export const statusRoutes = new Hono<Env>();
 
@@ -183,10 +211,15 @@ statusRoutes.post("/api/v1/statuses", async (c) => {
   const params = await body(c);
   const source = text(params.status).trim();
 
-  if (nonEmptyList(params.media_ids)) return fail(c, "Attaching media isn't available on this server yet");
+  const mediaIds = list(params.media_ids);
   if (params.poll) return fail(c, "Polls aren't available on this server yet");
   if (params.scheduled_at) return fail(c, "Scheduled posts aren't available on this server yet");
-  if (!source) return fail(c, "Validation failed: Text can't be blank");
+  if (mediaIds.length > MAX_ATTACHMENTS) return fail(c, `Validation failed: You can attach up to ${MAX_ATTACHMENTS} images`);
+  for (const id of mediaIds) {
+    const media = await mediaById(c.env.bindings.DB, id);
+    if (!media || media.accountId !== me.id || media.postId !== null) return fail(c, "Validation failed: Media not found");
+  }
+  if (!source && !mediaIds.length) return fail(c, "Validation failed: Text can't be blank");
   if ([...source].length > MAX_CHARACTERS) {
     return fail(c, `Validation failed: Text character limit of ${MAX_CHARACTERS} exceeded`);
   }
@@ -214,6 +247,7 @@ statusRoutes.post("/api/v1/statuses", async (c) => {
     language: text(params.language) || null,
     inReplyTo,
   });
+  await attachMedia(c.env.bindings.DB, post.id, me.id, mediaIds);
   c.env.activities.postCreated(post);
   const [status] = await statuses(c.env, [post]);
   return c.json(status);
@@ -318,4 +352,48 @@ statusRoutes.get("/api/v1/timelines/public", async (c) => {
   const posts = newestFirst(await localPublicPosts(c.env.bindings.DB, c.env.domain.domain, page(c)));
   linkHeader(c, posts);
   return c.json(await statuses(c.env, posts));
+});
+
+// --- media -------------------------------------------------------------------
+
+async function upload(c: C) {
+  const me = c.get("account");
+  if (!me) return fail(c, "The access token is invalid", 401);
+  const form = await c.req.formData().catch(() => null);
+  const file = form?.get("file");
+  if (!(file instanceof File)) return fail(c, "Validation failed: File can't be blank");
+  const description = form?.get("description");
+  const stored = await storeMedia(
+    c.env.bindings.DB,
+    c.env.bindings.MEDIA,
+    me.id,
+    file,
+    typeof description === "string" && description.trim() ? description.trim() : null,
+  );
+  if (stored === "no_storage") return fail(c, "Uploads aren't available on this server");
+  if (stored === "unsupported_type") return fail(c, "Validation failed: File content type is invalid");
+  if (stored === "too_large") return fail(c, "Validation failed: File file size must be less than 10 MB");
+  return c.json(mediaAttachment(c.env, stored));
+}
+
+statusRoutes.post("/api/v1/media", upload);
+statusRoutes.post("/api/v2/media", upload);
+
+async function ownMedia(c: C): Promise<Media | null> {
+  const me = c.get("account");
+  const media = me ? await mediaById(c.env.bindings.DB, c.req.param("id") ?? "") : null;
+  return media && media.accountId === me?.id ? media : null;
+}
+
+statusRoutes.get("/api/v1/media/:id", async (c) => {
+  const media = await ownMedia(c);
+  return media ? c.json(mediaAttachment(c.env, media)) : fail(c, "Record not found", 404);
+});
+
+statusRoutes.put("/api/v1/media/:id", async (c) => {
+  const media = await ownMedia(c);
+  if (!media) return fail(c, "Record not found", 404);
+  const description = text((await body(c)).description).trim() || null;
+  await describeMedia(c.env.bindings.DB, media.id, description);
+  return c.json(mediaAttachment(c.env, { ...media, description }));
 });
