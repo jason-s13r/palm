@@ -48,6 +48,12 @@ export interface ActivitySink {
    * `!name@host`) or URL, fetching and recording it if palm hasn't met it.
    */
   resolve(query: string): Promise<Resolved | null>;
+  /**
+   * Fills in a remote person's recent posts and counts from their server,
+   * for their profile. Waits for it, so the profile can show them; does
+   * nothing if palm did so recently.
+   */
+  backfillProfile(accountId: number): Promise<void>;
 }
 
 /** What `resolve` found, by its ID in palm's tables. */
