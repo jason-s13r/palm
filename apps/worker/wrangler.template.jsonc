@@ -12,6 +12,9 @@
   // One D1 database (wrangler d1 create <name>). palm creates and migrates its
   // own tables on the first request, so there's no migration step to run.
   "d1_databases": [{ "binding": "DB", "database_name": "<database-name>", "database_id": "<database-id>" }],
+  // An R2 bucket for uploaded images (optional; without it uploads are
+  // refused). wrangler deploy creates it if it doesn't exist.
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "<bucket-name>" }],
   // One route per host in palm.config.ts: the domain, plus any API hosts.
   "routes": [
     { "pattern": "<domain>/*", "zone_name": "<domain>" }

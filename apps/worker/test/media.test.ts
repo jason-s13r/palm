@@ -1,0 +1,72 @@
+import { describe, expect, it } from "vitest";
+import { createAccount, createCommunity, json, MASTODON, mastodonToken, worker } from "./helpers.ts";
+
+const DOMAIN = "https://palm.test";
+// A 1x1 PNG.
+const PNG = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="), (ch) => ch.charCodeAt(0));
+
+const imageForm = (field: string, extra: Record<string, string> = {}) => {
+  const form = new FormData();
+  form.append(field, new File([PNG], "dot.png", { type: "image/png" }));
+  for (const [k, v] of Object.entries(extra)) form.append(k, v);
+  return form;
+};
+
+describe("Media", () => {
+  it("uploads an image from a Mastodon app, attaches it, serves it and federates it", async () => {
+    const id = await createAccount("yan", "pw");
+    const auth = { authorization: `Bearer ${await mastodonToken(id)}` };
+
+    const uploaded = await worker.fetch(`${MASTODON}/api/v2/media`, { method: "POST", headers: auth, body: imageForm("file", { description: "a dot" }) });
+    expect(uploaded.status).toBe(200);
+    const media = await uploaded.json<{ id: string; type: string; url: string; description: string }>();
+    expect(media).toMatchObject({ type: "image", description: "a dot" });
+    expect(media.url).toMatch(/^https:\/\/palm\.test\/pictrs\/image\/[0-9a-f]+\.png$/);
+
+    const served = await worker.fetch(media.url);
+    expect(served.status).toBe(200);
+    expect(served.headers.get("content-type")).toBe("image/png");
+    expect(new Uint8Array(await served.arrayBuffer())).toEqual(PNG);
+
+    const req = json({ status: "", media_ids: [media.id] });
+    const status = await (await worker.fetch(`${MASTODON}/api/v1/statuses`, { ...req, headers: { ...req.headers, ...auth } })).json<{ uri: string; media_attachments: { id: string }[] }>();
+    expect(status.media_attachments.map((m) => m.id)).toEqual([media.id]);
+
+    const note = await (await worker.fetch(status.uri, { headers: { accept: "application/activity+json" } })).json<{ attachment: { type: string; url: string; name: string } }>();
+    expect(note.attachment).toMatchObject({ type: "Document", url: media.url, name: "a dot" });
+
+    // Attached once is attached for good.
+    const again = await worker.fetch(`${MASTODON}/api/v1/statuses`, { ...req, headers: { ...req.headers, ...auth } });
+    expect(again.status).toBe(422);
+  });
+
+  it("uploads through Lemmy's pict-rs endpoint and deletes with the token", async () => {
+    await createAccount("zed", "pw-pw-pw");
+    const { jwt } = await (await worker.fetch(`${DOMAIN}/api/v3/user/login`, json({ username_or_email: "zed", password: "pw-pw-pw" }))).json<{ jwt: string }>();
+    const res = await worker.fetch(`${DOMAIN}/pictrs/image`, { method: "POST", headers: { cookie: `jwt=${jwt}` }, body: imageForm("images[]") });
+    expect(res.status).toBe(200);
+    const body = await res.json<{ msg: string; files: { file: string; delete_token: string }[] }>();
+    expect(body.msg).toBe("ok");
+    const [file] = body.files;
+
+    const communityId = await createCommunity("pics");
+    const url = `${DOMAIN}/pictrs/image/${file!.file}`;
+    const post = await (
+      await worker.fetch(`${DOMAIN}/api/v3/post`, { ...json({ community_id: communityId, name: "A picture", url }), headers: { authorization: `Bearer ${jwt}`, "content-type": "application/json" } })
+    ).json<{ post_view: { post: { url: string; thumbnail_url: string } } }>();
+    expect(post.post_view.post).toMatchObject({ url, thumbnail_url: url });
+
+    expect((await worker.fetch(`${DOMAIN}/pictrs/image/delete/wrong/${file!.file}`)).status).toBe(404);
+    expect((await worker.fetch(`${DOMAIN}/pictrs/image/delete/${file!.delete_token}/${file!.file}`)).status).toBe(204);
+    expect((await worker.fetch(url)).status).toBe(404);
+  });
+
+  it("refuses uploads without a login or of other types", async () => {
+    expect((await worker.fetch(`${DOMAIN}/pictrs/image`, { method: "POST", body: imageForm("images[]") })).status).toBe(401);
+    const id = await createAccount("abe", "pw");
+    const form = new FormData();
+    form.append("file", new File(["hello"], "note.txt", { type: "text/plain" }));
+    const res = await worker.fetch(`${MASTODON}/api/v2/media`, { method: "POST", headers: { authorization: `Bearer ${await mastodonToken(id)}` }, body: form });
+    expect(res.status).toBe(422);
+  });
+});

@@ -94,7 +94,8 @@ export async function handle(
       // @name@domain. Their paths don't overlap: Lemmy's API is /api/v3,
       // Mastodon's /api/v1 and /api/v2. Discovery (WebFinger, nodeinfo) stays
       // with federation, which answers nodeinfo as Lemmy.
-      if (url.pathname.startsWith("/api/v3/")) return handleLemmy(request, ctx);
+      // Uploaded images live where Lemmy keeps them, for both kinds of app.
+      if (url.pathname.startsWith("/api/v3/") || url.pathname.startsWith("/pictrs/")) return handleLemmy(request, ctx);
       if (isMastodonPath(url.pathname)) return handleMastodon(request, ctx);
       return handleFederation(request, ctx, (req) => federationFallback(config, req, new URL(req.url)));
   }
