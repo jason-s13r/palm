@@ -9,7 +9,9 @@ import type { FederationTask } from "@palm/core";
  */
 export type QueueBody =
   | { palm: "fedify"; federation: FederationName; message: unknown }
-  | { palm: "task"; domain: string; task: FederationTask };
+  | { palm: "task"; domain: string; task: FederationTask }
+  /** A delivery to an inbox, accepted at once and verified in the queue. */
+  | { palm: "inbox"; url: string; headers: [string, string][]; body: string; receivedAt: number };
 
 /** palm runs two Fedify federations: one for people, one for communities. */
 export type FederationName = "people" | "communities";

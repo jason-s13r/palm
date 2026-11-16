@@ -261,6 +261,7 @@ export async function processQueueMessage(body: QueueBody, contextFor: (domain: 
     if (ctx) await runTask(ctx, body.task);
     return;
   }
+  if (body.palm !== "fedify") return;
   // Fedify's messages carry the origin they were made for.
   const baseUrl = (body.message as { baseUrl?: string }).baseUrl;
   const ctx = baseUrl ? contextFor(new URL(baseUrl).host) : null;
