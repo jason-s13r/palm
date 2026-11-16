@@ -33,6 +33,7 @@ import {
   postByUri,
   upsertRemoteAccount,
   upsertRemoteCommunity,
+  vote,
   type Account,
   type Community,
   type Post,
@@ -297,6 +298,8 @@ export async function storeRemotePost(
     throw error;
   });
 
+  // Lemmy counts an author's own post or comment as upvoted, without sending a vote for it.
+  if (post.communityId) await vote(db, post.id, author.id, 1);
   if (localMentions.length) await addMentions(db, post.id, localMentions.map((m) => m.id));
   for (const m of localMentions) await notify(db, { accountId: m.id, kind: "mention", fromAccountId: author.id, postId: post.id });
   if (parent) {
