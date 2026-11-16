@@ -1,6 +1,6 @@
 import { createFederationBuilder, importJwk, type Context, type Federation } from "@fedify/fedify";
-import { Accept, Create, Delete, Endpoints, Follow, Image, Note, Person, PUBLIC_COLLECTION, Tombstone, Undo } from "@fedify/fedify/vocab";
-import { nodeinfoVersion, type ActivitySink, type PostRef, type RequestContext } from "@palm/core";
+import { Accept, Create, Delete, Document, Endpoints, Follow, Image, Note, Person, PUBLIC_COLLECTION, Tombstone, Undo } from "@fedify/fedify/vocab";
+import { nodeinfoVersion, urls, type ActivitySink, type PostRef, type RequestContext } from "@palm/core";
 import {
   accountById,
   accountForLogin,
@@ -11,10 +11,12 @@ import {
   countLocalPosts,
   countPosts,
   followers,
+  mediaForPosts,
   postById,
   postsByAccount,
   removeFollower,
   type Account,
+  type Media,
   type Post,
 } from "@palm/db";
 import { Temporal } from "temporal-polyfill";
@@ -115,9 +117,17 @@ function audience(ctx: Context<RequestContext>, account: Account, visibility: Po
 
 const noteUri = (ctx: Context<RequestContext>, id: number) => ctx.getObjectUri(Note, { id: String(id) });
 
-function noteFor(ctx: Context<RequestContext>, account: Account, post: Post): Note {
+function noteFor(ctx: Context<RequestContext>, account: Account, post: Post, media: Media[] = []): Note {
   const id = noteUri(ctx, post.id);
   return new Note({
+    attachments: media.map(
+      (m) =>
+        new Document({
+          url: new URL(urls.media(ctx.data.domain.domain, m.file)),
+          mediaType: m.contentType,
+          name: m.description,
+        }),
+    ),
     id,
     url: id,
     attribution: ctx.getActorUri(identifierOf(account)),
@@ -131,8 +141,8 @@ function noteFor(ctx: Context<RequestContext>, account: Account, post: Post): No
   });
 }
 
-function createFor(ctx: Context<RequestContext>, account: Account, post: Post): Create {
-  const note = noteFor(ctx, account, post);
+function createFor(ctx: Context<RequestContext>, account: Account, post: Post, media: Media[] = []): Create {
+  const note = noteFor(ctx, account, post, media);
   return new Create({
     id: new URL(`${note.id!.href}#create`),
     actor: ctx.getActorUri(identifierOf(account)),
@@ -150,7 +160,8 @@ builder.setObjectDispatcher(Note, "/objects/{id}", async (ctx, { id }) => {
   if (!post || (post.visibility !== "public" && post.visibility !== "unlisted")) return null;
   const account = await accountById(ctx.data.bindings.DB, post.accountId);
   if (account?.domain !== ctx.data.domain.domain) return null;
-  return noteFor(ctx, account, post);
+  const media = await mediaForPosts(ctx.data.bindings.DB, [post.id]);
+  return noteFor(ctx, account, post, media.get(post.id));
 });
 
 const OUTBOX_PAGE = 20;
@@ -169,8 +180,9 @@ builder
       limit: OUTBOX_PAGE,
     });
     const last = posts.at(-1);
+    const media = await mediaForPosts(ctx.data.bindings.DB, posts.map((p) => p.id));
     return {
-      items: posts.map((post) => createFor(ctx, account, post)),
+      items: posts.map((post) => createFor(ctx, account, post, media.get(post.id))),
       nextCursor: posts.length === OUTBOX_PAGE && last ? String(last.id) : null,
     };
   })
@@ -293,7 +305,8 @@ export function activitySink(ctx: RequestContext): ActivitySink {
         const ready = await prepare(ref);
         const post = await postById(ctx.bindings.DB, ref.id);
         if (!ready || !post) return;
-        await ready.fctx.sendActivity({ identifier: identifierOf(ready.account) }, "followers", createFor(ready.fctx, ready.account, post), {
+        const media = await mediaForPosts(ctx.bindings.DB, [post.id]);
+        await ready.fctx.sendActivity({ identifier: identifierOf(ready.account) }, "followers", createFor(ready.fctx, ready.account, post, media.get(post.id)), {
           preferSharedInbox: true,
         });
       });
