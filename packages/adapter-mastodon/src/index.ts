@@ -333,7 +333,6 @@ app.route("/", statusRoutes);
 
 const empty = (c: C) => c.json([]);
 for (const path of [
-  "/api/v1/timelines/tag/:tag",
   "/api/v1/timelines/list/:id",
   "/api/v1/accounts/:id/endorsements",
   "/api/v1/accounts/:id/featured_tags",

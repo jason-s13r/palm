@@ -15,6 +15,7 @@ import {
   markNotificationsRead,
   postsByIds,
   relationships,
+  searchTags,
   storeMedia,
   unfollow,
   updateProfile,
@@ -25,7 +26,7 @@ import {
   type OAuthApp,
 } from "@palm/db";
 import { Hono, type Context } from "hono";
-import { accountStats, statuses } from "./statuses.ts";
+import { accountStats, statuses, tagView } from "./statuses.ts";
 import { account, credentialAccount, iso } from "./views.ts";
 
 /**
@@ -225,7 +226,12 @@ peopleRoutes.get("/api/v2/search", async (c) => {
     }
     return c.json(out);
   }
-  if (type === "statuses" || type === "hashtags") return c.json(out);
+  if (type === "hashtags" || q.startsWith("#")) {
+    out.hashtags.push(...(await searchTags(db, q)).map((t) => tagView(c.env, t)));
+    if (!(await searchTags(db, q, 1)).length && /^#?[\p{L}\p{N}_]+$/u.test(q)) out.hashtags.push(tagView(c.env, q.replace(/^#/, "").toLowerCase()));
+    return c.json(out);
+  }
+  if (type === "statuses") return c.json(out);
   // A handle is looked up (and fetched, with resolve); otherwise names that match, here and known.
   if (/^@?[^@\s]+@[^@\s]+\.[^@\s]+$/.test(q)) {
     const found = await accountNamed(c, q, resolve);

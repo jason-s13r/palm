@@ -1,10 +1,13 @@
-import { escapeHtml, mentionsIn, textToHtml, urls, type RequestContext } from "@palm/core";
+import { escapeHtml, hashtagsIn, mentionsIn, textToHtml, urls, type RequestContext } from "@palm/core";
 import {
   accountByHandle,
   accountById,
   accountForLogin,
   accountsByIds,
   addMentions,
+  addTags,
+  postsTagged,
+  tagsFor,
   attachMedia,
   boost,
   bookmark,
@@ -192,11 +195,12 @@ export async function statuses(ctx: RequestContext, rows: Post[], viewer: Accoun
 async function renderStatuses(ctx: RequestContext, posts: Post[], viewer: Account | null) {
   const db = ctx.bindings.DB;
   const parentIds = posts.map((p) => p.parentId).filter((id): id is number => id !== null);
-  const [media, mentioned, counts, parents] = await Promise.all([
+  const [media, mentioned, counts, parents, tags] = await Promise.all([
     mediaForPosts(db, posts.map((p) => p.id)),
     mentionedIds(db, posts.map((p) => p.id)),
     interactions(db, posts.map((p) => p.id), viewer?.id ?? null),
     postsByIds(db, parentIds),
+    tagsFor(db, posts.map((p) => p.id)),
   ]);
   const people = await accountsByIds(db, [
     ...posts.map((p) => p.accountId),
@@ -258,7 +262,7 @@ async function renderStatuses(ctx: RequestContext, posts: Post[], viewer: Accoun
           const view = account(ctx, m);
           return [{ id: view.id, username: view.username, acct: view.acct, url: view.url }];
         }),
-        tags: [],
+        tags: (tags.get(post.id) ?? []).map((t) => ({ name: t, url: urls.tag(ctx.domain.domain, t) })),
         emojis: [],
         card: null,
         poll: null,
@@ -349,6 +353,12 @@ async function resolveMentions(c: C, source: string): Promise<{ accounts: Accoun
   return { accounts, links };
 }
 
+/** Where a hashtag links: its page on this domain. */
+const tagLink = (c: C) => (tag: string) => urls.tag(c.env.domain.domain, tag);
+
+/** Mastodon's Tag entity. */
+export const tagView = (ctx: RequestContext, tag: string) => ({ name: tag, url: urls.tag(ctx.domain.domain, tag), history: [], following: false });
+
 export const statusRoutes = new Hono<Env>();
 
 statusRoutes.post("/api/v1/statuses", async (c) => {
@@ -390,7 +400,7 @@ statusRoutes.post("/api/v1/statuses", async (c) => {
   const post = await createPost(db, {
     accountId: me.id,
     contentSource: source,
-    contentHtml: textToHtml(source, mentions.links),
+    contentHtml: textToHtml(source, mentions.links, tagLink(c)),
     spoilerText: text(params.spoiler_text).trim(),
     sensitive: truthy(params.sensitive) || text(params.spoiler_text).trim() !== "",
     visibility,
@@ -402,6 +412,7 @@ statusRoutes.post("/api/v1/statuses", async (c) => {
   });
   await attachMedia(db, post.id, me.id, mediaIds);
   await addMentions(db, post.id, mentions.accounts.map((a) => a.id));
+  await addTags(db, post.id, hashtagsIn(source));
   c.env.activities.enqueue({ kind: "post_created", postId: post.id });
   const [status] = await statuses(c.env, [post], me);
   return c.json(status);
@@ -443,8 +454,9 @@ statusRoutes.put("/api/v1/statuses/:id", async (c) => {
   const source = text((await body(c)).status).trim();
   if (!source || [...source].length > MAX_CHARACTERS) return fail(c, "Validation failed: Text can't be blank");
   const mentions = await resolveMentions(c, source);
-  await editPost(c.env.bindings.DB, post.id, { contentSource: source, contentHtml: textToHtml(source, mentions.links) });
+  await editPost(c.env.bindings.DB, post.id, { contentSource: source, contentHtml: textToHtml(source, mentions.links, tagLink(c)) });
   await addMentions(c.env.bindings.DB, post.id, mentions.accounts.map((a) => a.id));
+  await addTags(c.env.bindings.DB, post.id, hashtagsIn(source));
   c.env.activities.enqueue({ kind: "post_updated", postId: post.id });
   return statusResponse(c, post.id);
 });
@@ -589,6 +601,10 @@ statusRoutes.get("/api/v1/timelines/home", async (c) => {
   if (!me) return fail(c, "The access token is invalid", 401);
   return statusList(c, await homeTimeline(c.env.bindings.DB, me.id, page(c)));
 });
+
+statusRoutes.get("/api/v1/timelines/tag/:tag", async (c) => statusList(c, await postsTagged(c.env.bindings.DB, c.req.param("tag"), page(c))));
+
+statusRoutes.get("/api/v1/tags/:tag", (c) => c.json(tagView(c.env, c.req.param("tag").toLowerCase())));
 
 // Local is this domain's public posts; federated adds every public post palm has met.
 statusRoutes.get("/api/v1/timelines/public", async (c) => {
