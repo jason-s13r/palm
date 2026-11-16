@@ -61,9 +61,10 @@ const postUriOf = (post: Pick<Post, "apId" | "id">, author: Pick<Account, "domai
  * A post's HTML as a status. A Lemmy post leads with its title and link, as
  * Mastodon shows a Lemmy post that federates in.
  */
-export function statusHtml(post: Post): string {
+export function statusHtml(post: Post, linkIsAttached = false): string {
   if (!post.title) return post.contentHtml;
-  const link = post.linkUrl
+  // An image post's link is its picture, which shows as an attachment.
+  const link = post.linkUrl && !linkIsAttached
     ? `<p><a href="${escapeHtml(post.linkUrl)}" rel="nofollow noopener" target="_blank">${escapeHtml(post.linkUrl)}</a></p>`
     : "";
   return `<p><strong>${escapeHtml(post.title)}</strong></p>${link}${post.contentHtml}`;
@@ -188,7 +189,12 @@ export async function statuses(ctx: RequestContext, posts: Post[], viewer: Accou
         muted: false,
         bookmarked: n?.bookmarked ?? false,
         pinned: false,
-        content: statusHtml(post),
+        content: statusHtml(
+          post,
+          !!post.linkUrl &&
+            ((media.get(post.id) ?? []).some((m) => post.linkUrl!.endsWith(`/${m.file}`)) ||
+              post.attachments.some((a) => a.url === post.linkUrl)),
+        ),
         filtered: [],
         reblog: null,
         application: null,
