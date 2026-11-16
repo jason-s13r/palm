@@ -14,7 +14,8 @@
   "dependencies": {
     "@fedify/fedify": "^2.4.5",
     "@palm/core": "workspace:*",
-    "@palm/db": "workspace:*"
+    "@palm/db": "workspace:*",
+    "temporal-polyfill": "^1.0.8"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261116.1",

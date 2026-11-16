@@ -1,7 +1,23 @@
-import { createFederationBuilder, importJwk, type Federation } from "@fedify/fedify";
-import { Accept, Endpoints, Follow, Image, Person, Undo } from "@fedify/fedify/vocab";
-import { nodeinfoVersion, type RequestContext } from "@palm/core";
-import { accountForLogin, actorKeys, addFollower, countAccounts, countFollowers, followers, removeFollower } from "@palm/db";
+import { createFederationBuilder, importJwk, type Context, type Federation } from "@fedify/fedify";
+import { Accept, Create, Delete, Endpoints, Follow, Image, Note, Person, PUBLIC_COLLECTION, Tombstone, Undo } from "@fedify/fedify/vocab";
+import { nodeinfoVersion, type ActivitySink, type PostRef, type RequestContext } from "@palm/core";
+import {
+  accountById,
+  accountForLogin,
+  actorKeys,
+  addFollower,
+  countAccounts,
+  countFollowers,
+  countLocalPosts,
+  countPosts,
+  followers,
+  postById,
+  postsByAccount,
+  removeFollower,
+  type Account,
+  type Post,
+} from "@palm/db";
+import { Temporal } from "temporal-polyfill";
 import { D1KvStore } from "./kv.ts";
 
 export { D1KvStore };
@@ -13,7 +29,8 @@ export { D1KvStore };
  *   /users/{name}            the Person actor
  *   /users/{name}/inbox      its inbox; /inbox is the shared inbox
  *   /users/{name}/followers  its followers collection
- *   /users/{name}/outbox     its posts
+ *   /users/{name}/outbox     its posts, as Create activities
+ *   /objects/{id}            a post, as a Note
  *   /nodeinfo/2.1            software and usage, via /.well-known/nodeinfo
  *
  * These paths are the URL scheme in @palm/core's `urls`, and permanent.
@@ -80,13 +97,87 @@ builder
     return account ? countFollowers(ctx.data.bindings.DB, account.id) : 0;
   });
 
-// The actor's posts. Empty until palm stores posts; Lemmy needs it to exist.
+/** The actor identifier for an account: its username, lowercased like urls.user. */
+const identifierOf = (account: Account) => account.username.toLowerCase();
+
+/** Who a post is addressed to, by Mastodon's visibility levels. */
+function audience(ctx: Context<RequestContext>, account: Account, visibility: PostRef["visibility"]) {
+  const followersUri = ctx.getFollowersUri(identifierOf(account));
+  switch (visibility) {
+    case "public":
+      return { tos: [PUBLIC_COLLECTION], ccs: [followersUri] };
+    case "unlisted":
+      return { tos: [followersUri], ccs: [PUBLIC_COLLECTION] };
+    default:
+      return { tos: [followersUri], ccs: [] };
+  }
+}
+
+const noteUri = (ctx: Context<RequestContext>, id: number) => ctx.getObjectUri(Note, { id: String(id) });
+
+function noteFor(ctx: Context<RequestContext>, account: Account, post: Post): Note {
+  const id = noteUri(ctx, post.id);
+  return new Note({
+    id,
+    url: id,
+    attribution: ctx.getActorUri(identifierOf(account)),
+    ...audience(ctx, account, post.visibility),
+    content: post.contentHtml,
+    summary: post.spoilerText || null,
+    sensitive: post.sensitive,
+    published: Temporal.Instant.fromEpochMilliseconds(post.createdAt * 1000),
+    replyTarget: post.inReplyTo ? new URL(post.inReplyTo) : null,
+  });
+}
+
+function createFor(ctx: Context<RequestContext>, account: Account, post: Post): Create {
+  const note = noteFor(ctx, account, post);
+  return new Create({
+    id: new URL(`${note.id!.href}#create`),
+    actor: ctx.getActorUri(identifierOf(account)),
+    ...audience(ctx, account, post.visibility),
+    published: note.published,
+    object: note,
+  });
+}
+
+// A post, readable by anyone when it's public or unlisted. Followers-only
+// posts reach followers by delivery and aren't served here yet.
+builder.setObjectDispatcher(Note, "/objects/{id}", async (ctx, { id }) => {
+  if (!/^\d+$/.test(id)) return null;
+  const post = await postById(ctx.data.bindings.DB, Number(id));
+  if (!post || (post.visibility !== "public" && post.visibility !== "unlisted")) return null;
+  const account = await accountById(ctx.data.bindings.DB, post.accountId);
+  if (account?.domain !== ctx.data.domain.domain) return null;
+  return noteFor(ctx, account, post);
+});
+
+const OUTBOX_PAGE = 20;
+
+// The actor's public and unlisted posts, newest first, in pages. The cursor is
+// the ID to page below; "top" is the newest page.
 builder
-  .setOutboxDispatcher("/users/{identifier}/outbox", async (ctx, identifier) => {
+  .setOutboxDispatcher("/users/{identifier}/outbox", async (ctx, identifier, cursor) => {
+    if (cursor === null) return null;
     const account = await accountFor(ctx.data, identifier);
-    return account ? { items: [] } : null;
+    if (!account) return null;
+    const maxId = cursor === "top" ? undefined : Number(cursor);
+    if (maxId !== undefined && !Number.isInteger(maxId)) return null;
+    const posts = await postsByAccount(ctx.data.bindings.DB, account.id, ["public", "unlisted"], {
+      maxId,
+      limit: OUTBOX_PAGE,
+    });
+    const last = posts.at(-1);
+    return {
+      items: posts.map((post) => createFor(ctx, account, post)),
+      nextCursor: posts.length === OUTBOX_PAGE && last ? String(last.id) : null,
+    };
   })
-  .setCounter(async () => 0);
+  .setFirstCursor(() => "top")
+  .setCounter(async (ctx, identifier) => {
+    const account = await accountFor(ctx.data, identifier);
+    return account ? countPosts(ctx.data.bindings.DB, account.id) : 0;
+  });
 
 builder
   .setInboxListeners("/users/{identifier}/inbox", "/inbox")
@@ -136,7 +227,7 @@ builder.setNodeInfoDispatcher("/nodeinfo/2.1", async (ctx) => ({
   openRegistrations: false,
   usage: {
     users: { total: await countAccounts(ctx.data.bindings.DB, ctx.data.domain.domain) },
-    localPosts: 0,
+    localPosts: await countLocalPosts(ctx.data.bindings.DB, ctx.data.domain.domain),
     localComments: 0,
   },
   metadata: { nodeName: ctx.data.config.instance.name, palm: { version: ctx.data.version } },
@@ -170,4 +261,59 @@ export async function handleFederation(
     // A browser asking for an actor or object gets the browser fallback too.
     onNotAcceptable: fallback,
   });
+}
+
+/**
+ * Delivers activities about local posts to followers' servers. Delivery runs
+ * in the background; failures are logged, not retried, until palm has a queue.
+ */
+export function activitySink(ctx: RequestContext): ActivitySink {
+  const run = (name: string, work: () => Promise<void>) =>
+    ctx.waitUntil(
+      work().catch((error: unknown) =>
+        console.error(JSON.stringify({ palm: "delivery_failed", activity: name, error: String(error) })),
+      ),
+    );
+
+  async function prepare(ref: PostRef) {
+    const db = ctx.bindings.DB;
+    const account = await accountById(db, ref.accountId);
+    if (!account || account.domain !== ctx.domain.domain) return null;
+    const federation = await federationFor(db);
+    return { account, fctx: federation.createContext(new URL(`https://${ctx.domain.domain}`), ctx) };
+  }
+
+  return {
+    postCreated(ref) {
+      if (ref.visibility === "direct") return;
+      run("Create", async () => {
+        const ready = await prepare(ref);
+        const post = await postById(ctx.bindings.DB, ref.id);
+        if (!ready || !post) return;
+        await ready.fctx.sendActivity({ identifier: identifierOf(ready.account) }, "followers", createFor(ready.fctx, ready.account, post), {
+          preferSharedInbox: true,
+        });
+      });
+    },
+    postDeleted(ref) {
+      if (ref.visibility === "direct") return;
+      run("Delete", async () => {
+        const ready = await prepare(ref);
+        if (!ready) return;
+        const { account, fctx } = ready;
+        const id = noteUri(fctx, ref.id);
+        await fctx.sendActivity(
+          { identifier: identifierOf(account) },
+          "followers",
+          new Delete({
+            id: new URL(`${id.href}#delete`),
+            actor: fctx.getActorUri(identifierOf(account)),
+            ...audience(fctx, account, ref.visibility),
+            object: new Tombstone({ id }),
+          }),
+          { preferSharedInbox: true },
+        );
+      });
+    },
+  };
 }
