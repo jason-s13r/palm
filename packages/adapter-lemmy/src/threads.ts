@@ -436,6 +436,12 @@ threadRoutes.get("/api/v3/comment/list", async (c) => {
   if (savedOnly && !viewer) return c.json({ comments: [] } satisfies GetCommentsResponse);
   const community = await communityFor(c, int(c.req.query("community_id")), c.req.query("community_name"));
   if (community === null) return fail(c, "couldnt_find_community", 404);
+  // Opening a remote post: bring in comments it had before anyone here followed along.
+  const postId = int(c.req.query("post_id"));
+  if (postId !== undefined && !c.req.query("page_cursor") && (int(c.req.query("page")) ?? 1) === 1) {
+    const root = await postByIdAny(c.env.bindings.DB, postId);
+    if (root?.apId) await c.env.activities.backfillThread(root.id);
+  }
   const comments = await listThreadComments(c.env.bindings.DB, {
     domain: c.env.domain.domain,
     scope: scopeOf(c.req.query("type_")),

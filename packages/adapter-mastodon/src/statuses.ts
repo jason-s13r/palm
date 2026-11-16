@@ -480,6 +480,8 @@ statusRoutes.get("/api/v1/statuses/:id/context", async (c) => {
   if (!post) return fail(c, "Record not found", 404);
   const viewer = c.get("account");
   const db = c.env.bindings.DB;
+  // A remote thread: bring in replies it had before anyone here followed along.
+  if (post.apId && post.parentId === null) await c.env.activities.backfillThread(post.id);
 
   const ancestors: Post[] = [];
   let parentId = post.parentId;
