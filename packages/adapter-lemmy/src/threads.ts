@@ -38,6 +38,8 @@ import {
   type ThreadComment,
   type ThreadPost,
   type ThreadSort,
+  hiddenFor,
+  isHidden,
 } from "@palm/db";
 import { Hono, type Context } from "hono";
 import type {
@@ -197,10 +199,13 @@ function asLemmyPost<T extends ThreadPost>(p: T): T {
 }
 
 async function postViews(c: C, posts: ThreadPost[]) {
-  const ctxOf = await contextFor(c, posts);
+  const viewer = c.get("auth")?.account ?? null;
+  const [ctxOf, hidden] = await Promise.all([contextFor(c, posts), hiddenFor(c.env.bindings.DB, viewer?.id)]);
   return posts.flatMap((p) => {
     const t = ctxOf(p);
-    return t ? [postView(c.env, asLemmyPost(p), t)] : [];
+    // Blocked people, communities and instances drop out; your own posts stay.
+    if (!t || (p.accountId !== viewer?.id && isHidden(hidden, t.creator, t.community.id))) return [];
+    return [postView(c.env, asLemmyPost(p), t)];
   });
 }
 
@@ -216,10 +221,14 @@ async function commentViews(c: C, comments: ThreadComment[]) {
     c,
     comments.map((x) => ({ accountId: x.accountId, communityId: x.communityId, ownerId: rootById.get(x.rootId ?? 0)?.accountId })),
   );
+  const hidden = await hiddenFor(c.env.bindings.DB, viewerId);
   return comments.flatMap((x) => {
     const root = rootById.get(x.rootId ?? 0);
     const t = ctxOf({ accountId: x.accountId, communityId: x.communityId, ownerId: root?.accountId });
-    return t && root ? [commentView(c.env, x, root, t)] : [];
+    if (!t || !root) return [];
+    // A blocked person's comment stays in place, so replies keep their thread, but its text goes.
+    if (x.accountId !== viewerId && isHidden(hidden, t.creator)) return [commentView(c.env, { ...x, contentSource: "", contentHtml: "" }, root, t)];
+    return [commentView(c.env, x, root, t)];
   });
 }
 

@@ -158,3 +158,18 @@ export {
   setBlockedDomains,
 } from "./moderation.ts";
 export type { InviteKeyPair } from "./moderation.ts";
+export {
+  blockAccount,
+  blockedAccountIds,
+  blockedCommunityIds,
+  blocks,
+  blockStates,
+  hiddenFor,
+  isHidden,
+  NOTHING_HIDDEN,
+  setCommunityBlock,
+  setUserDomainBlock,
+  unblockAccount,
+  userDomainBlocks,
+} from "./blocks.ts";
+export type { BlockKind, Hidden } from "./blocks.ts";

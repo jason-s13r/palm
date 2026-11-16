@@ -1,5 +1,8 @@
 import { escapeHtml, hashtagsIn, mentionsIn, textToHtml, urls, type RequestContext } from "@palm/core";
 import {
+  hiddenFor,
+  isHidden,
+  NOTHING_HIDDEN,
   accountByHandle,
   accountById,
   accountForLogin,
@@ -154,6 +157,20 @@ function remoteAttachment(postId: number, index: number, a: Post["attachments"][
  */
 export async function statuses(ctx: RequestContext, rows: Post[], viewer: Account | null) {
   const db = ctx.bindings.DB;
+  // People, servers and communities the viewer blocked or muted drop out,
+  // boosts of them included; the viewer's own posts always show.
+  const hidden = await hiddenFor(db, viewer?.id);
+  if (hidden !== NOTHING_HIDDEN) {
+    const authors = await accountsByIds(db, rows.map((r) => r.accountId));
+    const originals = await postsByIds(db, rows.map((r) => r.reblogOf).filter((id): id is number => id !== null));
+    const originalAuthors = await accountsByIds(db, [...originals.values()].map((p) => p.accountId));
+    rows = rows.filter((r) => {
+      if (r.accountId === viewer!.id) return true;
+      if (isHidden(hidden, authors.get(r.accountId), r.communityId)) return false;
+      const original = r.reblogOf !== null ? originals.get(r.reblogOf) : undefined;
+      return !original || original.accountId === viewer!.id || !isHidden(hidden, originalAuthors.get(original.accountId), original.communityId);
+    });
+  }
   // Boosts are rows that point at the post they boost: show the post inside.
   const boosted = await postsByIds(db, rows.map((r) => r.reblogOf).filter((id): id is number => id !== null));
   const inner = await renderStatuses(ctx, [...boosted.values()], viewer);

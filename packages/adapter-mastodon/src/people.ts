@@ -11,6 +11,13 @@ import {
   followingIds,
   followState,
   listNotifications,
+  blockAccount,
+  blockedAccountIds,
+  blockStates,
+  removeFollower,
+  setUserDomainBlock,
+  unblockAccount,
+  userDomainBlocks,
   localFollowerIds,
   markNotificationsRead,
   postsByIds,
@@ -64,9 +71,17 @@ export async function accountNamed(c: C, handle: string, fetch = true): Promise<
 
 /** Mastodon's Relationship entity, from the viewer to each account. */
 async function relationshipViews(c: C, viewer: Account, ids: number[]) {
-  const found = await relationships(c.env.bindings.DB, viewer.id, ids);
+  const db = c.env.bindings.DB;
+  const [found, blocked, people, domains] = await Promise.all([
+    relationships(db, viewer.id, ids),
+    blockStates(db, viewer.id, ids),
+    accountsByIds(db, ids),
+    userDomainBlocks(db, viewer.id),
+  ]);
   return ids.map((id) => {
     const r = found.get(id);
+    const b = blocked.get(id);
+    const domain = people.get(id)?.domain;
     return {
       id: String(id),
       following: r?.following === "accepted",
@@ -75,11 +90,11 @@ async function relationshipViews(c: C, viewer: Account, ids: number[]) {
       showing_reblogs: true,
       notifying: false,
       languages: null,
-      blocking: false,
-      blocked_by: false,
-      muting: false,
-      muting_notifications: false,
-      domain_blocking: false,
+      blocking: b?.blocking ?? false,
+      blocked_by: b?.blockedBy ?? false,
+      muting: b?.muting ?? false,
+      muting_notifications: b?.mutingNotifications ?? false,
+      domain_blocking: domain ? domains.includes(domain) : false,
       endorsed: false,
       note: "",
     };
@@ -156,6 +171,98 @@ peopleRoutes.post("/api/v1/accounts/:id{[0-9]+}/unfollow", async (c) => {
   const [relationship] = await relationshipViews(c, me, [target.id]);
   return c.json(relationship);
 });
+
+/**
+ * Blocking someone also ends follows both ways, and tells their server (as
+ * Mastodon does), so they stop seeing the blocker's posts there too.
+ */
+async function setBlock(c: C, me: Account, target: Account, on: boolean): Promise<void> {
+  const db = c.env.bindings.DB;
+  if (on) {
+    const blockApId = `${urls.user(me.domain, me.username)}#blocks/${target.id}-${Date.now()}`;
+    await blockAccount(db, me.id, target.id, "block", { blockApId: target.apId ? blockApId : null });
+    const mine = await followState(db, me.id, target.id);
+    if (mine) {
+      await unfollow(db, me.id, target.id);
+      if (target.apId && mine.followApId) {
+        c.env.activities.enqueue({ kind: "followed", accountId: me.id, targetId: target.id, followApId: mine.followApId, undo: true });
+      }
+    }
+    await unfollow(db, target.id, me.id);
+    if (target.apId) await removeFollower(db, me.id, target.apId);
+    if (target.apId) c.env.activities.enqueue({ kind: "blocked", accountId: me.id, targetId: target.id, blockApId, undo: false });
+  } else {
+    const removed = await unblockAccount(db, me.id, target.id, "block");
+    if (removed?.blockApId && target.apId) {
+      c.env.activities.enqueue({ kind: "blocked", accountId: me.id, targetId: target.id, blockApId: removed.blockApId, undo: true });
+    }
+  }
+}
+
+for (const [action, on] of [["block", true], ["unblock", false]] as const) {
+  peopleRoutes.post(`/api/v1/accounts/:id{[0-9]+}/${action}`, async (c) => {
+    const me = c.get("account");
+    if (!me) return fail(c, "The access token is invalid", 401);
+    const target = showable(c, await accountById(c.env.bindings.DB, Number(c.req.param("id"))));
+    if (!target || target.id === me.id) return fail(c, "Record not found", 404);
+    await setBlock(c, me, target, on);
+    const [relationship] = await relationshipViews(c, me, [target.id]);
+    return c.json(relationship);
+  });
+}
+
+peopleRoutes.post("/api/v1/accounts/:id{[0-9]+}/mute", async (c) => {
+  const me = c.get("account");
+  if (!me) return fail(c, "The access token is invalid", 401);
+  const target = showable(c, await accountById(c.env.bindings.DB, Number(c.req.param("id"))));
+  if (!target || target.id === me.id) return fail(c, "Record not found", 404);
+  const params = await c.req.json<{ notifications?: unknown; duration?: unknown }>().catch(() => ({}) as { notifications?: unknown; duration?: unknown });
+  const duration = Number(params.duration ?? c.req.query("duration") ?? 0);
+  await blockAccount(c.env.bindings.DB, me.id, target.id, "mute", {
+    hideNotifications: params.notifications !== false && params.notifications !== "false",
+    expiresAt: duration > 0 ? Math.floor(Date.now() / 1000) + duration : null,
+  });
+  const [relationship] = await relationshipViews(c, me, [target.id]);
+  return c.json(relationship);
+});
+
+peopleRoutes.post("/api/v1/accounts/:id{[0-9]+}/unmute", async (c) => {
+  const me = c.get("account");
+  if (!me) return fail(c, "The access token is invalid", 401);
+  await unblockAccount(c.env.bindings.DB, me.id, Number(c.req.param("id")), "mute");
+  const [relationship] = await relationshipViews(c, me, [Number(c.req.param("id"))]);
+  return c.json(relationship);
+});
+
+for (const [path, kind] of [["/api/v1/blocks", "block"], ["/api/v1/mutes", "mute"]] as const) {
+  peopleRoutes.get(path, async (c) => {
+    const me = c.get("account");
+    if (!me) return fail(c, "The access token is invalid", 401);
+    const db = c.env.bindings.DB;
+    const ids = await blockedAccountIds(db, me.id, kind, Math.min(Number(c.req.query("limit")) || 40, 80));
+    const people = await accountsByIds(db, ids);
+    return c.json(await Promise.all(ids.flatMap((id) => (people.has(id) ? [accountView(c, people.get(id)!)] : []))));
+  });
+}
+
+peopleRoutes.get("/api/v1/domain_blocks", async (c) => {
+  const me = c.get("account");
+  if (!me) return fail(c, "The access token is invalid", 401);
+  return c.json(await userDomainBlocks(c.env.bindings.DB, me.id));
+});
+
+for (const [method, on] of [["post", true], ["delete", false]] as const) {
+  peopleRoutes[method]("/api/v1/domain_blocks", async (c) => {
+    const me = c.get("account");
+    if (!me) return fail(c, "The access token is invalid", 401);
+    const fromBody = await c.req.parseBody().catch(() => ({}) as Record<string, unknown>);
+    const fromJson = await c.req.json<{ domain?: string }>().catch(() => ({}) as { domain?: string });
+    const domain = String(c.req.query("domain") ?? fromJson.domain ?? fromBody.domain ?? "").trim().toLowerCase();
+    if (!domain || domain === c.env.domain.domain) return fail(c, "Validation failed: Domain is invalid", 422);
+    await setUserDomainBlock(c.env.bindings.DB, me.id, domain, on);
+    return c.json({});
+  });
+}
 
 peopleRoutes.get("/api/v1/accounts/:id{[0-9]+}/following", async (c) => {
   const db = c.env.bindings.DB;

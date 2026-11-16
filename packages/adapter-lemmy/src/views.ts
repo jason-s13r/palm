@@ -33,7 +33,7 @@ const LOCAL_INSTANCE_ID = 1;
  * Lemmy numbers every instance it knows; palm doesn't keep a table of them,
  * so a remote host gets a stable number from its name. Apps only compare them.
  */
-function instanceId(host: string): number {
+export function instanceId(host: string): number {
   let hash = 0;
   for (const ch of host) hash = (hash * 31 + ch.charCodeAt(0)) | 0;
   return 2 + (Math.abs(hash) % 1_000_000_000);
@@ -198,15 +198,26 @@ export function localUserView(ctx: RequestContext, account: Account): LocalUserV
   };
 }
 
-export function myUserInfo(ctx: RequestContext, account: Account, follows: StoredCommunity[] = []): MyUserInfo {
+export interface Blocks {
+  people: Account[];
+  communities: StoredCommunity[];
+  domains: string[];
+}
+
+export function myUserInfo(
+  ctx: RequestContext,
+  account: Account,
+  follows: StoredCommunity[] = [],
+  blocks: Blocks = { people: [], communities: [], domains: [] },
+): MyUserInfo {
   const follower = person(ctx, account);
   return {
     local_user_view: localUserView(ctx, account),
     follows: follows.map((c) => ({ community: community(ctx, c), follower })),
     moderates: [],
-    community_blocks: [],
-    instance_blocks: [],
-    person_blocks: [],
+    community_blocks: blocks.communities.map((c) => ({ person: follower, community: community(ctx, c) })),
+    instance_blocks: blocks.domains.map((domain) => ({ person: follower, instance: { id: instanceId(domain), domain, published: iso(0) } })),
+    person_blocks: blocks.people.map((p) => ({ person: follower, target: person(ctx, p) })),
     discussion_languages: [],
   };
 }

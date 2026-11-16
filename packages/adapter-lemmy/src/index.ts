@@ -51,6 +51,7 @@ import type {
   SearchResponse,
   SuccessResponse,
 } from "lemmy-js-client";
+import { blockRoutes, blocksOf } from "./blocks.ts";
 import { followedPeople, inboxItems, lemmyInboxCounts, personThreads, resolveObject, searchThreads, threadRoutes } from "./threads.ts";
 import { LEMMY_VERSION, myUserInfo, personView, siteView } from "./views.ts";
 
@@ -171,7 +172,7 @@ app.get("/api/v3/site", async (c) => {
     site_view: siteView(c.env, { users, ...counts }),
     admins: adminAccounts.map((a) => personView(c.env, a)),
     version: LEMMY_VERSION,
-    ...(auth ? { my_user: myUserInfo(c.env, auth.account, follows) } : {}),
+    ...(auth ? { my_user: myUserInfo(c.env, auth.account, follows, await blocksOf(c.env, auth.account.id)) } : {}),
     all_languages: [{ id: 0, code: "und", name: "Undetermined" }, { id: 37, code: "en", name: "English" }],
     discussion_languages: [],
     taglines: [],
@@ -350,6 +351,7 @@ async function personNamed(c: C, name: string): Promise<Account | null> {
   return found?.kind === "account" ? accountById(db, found.id) : null;
 }
 
+app.route("/", blockRoutes);
 app.route("/", threadRoutes);
 
 // --- the inbox: replies to and mentions of the signed-in account -------------

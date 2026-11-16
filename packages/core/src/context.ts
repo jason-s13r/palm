@@ -74,6 +74,7 @@ export type FederationTask =
   | { kind: "boosted"; postId: number; accountId: number; undo: boolean }
   /** Following a person. `followApId` names the Follow, so it can be undone or accepted. */
   | { kind: "followed"; accountId: number; targetId: number; followApId: string; undo: boolean }
+  | { kind: "blocked"; accountId: number; targetId: number; blockApId: string; undo: boolean }
   | { kind: "subscribed"; accountId: number; communityId: number; followApId: string; undo: boolean }
   | { kind: "profile_updated"; accountId: number }
   /** Fetches a remote community's recent posts after the first local subscription. */

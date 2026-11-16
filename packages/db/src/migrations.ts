@@ -411,6 +411,36 @@ CREATE TABLE IF NOT EXISTS remote_keys (
 CREATE INDEX IF NOT EXISTS posts_parent ON posts (parent_id) WHERE parent_id IS NOT NULL
 `,
   },
+  {
+    version: 14,
+    name: "blocks and mutes",
+    sql: `
+CREATE TABLE IF NOT EXISTS account_blocks (
+  account_id INTEGER NOT NULL REFERENCES accounts (id),
+  target_id INTEGER NOT NULL REFERENCES accounts (id),
+  kind TEXT NOT NULL CHECK (kind IN ('block', 'mute')),
+  hide_notifications INTEGER NOT NULL DEFAULT 1,
+  expires_at INTEGER,
+  block_ap_id TEXT,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (account_id, target_id, kind)
+)
+;
+CREATE TABLE IF NOT EXISTS community_blocks (
+  account_id INTEGER NOT NULL REFERENCES accounts (id),
+  community_id INTEGER NOT NULL REFERENCES communities (id),
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (account_id, community_id)
+)
+;
+CREATE TABLE IF NOT EXISTS user_domain_blocks (
+  account_id INTEGER NOT NULL REFERENCES accounts (id),
+  domain TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (account_id, domain)
+)
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

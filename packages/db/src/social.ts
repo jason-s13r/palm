@@ -228,8 +228,16 @@ export async function notify(
   n: { accountId: number; kind: NotificationKind; fromAccountId: number; postId?: number | null },
 ): Promise<void> {
   if (n.accountId === n.fromAccountId) return;
+  // Nothing from someone the recipient blocked, or muted with notifications.
   await db
-    .prepare("INSERT INTO notifications (account_id, kind, from_account_id, post_id, created_at) VALUES (?, ?, ?, ?, ?)")
+    .prepare(
+      `INSERT INTO notifications (account_id, kind, from_account_id, post_id, created_at)
+       SELECT ?1, ?2, ?3, ?4, ?5 WHERE NOT EXISTS (
+         SELECT 1 FROM account_blocks b WHERE b.account_id = ?1 AND b.target_id = ?3
+           AND (b.kind = 'block' OR b.hide_notifications = 1) AND (b.expires_at IS NULL OR b.expires_at > ?5))
+       AND NOT EXISTS (
+         SELECT 1 FROM user_domain_blocks d JOIN accounts a ON a.id = ?3 WHERE d.account_id = ?1 AND d.domain = a.domain)`,
+    )
     .bind(n.accountId, n.kind, n.fromAccountId, n.postId ?? null, now())
     .run();
 }

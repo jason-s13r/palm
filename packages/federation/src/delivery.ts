@@ -4,6 +4,7 @@ import {
   Create,
   Delete,
   Dislike,
+  Block,
   Follow,
   Like,
   PUBLIC_COLLECTION,
@@ -202,6 +203,16 @@ export async function runTask(ctx: RequestContext, task: FederationTask): Promis
       }
       const follow = new Follow({ id: new URL(task.followApId), actor: actorUri(account), object: actorUri(target) });
       const activity = task.undo ? new Undo({ id: new URL(`${task.followApId}/undo`), actor: actorUri(account), object: follow }) : follow;
+      const to = recipientOf(target);
+      if (to) await send(people, await personKeys(people, account), to, activity);
+      return;
+    }
+    case "blocked": {
+      // Mastodon hides a blocker's posts from the blocked and drops their follows.
+      const [account, target] = await Promise.all([accountById(db, task.accountId), accountById(db, task.targetId)]);
+      if (!account || !target || !isLocal(account) || isLocal(target)) return;
+      const block = new Block({ id: new URL(task.blockApId), actor: actorUri(account), object: actorUri(target) });
+      const activity = task.undo ? new Undo({ id: new URL(`${task.blockApId}/undo`), actor: actorUri(account), object: block }) : block;
       const to = recipientOf(target);
       if (to) await send(people, await personKeys(people, account), to, activity);
       return;
