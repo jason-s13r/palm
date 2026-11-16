@@ -30,6 +30,8 @@ cli) arrive with the milestones that need them.
 
 ## Rules that matter
 
+- **Work goes straight to `main`.** No PRs or feature branches for now.
+- **No session references in commits or PR text.** A Co-Authored-By line is fine.
 - **Commits are conventional and scoped to a package folder**: `feat(core):`,
   `fix(worker):`, `feat(core,worker)!:`. Repo-wide changes use `repo`
   (`chore(repo):`, `ci(repo):`, `docs(repo):`). dispat computes versions from
