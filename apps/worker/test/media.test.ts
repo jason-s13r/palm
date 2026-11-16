@@ -61,6 +61,20 @@ describe("Media", () => {
     expect((await worker.fetch(url)).status).toBe(404);
   });
 
+  it("takes video, and serves it in ranges for players", async () => {
+    const id = await createAccount("vid", "pw");
+    const form = new FormData();
+    const bytes = new Uint8Array(1000).map((_, i) => i % 256);
+    form.append("file", new File([bytes], "clip.mp4", { type: "video/mp4" }));
+    const media = await (await worker.fetch(`${MASTODON}/api/v2/media`, { method: "POST", headers: { authorization: `Bearer ${await mastodonToken(id)}` }, body: form })).json<{ type: string; url: string }>();
+    expect(media.type).toBe("video");
+    expect(media.url).toMatch(/\.mp4$/);
+    const part = await worker.fetch(media.url, { headers: { range: "bytes=10-19" } });
+    expect(part.status).toBe(206);
+    expect(part.headers.get("content-range")).toBe("bytes 10-19/1000");
+    expect([...new Uint8Array(await part.arrayBuffer())]).toEqual([10, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
+  });
+
   it("refuses uploads without a login or of other types", async () => {
     expect((await worker.fetch(`${DOMAIN}/pictrs/image`, { method: "POST", body: imageForm("images[]") })).status).toBe(401);
     const id = await createAccount("abe", "pw");
