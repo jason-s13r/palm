@@ -62,7 +62,14 @@ pre{overflow-x:auto;background:#f6f6f6;padding:.5rem}h1{font-size:1.4em;margin:.
 @media(prefers-color-scheme:dark){body{background:#151515;color:#ddd}a{color:#8ab4f8}header,footer,.meta{color:#999}pre{background:#222}}
 `;
 
-export function page(site: { name: string; domain: string }, meta: Meta, body: Html): Response {
+export interface Site {
+  name: string;
+  domain: string;
+  /** palm's version, shown in the footer. */
+  version: string;
+}
+
+export function page(site: Site, meta: Meta, body: Html): Response {
   const description = meta.description ? meta.description.slice(0, 300) : undefined;
   const doc = html`<!doctype html>
 <html lang="en">
@@ -90,7 +97,7 @@ ${meta.noindex ? html`<meta name="robots" content="noindex">` : ""}
 <main>
 ${body}
 </main>
-<footer>Read and reply from any Lemmy or Mastodon app. Powered by <a href="https://github.com/jason-s13r/palm">palm</a>.</footer>
+<footer>Read and reply from any Lemmy or Mastodon app. Powered by <a href="https://github.com/jason-s13r/palm">palm</a> ${site.version}.</footer>
 </body>
 </html>`;
   return new Response(doc.value, {
@@ -104,7 +111,7 @@ ${body}
   });
 }
 
-export function notFound(site: { name: string; domain: string }, url: string): Response {
+export function notFound(site: Site, url: string): Response {
   const response = page(site, { title: "Not found", url, noindex: true }, html`<h1>Not found</h1><p>Nothing here, or it isn't public.</p>`);
   return new Response(response.body, { status: 404, headers: response.headers });
 }

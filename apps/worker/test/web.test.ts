@@ -41,6 +41,7 @@ describe("Web pages", () => {
     expect(profileHtml).toContain(`/@wren/${status.id}`);
     expect(profileHtml).not.toContain("secret");
     expect(profileHtml).not.toContain("<script");
+    expect(profileHtml).toMatch(/palm<\/a> \d+\.\d+\.\d+/);
 
     const page = await (await worker.fetch(`${SITE}/@wren/${status.id}`, BROWSER)).text();
     expect(meta(page, "og:type")).toBe("article");

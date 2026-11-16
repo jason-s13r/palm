@@ -37,7 +37,7 @@ type C = Context<Env>;
 
 const app = new Hono<Env>();
 
-const site = (c: C) => ({ name: c.env.config.instance.name, domain: c.env.domain.domain });
+const site = (c: C) => ({ name: c.env.config.instance.name, domain: c.env.domain.domain, version: c.env.version });
 const origin = (c: C) => `https://${c.env.domain.domain}`;
 const here = (c: C) => origin(c) + new URL(c.req.url).pathname;
 
