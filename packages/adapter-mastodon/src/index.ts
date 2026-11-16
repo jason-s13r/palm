@@ -13,6 +13,8 @@ import {
   revokeToken,
   setPasswordHash,
   tokenGrant,
+  openInvite,
+  redeemInvite,
   type Account,
   type OAuthApp,
 } from "@palm/db";
@@ -74,7 +76,7 @@ app.use("/api/*", async (c, next) => {
       c.set("app", await appById(db, grant.appId));
       if (grant.accountId !== null) {
         const acct = await accountById(db, grant.accountId);
-        if (acct?.domain === c.env.domain.domain) c.set("account", acct);
+        if (acct?.domain === c.env.domain.domain && acct.apId === null && !acct.banned) c.set("account", acct);
       }
     }
   }
@@ -201,19 +203,20 @@ app.post("/oauth/authorize", async (c) => {
   const db = c.env.bindings.DB;
   const username = (p.username ?? "").trim().replace(/^@/, "").replace(/@.*$/, "");
   const found = username ? await accountForLogin(db, c.env.domain.domain, username) : null;
-  if (!found?.passwordHash || !(await verifyPassword(p.password ?? "", found.passwordHash))) {
+  const ok = found?.passwordHash && (await verifyPassword(p.password ?? "", found.passwordHash));
+  if (!found || !ok || found.account.banned) {
     return c.html(
       authorizePage({
         instanceName: c.env.config.instance.name,
         appName: request.client.name,
         params: carried(p),
-        error: "That username and password don't match.",
+        error: found?.account.banned && ok ? "This account is suspended." : "That username and password don't match.",
         username,
       }),
       401,
     );
   }
-  if (needsRehash(found.passwordHash)) {
+  if (found.passwordHash && needsRehash(found.passwordHash)) {
     c.env.waitUntil(hashPassword(p.password ?? "").then((hash) => setPasswordHash(db, found.account.id, hash)));
   }
   const code = await createCode(db, {
@@ -274,6 +277,26 @@ app.post("/oauth/token", async (c) => {
   if (p.redirect_uri && p.redirect_uri !== grant.redirectUri) return invalidGrant();
   const { token, createdAt } = await createToken(db, { appId: client.id, accountId: grant.accountId, scopes: grant.scopes });
   return c.json({ access_token: token, token_type: "Bearer", scope: grant.scopes, created_at: createdAt });
+});
+
+// Sign-up from a Mastodon app, with an invite code in the reason field. Needs
+// the app's own token (client_credentials), as Mastodon does.
+app.post("/api/v1/accounts", async (c) => {
+  const client = c.get("app");
+  if (!client) return fail(c, "This action needs an app token", 401);
+  if (c.env.config.registration !== "invite") return fail(c, "Registrations are closed", 403);
+  const p = await params(c);
+  const username = (p.username ?? "").trim();
+  const password = p.password ?? "";
+  if (!/^[a-zA-Z0-9_]{1,20}$/.test(username)) return fail(c, "Validation failed: Username is invalid", 422);
+  if (password.length < 10) return fail(c, "Validation failed: Password is too short (minimum is 10 characters)", 422);
+  const db = c.env.bindings.DB;
+  const invite = await openInvite(db, c.env.domain.domain, p.invite_code ?? p.reason ?? "");
+  if (!invite) return fail(c, "Validation failed: An invite code is needed: put it in the reason field", 422);
+  const created = await redeemInvite(db, invite, { domain: c.env.domain.domain, username, passwordHash: await hashPassword(password) });
+  if (!created) return fail(c, "Validation failed: Username has already been taken", 422);
+  const { token, createdAt } = await createToken(db, { appId: client.id, accountId: created.id, scopes: "read write follow push" });
+  return c.json({ access_token: token, token_type: "Bearer", scope: "read write follow push", created_at: createdAt });
 });
 
 app.post("/oauth/revoke", async (c) => {

@@ -123,7 +123,10 @@ export function instanceV2(ctx: RequestContext, palmVersion: string, users: numb
     icon: [],
     languages: ["en"],
     configuration: configuration(ctx.host),
-    registrations: { enabled: false, approval_required: false, message: null, url: null },
+    registrations:
+      ctx.config.registration === "invite"
+        ? { enabled: true, approval_required: false, message: "Sign-up needs an invite code: put it in the reason field.", url: null }
+        : { enabled: false, approval_required: false, message: null, url: null },
     api_versions: { mastodon: 2 },
     contact: { email: instance.contact ?? "", account: null },
     rules: [],
@@ -143,7 +146,7 @@ export function instanceV1(ctx: RequestContext, palmVersion: string, users: numb
     stats: { user_count: users, status_count: 0, domain_count: 0 },
     thumbnail: avatarUrl(ctx.host),
     languages: ["en"],
-    registrations: false,
+    registrations: ctx.config.registration === "invite",
     approval_required: false,
     invites_enabled: false,
     configuration: configuration(ctx.host),
