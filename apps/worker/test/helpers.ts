@@ -54,3 +54,13 @@ export async function mastodonToken(accountId: number): Promise<string> {
   const app = await createApp(db, { name: "Test", website: null, redirectUris: ["ivory://oauth"], scopes: "read write follow" });
   return (await createToken(db, { appId: app.id, accountId, scopes: "read write follow" })).token;
 }
+
+/** Creates a community the way `palm community create` does (without keys). */
+export async function createCommunity(name: string, title = name): Promise<number> {
+  await migrate(db);
+  const row = await db
+    .prepare("INSERT INTO communities (domain, name, title, created_at) VALUES (?, ?, ?, ?) RETURNING id")
+    .bind(DOMAIN, name, title, Math.floor(Date.now() / 1000))
+    .first<{ id: number }>();
+  return row!.id;
+}
