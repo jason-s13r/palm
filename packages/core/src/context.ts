@@ -4,6 +4,8 @@ import type { DomainConfig, PalmConfig } from "./config.ts";
 export interface PalmBindings {
   /** The D1 database. palm creates and migrates its tables itself. */
   DB: D1Database;
+  /** An R2 bucket for uploaded images. Without it, uploads are refused. */
+  MEDIA?: R2Bucket;
 }
 
 /** What every adapter gets for one request. */
@@ -52,6 +54,8 @@ export interface PostRef {
 export const urls = {
   user: (domain: string, username: string) => `https://${domain}/users/${encodeURIComponent(username.toLowerCase())}`,
   object: (domain: string, id: string) => `https://${domain}/objects/${encodeURIComponent(id)}`,
+  /** An uploaded file, at the path Lemmy's image host (pict-rs) uses. */
+  media: (domain: string, file: string) => `https://${domain}/pictrs/image/${encodeURIComponent(file)}`,
   /** A community, as Lemmy names them: `!name@domain` lives at /c/name. */
   community: (domain: string, name: string) => `https://${domain}/c/${encodeURIComponent(name.toLowerCase())}`,
   inbox: (domain: string) => `https://${domain}/inbox`,
