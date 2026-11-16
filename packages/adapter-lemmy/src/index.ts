@@ -404,6 +404,29 @@ app.get("/api/v3/user/mention", (c) => c.json({ mentions: [] } satisfies GetPers
 app.get("/api/v3/comment/report/list", (c) => c.json({ comment_reports: [] }));
 app.get("/api/v3/post/report/list", (c) => c.json({ post_reports: [] }));
 app.get("/api/v3/private_message/report/list", (c) => c.json({ private_message_reports: [] }));
+// Sign-up is by invite, so there are no applications to review.
+app.get("/api/v3/admin/registration_application/list", (c) => c.json({ registration_applications: [] }));
+app.get("/api/v3/admin/registration_application/count", (c) => c.json({ registration_applications: 0 }));
+// Bans and removals aren't logged yet.
+app.get("/api/v3/modlog", (c) =>
+  c.json({
+    removed_posts: [],
+    locked_posts: [],
+    featured_posts: [],
+    removed_comments: [],
+    removed_communities: [],
+    banned_from_community: [],
+    banned: [],
+    added_to_community: [],
+    transferred_to_community: [],
+    added: [],
+    admin_purged_persons: [],
+    admin_purged_communities: [],
+    admin_purged_posts: [],
+    admin_purged_comments: [],
+    hidden_communities: [],
+  }),
+);
 app.get("/api/v3/private_message/list", (c) => c.json({ private_messages: [] } satisfies PrivateMessagesResponse));
 app.get("/api/v3/federated_instances", async (c) => {
   const db = c.env.bindings.DB;

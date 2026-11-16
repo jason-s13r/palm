@@ -1,5 +1,5 @@
 import { base64url, hashPassword, needsRehash, utf8, verifyPassword } from "@palm/auth";
-import { urls, type RequestContext } from "@palm/core";
+import { escapeHtml, urls, type RequestContext } from "@palm/core";
 import {
   accountById,
   accountForLogin,
@@ -7,6 +7,7 @@ import {
   appById,
   consumeCode,
   countAccounts,
+  knownDomains,
   createApp,
   createCode,
   createToken,
@@ -362,6 +363,17 @@ for (const path of [
 }
 
 app.get("/api/v1/instance/translation_languages", (c) => c.json({}));
+app.get("/api/v1/instance/extended_description", (c) =>
+  c.json({ updated_at: new Date(0).toISOString(), content: escapeHtml(c.env.config.instance.description ?? "") }),
+);
+// The servers palm has met: people and communities it keeps.
+app.get("/api/v1/instance/peers", async (c) => c.json(await knownDomains(c.env.bindings.DB)));
+// Weekly activity isn't kept; an empty list is what a new server answers.
+app.get("/api/v1/instance/activity", (c) => c.json([]));
+// No streaming (a Worker can't hold the connections on the free plan): apps
+// fall back to polling when this isn't there, so it's not logged as unknown.
+app.all("/api/v1/streaming/*", (c) => fail(c, "Streaming isn't available on this server", 404));
+app.all("/api/v1/streaming", (c) => fail(c, "Streaming isn't available on this server", 404));
 app.get("/api/v2/notifications/policy", (c) =>
   c.json({
     for_not_following: "accept",

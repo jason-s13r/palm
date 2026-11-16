@@ -31,6 +31,14 @@ describe("Mastodon API", () => {
     expect(v1.uri).toBe("palm.test");
   });
 
+  it("answers the instance extras apps ask for", async () => {
+    const extended = await (await worker.fetch(`${MASTODON}/api/v1/instance/extended_description`)).json<{ content: string }>();
+    expect(typeof extended.content).toBe("string");
+    expect(Array.isArray(await (await worker.fetch(`${MASTODON}/api/v1/instance/peers`)).json())).toBe(true);
+    expect(await (await worker.fetch(`${MASTODON}/api/v1/instance/activity`)).json()).toEqual([]);
+    expect((await worker.fetch("https://palm.test/api/v3/modlog")).status).toBe(200);
+  });
+
   it("shows the sign-in page for a registered app", async () => {
     const app = await registerApp();
     const res = await worker.fetch(`${MASTODON}/oauth/authorize?response_type=code&client_id=${app.client_id}&redirect_uri=ivory://oauth&scope=read`);

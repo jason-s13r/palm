@@ -70,7 +70,7 @@ describe("Lemmy API", () => {
   });
 
   it("returns a Lemmy-style 404 for endpoints it doesn't have yet", async () => {
-    const res = await worker.fetch(`${LEMMY}/api/v3/modlog`);
+    const res = await worker.fetch(`${LEMMY}/api/v3/community/transfer`);
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: "unknown_endpoint" });
   });
