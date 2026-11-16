@@ -19,6 +19,7 @@ import {
 import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 import { authorizePage, codePage } from "./oauth-page.ts";
+import { accountStats, statusRoutes } from "./statuses.ts";
 import { account, credentialAccount, instanceV1, instanceV2, MASTODON_VERSION } from "./views.ts";
 
 export { MASTODON_VERSION };
@@ -277,21 +278,24 @@ app.post("/oauth/revoke", async (c) => {
 
 // --- accounts --------------------------------------------------------------
 
-app.get("/api/v1/accounts/verify_credentials", (c) => {
+app.get("/api/v1/accounts/verify_credentials", async (c) => {
   const acct = requireAccount(c);
-  return acct ? c.json(credentialAccount(c.env, acct)) : fail(c, "The access token is invalid", 401);
+  if (!acct) return fail(c, "The access token is invalid", 401);
+  return c.json(credentialAccount(c.env, acct, await accountStats(c.env, acct)));
 });
 
 app.get("/api/v1/accounts/relationships", (c) => c.json([]));
 app.get("/api/v1/accounts/lookup", async (c) => {
   const name = (c.req.query("acct") ?? "").replace(/^@/, "").replace(new RegExp(`@${c.env.domain.domain}$`, "i"), "");
   const found = name.includes("@") ? null : await accountForLogin(c.env.bindings.DB, c.env.domain.domain, name);
-  return found ? c.json(account(c.env, found.account)) : fail(c, "Record not found", 404);
+  return found ? c.json(account(c.env, found.account, await accountStats(c.env, found.account))) : fail(c, "Record not found", 404);
 });
 
 app.get("/api/v1/accounts/:id", async (c) => {
   const found = await accountById(c.env.bindings.DB, Number(c.req.param("id")));
-  return found && found.domain === c.env.domain.domain ? c.json(account(c.env, found)) : fail(c, "Record not found", 404);
+  return found && found.domain === c.env.domain.domain
+    ? c.json(account(c.env, found, await accountStats(c.env, found)))
+    : fail(c, "Record not found", 404);
 });
 
 app.get("/api/v1/preferences", (c) =>
@@ -304,16 +308,17 @@ app.get("/api/v1/preferences", (c) =>
   }),
 );
 
+// --- statuses and timelines ------------------------------------------------
+
+app.route("/", statusRoutes);
+
 // --- lists that stay empty until federation brings content (M2, M6) --------
 
 const empty = (c: C) => c.json([]);
 for (const path of [
-  "/api/v1/timelines/home",
-  "/api/v1/timelines/public",
   "/api/v1/timelines/tag/:tag",
   "/api/v1/timelines/list/:id",
   "/api/v1/notifications",
-  "/api/v1/accounts/:id/statuses",
   "/api/v1/accounts/:id/followers",
   "/api/v1/accounts/:id/following",
   "/api/v1/conversations",

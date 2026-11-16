@@ -21,7 +21,14 @@ const escapeHtml = (text: string) =>
 /** The placeholder avatar and header every account has until uploads exist. */
 export const avatarUrl = (host: string) => `https://${host}/palm/avatar.png`;
 
-export function account(ctx: RequestContext, a: Account) {
+/** Counts shown on a profile. Left out, they read as zero. */
+export interface AccountStats {
+  statuses: number;
+  followers: number;
+  lastStatusAt: number | null;
+}
+
+export function account(ctx: RequestContext, a: Account, stats?: AccountStats) {
   const url = urls.user(ctx.domain.domain, a.username);
   return {
     id: String(a.id),
@@ -41,10 +48,10 @@ export function account(ctx: RequestContext, a: Account) {
     avatar_static: avatarUrl(ctx.host),
     header: avatarUrl(ctx.host),
     header_static: avatarUrl(ctx.host),
-    followers_count: 0,
+    followers_count: stats?.followers ?? 0,
     following_count: 0,
-    statuses_count: 0,
-    last_status_at: null,
+    statuses_count: stats?.statuses ?? 0,
+    last_status_at: stats?.lastStatusAt ? iso(stats.lastStatusAt).slice(0, 10) : null,
     hide_collections: false,
     noindex: true,
     emojis: [],
@@ -53,9 +60,9 @@ export function account(ctx: RequestContext, a: Account) {
   };
 }
 
-export function credentialAccount(ctx: RequestContext, a: Account) {
+export function credentialAccount(ctx: RequestContext, a: Account, stats?: AccountStats) {
   return {
-    ...account(ctx, a),
+    ...account(ctx, a, stats),
     source: {
       privacy: "public",
       sensitive: false,
