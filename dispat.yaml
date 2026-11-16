@@ -4,6 +4,7 @@
 # tessera (grid-games).
 #
 # Commit scopes name packages, by folder: feat(core):, fix(worker):,
+# feat(adapter-lemmy):,
 # feat(core,worker)!:. Repository-wide changes use the repo scope
 # (chore(repo):, ci(repo):, docs(repo):) and release nothing.
 #
@@ -60,8 +61,24 @@ spaces:
       publish: publish-worker
 
 dependencies:
+  db:
+    - auth
+  adapter-lemmy:
+    - core
+    - auth
+    - db
+  adapter-mastodon:
+    - core
+    - auth
+    - db
+  cli:
+    - auth
   worker:
     - core
+    - auth
+    - db
+    - adapter-lemmy
+    - adapter-mastodon
 
 # Scopes that are deliberately not packages.
 #   release  dispat's own release-commit scope

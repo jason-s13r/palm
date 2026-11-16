@@ -7,8 +7,19 @@ outside this repo (the Palm project's `palm-decisions.md`).
 
 ## Layout
 
-- `packages/core` (`@palm/core`): the config model (`defineConfig`) and host
-  routing (`resolveSurface`). Internal, never published.
+- `packages/core` (`@palm/core`): the config model (`defineConfig`), host
+  routing (`resolveSurface`), the request context and the ActivityPub URL
+  scheme (`urls`).
+- `packages/auth`: password hashing (PBKDF2), Lemmy JWTs and tokens, on Web
+  Crypto so the Worker and the CLI share them.
+- `packages/db`: the D1 schema as self-applying migrations (`migrate`), and the
+  queries. Append-only migrations; see `migrations.ts`.
+- `packages/adapter-lemmy`, `packages/adapter-mastodon`: the client APIs as
+  Hono apps over palm's data. Unknown endpoints are logged as
+  `{"palm":"unknown_endpoint"}` so the next one to build shows in the logs.
+- `packages/cli`: admin commands run locally (`pnpm palm user create ...`).
+
+All of these are internal and never published.
 - `apps/worker` (`@jason-s13r/palm-worker`): the one published package.
   `createPalm(config)` returns the Worker for a deployment. Built with tsup into
   a single bundle with `@palm/*` inlined.
@@ -16,8 +27,7 @@ outside this repo (the Palm project's `palm-decisions.md`).
   Workers Builds. Real deployments live in their own repos (see
   `wrangler.template.jsonc`).
 
-More packages (federation, db, fedify-d1, adapter-lemmy, adapter-mastodon,
-cli) arrive with the milestones that need them.
+Federation (Fedify, WebFinger, actors, the inbox) arrives next.
 
 ## Commands
 
