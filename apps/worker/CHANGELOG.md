@@ -1,5 +1,17 @@
 # Changelog
 
+## worker@0.3.1 (2026-11-16)
+
+### Fixes
+
+- release with federation's delivery fallback
+  federation 0.1.1 sends at once when the queue refuses, but dispat
+  releases a consumer only when a commit reaches it, so the worker (the
+  package deployments install) didn't take it. This releases the worker
+  with it. dispat.yaml now lists web and cli among the worker's
+  dependencies and says how to reach the worker from a package's commit.
+
+
 ## worker@0.3.0 (2026-11-16)
 
 ### Features
