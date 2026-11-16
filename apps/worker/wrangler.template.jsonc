@@ -18,6 +18,8 @@
   // A queue for deliveries and received activities (optional, but needed to
   // stay inside the free plan's CPU budget once people have followers). The
   // Worker consumes its own queue; wrangler deploy creates it.
+  // Daily pruning of old remote posts nobody here touched, so D1 stays small.
+  "triggers": { "crons": ["17 3 * * *"] },
   "queues": {
     "producers": [{ "binding": "QUEUE", "queue": "<queue-name>" }],
     "consumers": [{ "queue": "<queue-name>", "max_batch_size": 5, "max_retries": 5 }]

@@ -2,7 +2,7 @@ import { handleLemmy } from "@palm/adapter-lemmy";
 import { handleMastodon } from "@palm/adapter-mastodon";
 import { activitySink, handleFederation, processQueueMessage, type QueueBody } from "@palm/federation";
 import { defineConfig, normaliseHost, resolveSurface, type DomainConfig, type PalmBindings, type PalmConfig, type RequestContext } from "@palm/core";
-import { migrate } from "@palm/db";
+import { migrate, prune } from "@palm/db";
 import { avatarResponse } from "./assets.ts";
 import { VERSION } from "./version.ts";
 
@@ -42,6 +42,18 @@ export function createPalm<Env extends PalmEnv = PalmEnv>(source: ConfigSource<E
     // The same Worker consumes its queue: deliveries and received activities.
     async queue(batch, env, ctx) {
       await consume(configFor(env), batch as MessageBatch<QueueBody>, env, ctx);
+    },
+    // A daily cron keeps the database small: see prune.
+    async scheduled(_controller, env) {
+      await migrate(env.DB);
+      let removed = 0;
+      // A few batches per run keeps each run short; the next day picks up the rest.
+      for (let i = 0; i < 5; i++) {
+        const n = await prune(env.DB);
+        removed += n;
+        if (n === 0) break;
+      }
+      console.log(JSON.stringify({ palm: "pruned", posts: removed }));
     },
   };
 }

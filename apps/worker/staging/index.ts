@@ -24,6 +24,7 @@ export const stagingConfig = (env: StagingEnv) => ({
     },
   ],
   instance: { name: "palm staging", description: "palm's test instance. Accounts here are wiped without notice." },
+  registration: "invite" as const,
   ...(env.STAGING_BROWSER_REDIRECT ? { browserRedirect: env.STAGING_BROWSER_REDIRECT } : {}),
 });
 
