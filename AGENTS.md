@@ -36,10 +36,11 @@ All of the above are internal and never published.
 `@fedify/fedify` stays external to the bundle and is the published package's
 one dependency.
 
-The client APIs answer only on their own hosts; the bare domain is federation
-only, and its nodeinfo reports "palm". Voyager assumes the API lives on the
-handle's domain, so it doesn't work with this split (it signs in, then refuses
-the bare domain); other Lemmy apps are untested.
+Nodeinfo answers as Lemmy everywhere, with palm's version as semver build
+metadata (`0.19.9+palm.X.Y.Z`): Voyager saves an account under the handle's
+domain and then only talks to that domain, after checking its nodeinfo for
+Lemmy >=0.19. So the Lemmy API answers on the bare domain as well as on its own
+host. The Mastodon API answers only on its own host.
 
 ## Commands
 
