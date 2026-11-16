@@ -102,19 +102,38 @@ export async function relationships(
 
 // --- boosts and bookmarks ----------------------------------------------------
 
+/**
+ * Records a boost: in `boosts`, for counts, and as a row in `posts` that
+ * points at the boosted post, so it shows in the booster's timeline and
+ * their followers' home timelines.
+ */
 export async function boost(db: D1Database, postId: number, accountId: number, apId: string | null): Promise<void> {
-  await db
+  const added = await db
     .prepare("INSERT INTO boosts (post_id, account_id, ap_id, created_at) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING")
     .bind(postId, accountId, apId, now())
     .run();
+  if (!added.meta.changes) return;
+  await db
+    .prepare(
+      `INSERT INTO posts (account_id, content_source, content_html, visibility, created_at, reblog_of)
+       VALUES (?, '', '', 'public', ?, ?)`,
+    )
+    .bind(accountId, now(), postId)
+    .run();
+}
+
+async function removeBoostRow(db: D1Database, postId: number, accountId: number): Promise<void> {
+  await db.prepare("DELETE FROM posts WHERE reblog_of = ? AND account_id = ?").bind(postId, accountId).run();
 }
 
 export async function unboost(db: D1Database, postId: number, accountId: number): Promise<void> {
   await db.prepare("DELETE FROM boosts WHERE post_id = ? AND account_id = ?").bind(postId, accountId).run();
+  await removeBoostRow(db, postId, accountId);
 }
 
 export async function unboostByApId(db: D1Database, apId: string, accountId: number): Promise<void> {
-  await db.prepare("DELETE FROM boosts WHERE ap_id = ? AND account_id = ?").bind(apId, accountId).run();
+  const row = await db.prepare("SELECT post_id FROM boosts WHERE ap_id = ? AND account_id = ?").bind(apId, accountId).first<{ post_id: number }>();
+  if (row) await unboost(db, row.post_id, accountId);
 }
 
 export async function bookmark(db: D1Database, postId: number, accountId: number): Promise<void> {
@@ -147,7 +166,7 @@ export async function interactions(db: D1Database, postIds: number[], viewerId: 
       `SELECT p.id,
          (SELECT COUNT(*) FROM votes v WHERE v.post_id = p.id AND v.score = 1) AS favourites,
          (SELECT COUNT(*) FROM boosts b WHERE b.post_id = p.id) AS boosts,
-         (SELECT COUNT(*) FROM posts r WHERE r.parent_id = p.id AND r.deleted_at IS NULL) AS replies,
+         (SELECT COUNT(*) FROM posts r WHERE r.parent_id = p.id AND r.deleted_at IS NULL AND r.reblog_of IS NULL) AS replies,
          EXISTS (SELECT 1 FROM votes v WHERE v.post_id = p.id AND v.account_id = ?1 AND v.score = 1) AS favourited,
          EXISTS (SELECT 1 FROM boosts b WHERE b.post_id = p.id AND b.account_id = ?1) AS boosted,
          EXISTS (SELECT 1 FROM bookmarks k WHERE k.post_id = p.id AND k.account_id = ?1) AS bookmarked

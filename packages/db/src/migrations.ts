@@ -363,6 +363,15 @@ ALTER TABLE accounts ADD COLUMN statuses_count INTEGER
 ALTER TABLE accounts ADD COLUMN outbox_fetched_at INTEGER
 `,
   },
+  {
+    version: 9,
+    name: "boosts in timelines",
+    sql: `
+ALTER TABLE posts ADD COLUMN reblog_of INTEGER REFERENCES posts (id)
+;
+CREATE INDEX IF NOT EXISTS posts_reblog_of ON posts (reblog_of) WHERE reblog_of IS NOT NULL
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

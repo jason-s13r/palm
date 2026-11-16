@@ -142,6 +142,13 @@ export async function redeemInvite(
  */
 export async function prune(db: D1Database, days = 30, batch = 300): Promise<number> {
   const cutoff = now() - days * 24 * 60 * 60;
+  // Old boosts by people elsewhere go first: they only point at posts.
+  await db
+    .prepare(
+      "DELETE FROM posts WHERE reblog_of IS NOT NULL AND created_at < ? AND account_id IN (SELECT id FROM accounts WHERE ap_id IS NOT NULL)",
+    )
+    .bind(cutoff)
+    .run();
   const { results } = await db
     .prepare(
       `SELECT p.id FROM posts p JOIN accounts a ON a.id = p.account_id
@@ -150,7 +157,7 @@ export async function prune(db: D1Database, days = 30, batch = 300): Promise<num
          AND NOT EXISTS (SELECT 1 FROM bookmarks k WHERE k.post_id = p.id)
          AND NOT EXISTS (SELECT 1 FROM boosts b JOIN accounts ba ON ba.id = b.account_id WHERE b.post_id = p.id AND ba.ap_id IS NULL)
          AND NOT EXISTS (SELECT 1 FROM mentions m JOIN accounts ma ON ma.id = m.account_id WHERE m.post_id = p.id AND ma.ap_id IS NULL)
-         AND NOT EXISTS (SELECT 1 FROM posts c WHERE c.parent_id = p.id OR c.root_id = p.id)
+         AND NOT EXISTS (SELECT 1 FROM posts c WHERE c.parent_id = p.id OR c.root_id = p.id OR c.reblog_of = p.id)
          AND NOT EXISTS (SELECT 1 FROM media d WHERE d.post_id = p.id)
        LIMIT ?`,
     )
@@ -162,6 +169,7 @@ export async function prune(db: D1Database, days = 30, batch = 300): Promise<num
     await db.batch([
       db.prepare(`DELETE FROM votes WHERE post_id IN (${marks})`).bind(...ids),
       db.prepare(`DELETE FROM boosts WHERE post_id IN (${marks})`).bind(...ids),
+      db.prepare(`DELETE FROM bookmarks WHERE post_id IN (${marks})`).bind(...ids),
       db.prepare(`DELETE FROM mentions WHERE post_id IN (${marks})`).bind(...ids),
       db.prepare(`DELETE FROM notifications WHERE post_id IN (${marks})`).bind(...ids),
       db.prepare(`DELETE FROM posts WHERE id IN (${marks})`).bind(...ids),

@@ -33,6 +33,11 @@ export interface Post {
   url: string | null;
   /** A remote post's attachments, as they were sent. Local posts use the media table. */
   attachments: RemoteAttachment[];
+  /**
+   * Set when this row is a boost: the post it boosts. Boosts are rows of
+   * their own, as Mastodon keeps them, so they sort and page with posts.
+   */
+  reblogOf: number | null;
 }
 
 /** A remote post's image or other file, kept as a link to where it lives. */
@@ -63,6 +68,7 @@ interface PostRow {
   ap_id: string | null;
   url: string | null;
   attachments: string | null;
+  reblog_of?: number | null;
 }
 
 export const toPost = (r: PostRow): Post => ({
@@ -86,6 +92,7 @@ export const toPost = (r: PostRow): Post => ({
   apId: r.ap_id ?? null,
   url: r.url ?? null,
   attachments: r.attachments ? (JSON.parse(r.attachments) as RemoteAttachment[]) : [],
+  reblogOf: r.reblog_of ?? null,
 });
 
 export type { PostRow };
@@ -93,7 +100,7 @@ export type { PostRow };
 /** What a new post needs; the thread fields default to a plain status. */
 export type NewPost = Omit<
   Post,
-  "id" | "createdAt" | "updatedAt" | "communityId" | "title" | "linkUrl" | "rootId" | "parentId" | "path" | "apId" | "url" | "attachments"
+  "id" | "createdAt" | "updatedAt" | "communityId" | "title" | "linkUrl" | "rootId" | "parentId" | "path" | "apId" | "url" | "attachments" | "reblogOf"
 > &
   Partial<Pick<Post, "communityId" | "title" | "linkUrl" | "rootId" | "parentId" | "apId" | "url" | "createdAt" | "updatedAt" | "attachments">>;
 
@@ -255,7 +262,7 @@ export async function localPublicPosts(db: D1Database, domain: string, page: Pag
   const { results } = await db
     .prepare(
       `SELECT p.* FROM posts p JOIN accounts a ON a.id = p.account_id
-       WHERE a.domain = ? AND p.deleted_at IS NULL AND p.visibility = 'public'${sql.replaceAll("id ", "p.id ")}
+       WHERE a.domain = ? AND p.deleted_at IS NULL AND p.visibility = 'public' AND p.reblog_of IS NULL${sql.replaceAll("id ", "p.id ")}
        ORDER BY p.id DESC LIMIT ?`,
     )
     .bind(domain, ...params, page.limit)
@@ -329,7 +336,7 @@ export async function publicTimeline(db: D1Database, scope: { local: boolean; do
   const { results } = await db
     .prepare(
       `SELECT p.* FROM posts p JOIN accounts a ON a.id = p.account_id
-       WHERE p.deleted_at IS NULL AND p.visibility = 'public' AND p.root_id IS NULL
+       WHERE p.deleted_at IS NULL AND p.visibility = 'public' AND p.root_id IS NULL AND p.reblog_of IS NULL
          AND ${scope.local ? "a.ap_id IS NULL AND a.domain = ?" : "(a.ap_id IS NOT NULL OR a.domain = ?)"}
          ${sql.replaceAll("id ", "p.id ")}
        ORDER BY p.id DESC LIMIT ?`,
