@@ -9,9 +9,17 @@
   "workers_dev": true,
   "observability": { "enabled": true },
   "version_metadata": { "binding": "CF_VERSION_METADATA" },
+  // Staging lives on its own throwaway hosts under 1j.nz. They're flat
+  // (palm-test-lemmy, not lemmy.palm-test) so Cloudflare's free certificate
+  // covers them. Anything staging mints is disposable; 1j.nz itself is not.
   "vars": {
-    // Until a staging domain is chosen, staging answers on workers.dev only.
-    // With a domain: set these three and add routes for each host.
-    "STAGING_DOMAIN": "palm-staging.jason-2ab.workers.dev"
-  }
+    "STAGING_DOMAIN": "palm-test.1j.nz",
+    "STAGING_LEMMY_HOST": "palm-test-lemmy.1j.nz",
+    "STAGING_MASTODON_HOST": "palm-test-mastodon.1j.nz"
+  },
+  "routes": [
+    { "pattern": "palm-test.1j.nz", "custom_domain": true },
+    { "pattern": "palm-test-lemmy.1j.nz", "custom_domain": true },
+    { "pattern": "palm-test-mastodon.1j.nz", "custom_domain": true }
+  ]
 }
