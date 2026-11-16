@@ -13,7 +13,20 @@ export interface Post {
   visibility: Visibility;
   language: string | null;
   inReplyTo: string | null;
+  /** The community a Lemmy post or comment belongs to. */
+  communityId: number | null;
+  /** A Lemmy post's title; null for comments and plain statuses. */
+  title: string | null;
+  /** A Lemmy link post's link. */
+  linkUrl: string | null;
+  /** For a comment, the Lemmy post it's on. */
+  rootId: number | null;
+  /** For a comment, the local post or comment it answers. */
+  parentId: number | null;
+  /** For a comment, Lemmy's path: "0", then each comment ID down to this one. */
+  path: string | null;
   createdAt: number;
+  updatedAt: number | null;
 }
 
 interface PostRow {
@@ -26,10 +39,17 @@ interface PostRow {
   visibility: Visibility;
   language: string | null;
   in_reply_to: string | null;
+  community_id: number | null;
+  title: string | null;
+  link_url: string | null;
+  root_id: number | null;
+  parent_id: number | null;
+  path: string | null;
   created_at: number;
+  updated_at: number | null;
 }
 
-const toPost = (r: PostRow): Post => ({
+export const toPost = (r: PostRow): Post => ({
   id: r.id,
   accountId: r.account_id,
   contentSource: r.content_source,
@@ -39,17 +59,28 @@ const toPost = (r: PostRow): Post => ({
   visibility: r.visibility,
   language: r.language,
   inReplyTo: r.in_reply_to,
+  communityId: r.community_id ?? null,
+  title: r.title ?? null,
+  linkUrl: r.link_url ?? null,
+  rootId: r.root_id ?? null,
+  parentId: r.parent_id ?? null,
+  path: r.path ?? null,
   createdAt: r.created_at,
+  updatedAt: r.updated_at ?? null,
 });
 
-export async function createPost(
-  db: D1Database,
-  post: Omit<Post, "id" | "createdAt">,
-): Promise<Post> {
+export type { PostRow };
+
+/** What a new post needs; the thread fields default to a plain status. */
+export type NewPost = Omit<Post, "id" | "createdAt" | "updatedAt" | "communityId" | "title" | "linkUrl" | "rootId" | "parentId" | "path"> &
+  Partial<Pick<Post, "communityId" | "title" | "linkUrl" | "rootId" | "parentId">>;
+
+export async function createPost(db: D1Database, post: NewPost): Promise<Post> {
   const row = await db
     .prepare(
-      `INSERT INTO posts (account_id, content_source, content_html, spoiler_text, sensitive, visibility, language, in_reply_to, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      `INSERT INTO posts (account_id, content_source, content_html, spoiler_text, sensitive, visibility, language, in_reply_to,
+                          community_id, title, link_url, root_id, parent_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .bind(
       post.accountId,
@@ -60,11 +91,42 @@ export async function createPost(
       post.visibility,
       post.language,
       post.inReplyTo,
+      post.communityId ?? null,
+      post.title ?? null,
+      post.linkUrl ?? null,
+      post.rootId ?? null,
+      post.parentId ?? null,
       now(),
     )
     .first<PostRow>();
   if (!row) throw new Error("Post was not created.");
-  return toPost(row);
+  if (row.root_id === null) return toPost(row);
+  // A comment's path is its parent's path (or "0" under the post) plus its own ID.
+  const parent = row.parent_id !== null && row.parent_id !== row.root_id ? await postById(db, row.parent_id) : null;
+  const path = `${parent?.path ?? "0"}.${row.id}`;
+  await db.prepare("UPDATE posts SET path = ? WHERE id = ?").bind(path, row.id).run();
+  return toPost({ ...row, path });
+}
+
+/** Changes a post's text (and a Lemmy post's title and link). */
+export async function editPost(
+  db: D1Database,
+  id: number,
+  edit: { contentSource: string; contentHtml: string; title?: string | null; linkUrl?: string | null },
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE posts SET content_source = ?, content_html = ?, title = COALESCE(?, title), link_url = COALESCE(?, link_url), updated_at = ?
+       WHERE id = ? AND deleted_at IS NULL`,
+    )
+    .bind(edit.contentSource, edit.contentHtml, edit.title ?? null, edit.linkUrl ?? null, now(), id)
+    .run();
+}
+
+/** A post, deleted or not, for Lemmy, which shows deleted comments in place. */
+export async function postByIdAny(db: D1Database, id: number): Promise<(Post & { deleted: boolean }) | null> {
+  const row = await db.prepare("SELECT * FROM posts WHERE id = ?").bind(id).first<PostRow & { deleted_at: number | null }>();
+  return row ? { ...toPost(row), deleted: row.deleted_at !== null } : null;
 }
 
 export async function postById(db: D1Database, id: number): Promise<Post | null> {
@@ -75,6 +137,11 @@ export async function postById(db: D1Database, id: number): Promise<Post | null>
 /** Soft-deletes a post, so its ID is never reused and can still answer as Tombstone. */
 export async function deletePost(db: D1Database, id: number): Promise<void> {
   await db.prepare("UPDATE posts SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL").bind(now(), id).run();
+}
+
+/** Undoes a delete, as Lemmy's "restore" does. */
+export async function restorePost(db: D1Database, id: number): Promise<void> {
+  await db.prepare("UPDATE posts SET deleted_at = NULL WHERE id = ?").bind(id).run();
 }
 
 export interface Page {

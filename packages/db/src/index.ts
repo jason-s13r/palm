@@ -30,5 +30,32 @@ export {
   removeFollower,
 } from "./federation.ts";
 export type { Follower, KeyAlgorithm, StoredKeyPair } from "./federation.ts";
-export { countLocalPosts, countPosts, createPost, deletePost, lastPostAt, localPublicPosts, postById, postsByAccount, repliesTo } from "./posts.ts";
-export type { Page, Post, Visibility } from "./posts.ts";
+export {
+  countLocalPosts,
+  countPosts,
+  createPost,
+  deletePost,
+  editPost,
+  lastPostAt,
+  localPublicPosts,
+  postById,
+  postByIdAny,
+  postsByAccount,
+  repliesTo,
+  restorePost,
+} from "./posts.ts";
+export type { NewPost, Page, Post, Visibility } from "./posts.ts";
+export {
+  communitiesByIds,
+  communityById,
+  communityByName,
+  communityKeys,
+  countCommunities,
+  listCommunities,
+  subscribe,
+  subscriptions,
+  unsubscribe,
+} from "./communities.ts";
+export type { Community, CommunityListing, CommunityStats } from "./communities.ts";
+export { listThreadComments, listThreadPosts, siteCounts, threadCounts, threadSort, vote } from "./threads.ts";
+export type { CommentListing, PostListing, Tally, ThreadComment, ThreadPost, ThreadSort } from "./threads.ts";

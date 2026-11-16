@@ -136,6 +136,66 @@ CREATE INDEX IF NOT EXISTS posts_public ON posts (visibility, id) WHERE deleted_
 CREATE INDEX IF NOT EXISTS posts_in_reply_to ON posts (in_reply_to) WHERE in_reply_to IS NOT NULL
 `,
   },
+  {
+    version: 4,
+    name: "communities, threads and votes",
+    sql: `
+CREATE TABLE IF NOT EXISTS communities (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  domain TEXT NOT NULL,
+  name TEXT NOT NULL COLLATE NOCASE,
+  title TEXT NOT NULL,
+  description TEXT,
+  nsfw INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  UNIQUE (domain, name)
+)
+;
+CREATE TABLE IF NOT EXISTS community_keys (
+  community_id INTEGER NOT NULL REFERENCES communities (id),
+  algorithm TEXT NOT NULL CHECK (algorithm IN ('RSASSA-PKCS1-v1_5', 'Ed25519')),
+  public_jwk TEXT NOT NULL,
+  private_jwk TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (community_id, algorithm)
+)
+;
+CREATE TABLE IF NOT EXISTS community_subscriptions (
+  community_id INTEGER NOT NULL REFERENCES communities (id),
+  account_id INTEGER NOT NULL REFERENCES accounts (id),
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (community_id, account_id)
+)
+;
+CREATE INDEX IF NOT EXISTS community_subscriptions_account ON community_subscriptions (account_id)
+;
+ALTER TABLE posts ADD COLUMN community_id INTEGER REFERENCES communities (id)
+;
+ALTER TABLE posts ADD COLUMN title TEXT
+;
+ALTER TABLE posts ADD COLUMN link_url TEXT
+;
+ALTER TABLE posts ADD COLUMN root_id INTEGER REFERENCES posts (id)
+;
+ALTER TABLE posts ADD COLUMN parent_id INTEGER REFERENCES posts (id)
+;
+ALTER TABLE posts ADD COLUMN path TEXT
+;
+ALTER TABLE posts ADD COLUMN updated_at INTEGER
+;
+CREATE INDEX IF NOT EXISTS posts_community ON posts (community_id, id) WHERE root_id IS NULL
+;
+CREATE INDEX IF NOT EXISTS posts_root ON posts (root_id, path) WHERE root_id IS NOT NULL
+;
+CREATE TABLE IF NOT EXISTS votes (
+  post_id INTEGER NOT NULL REFERENCES posts (id),
+  account_id INTEGER NOT NULL REFERENCES accounts (id),
+  score INTEGER NOT NULL CHECK (score IN (-1, 1)),
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (post_id, account_id)
+)
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;
