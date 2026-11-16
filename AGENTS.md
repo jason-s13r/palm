@@ -33,8 +33,9 @@ All of the above are internal and never published.
   Workers Builds. Real deployments live in their own repos (see
   `wrangler.template.jsonc`).
 
-`@fedify/fedify` stays external to the bundle and is the published package's
-one dependency.
+`@fedify/fedify` stays external to the bundle, along with `temporal-polyfill`
+(Fedify's own Temporal, which palm uses for ActivityPub dates); they're the
+published package's dependencies.
 
 Nodeinfo answers as Lemmy everywhere, with palm's version as semver build
 metadata (`0.19.9+palm.X.Y.Z`): Voyager saves an account under the handle's
