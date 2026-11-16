@@ -34,24 +34,39 @@ export interface RequestContext {
 }
 
 /**
- * Local changes that federate. Each call returns straight away and delivers in
- * the background, through waitUntil.
+ * What the client adapters ask of federation, so they don't depend on Fedify:
+ * tell other servers about local changes, and look up remote things.
  */
 export interface ActivitySink {
-  /** A local post was written: send a Create to its audience. */
-  postCreated(post: PostRef): void;
-  /** A local post was deleted: send a Delete to its audience. */
-  postDeleted(post: PostRef): void;
+  /**
+   * Hands a change to federation. It returns straight away; the work runs on
+   * the queue (or after the response, without one).
+   */
+  enqueue(task: FederationTask): void;
+  /**
+   * Finds a remote person, community or post by handle (`@name@host`,
+   * `!name@host`) or URL, fetching and recording it if palm hasn't met it.
+   */
+  resolve(query: string): Promise<Resolved | null>;
 }
 
-/** Enough of a local post to address activities about it. */
-export interface PostRef {
-  id: number;
-  accountId: number;
-  visibility: "public" | "unlisted" | "private" | "direct";
-  /** Set for Lemmy posts and comments, which go to their community instead. */
-  communityId?: number | null;
-}
+/** What `resolve` found, by its ID in palm's tables. */
+export type Resolved = { kind: "account"; id: number } | { kind: "community"; id: number } | { kind: "post"; id: number };
+
+/** Local changes that other servers hear about. */
+export type FederationTask =
+  | { kind: "post_created"; postId: number }
+  | { kind: "post_updated"; postId: number }
+  | { kind: "post_deleted"; postId: number }
+  /** A vote on a post or comment: 1, -1, or 0 for taking one back (a Mastodon favourite is 1). */
+  | { kind: "voted"; postId: number; accountId: number; score: number; previous: number }
+  | { kind: "boosted"; postId: number; accountId: number; undo: boolean }
+  /** Following a person. `followApId` names the Follow, so it can be undone or accepted. */
+  | { kind: "followed"; accountId: number; targetId: number; followApId: string; undo: boolean }
+  | { kind: "subscribed"; accountId: number; communityId: number; followApId: string; undo: boolean }
+  | { kind: "profile_updated"; accountId: number }
+  /** Fetches a remote community's recent posts after the first local subscription. */
+  | { kind: "backfill"; communityId: number };
 
 /**
  * ActivityPub IDs. These are permanent once another server has seen them, so
