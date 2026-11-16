@@ -10,11 +10,13 @@
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
-    "dev": "pnpm --filter @jason-s13r/palm-worker dev"
+    "dev": "pnpm --filter @jason-s13r/palm-worker dev",
+    "palm": "node packages/cli/src/palm.ts"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261116.1",
     "typescript": "~6.0.3",
-    "vitest": "^5.1.0"
+    "vitest": "^5.1.0",
+    "@palm/cli": "workspace:*"
   }
 }

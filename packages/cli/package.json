@@ -1,0 +1,22 @@
+{
+  "name": "@palm/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Admin commands for a palm deployment, run on your own machine.",
+  "bin": {
+    "palm": "./src/palm.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@palm/auth": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "~6.0.3",
+    "vitest": "^5.1.0"
+  }
+}
