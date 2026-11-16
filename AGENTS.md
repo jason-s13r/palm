@@ -1,0 +1,47 @@
+# Working on palm
+
+palm is a multi-user ActivityPub server on Cloudflare Workers, used through
+existing Lemmy and Mastodon apps, with one identity per person. Federation is
+built on [Fedify](https://fedify.dev). The build plan and its decisions live
+outside this repo (the Palm project's `palm-decisions.md`).
+
+## Layout
+
+- `packages/core` (`@palm/core`): the config model (`defineConfig`) and host
+  routing (`resolveSurface`). Internal, never published.
+- `apps/worker` (`@jason-s13r/palm-worker`): the one published package.
+  `createPalm(config)` returns the Worker for a deployment. Built with tsup into
+  a single bundle with `@palm/*` inlined.
+- `apps/worker/staging`: palm's own staging instance, deployed from `main` by
+  Workers Builds. Real deployments live in their own repos (see
+  `wrangler.template.jsonc`).
+
+More packages (federation, db, fedify-d1, adapter-lemmy, adapter-mastodon,
+cli) arrive with the milestones that need them.
+
+## Commands
+
+- `pnpm install`
+- `pnpm typecheck`
+- `pnpm test` (the worker's tests run inside workerd through
+  `@cloudflare/vitest-plugin`)
+- `pnpm --filter @jason-s13r/palm-worker build`
+- `pnpm dev` (wrangler dev on the staging entry)
+
+## Rules that matter
+
+- **Commits are conventional and scoped to a package folder**: `feat(core):`,
+  `fix(worker):`, `feat(core,worker)!:`. Repo-wide changes use `repo`
+  (`chore(repo):`, `ci(repo):`, `docs(repo):`). dispat computes versions from
+  these, so a wrong scope means a wrong release; see `dispat.yaml` for what
+  counts as breaking.
+- **Never hand-edit versions** in `package.json` or `apps/worker/src/version.ts`.
+  dispat writes them.
+- **Nothing deployment-specific in this repo.** No real domains, IDs or names
+  beyond the staging instance. Deployments pass a config to `createPalm`.
+- **ActivityPub IDs are permanent** once another server has seen them. Changes
+  to how they're minted are breaking and need a deliberate decision.
+- **Free-tier budget**: 10 ms CPU per request, Workers KV avoided (1,000 writes
+  a day), D1 capped at 500 MB per database. Keep hot paths cheap and measure.
+- **Expand-then-contract migrations** (from M1): add first, drop a release
+  later, so a rollback still matches the schema.
