@@ -99,7 +99,7 @@ builder
 builder.setObjectDispatcher(APObject, "/objects/{id}", async (ctx, { id }) => {
   if (!/^\d+$/.test(id)) return null;
   const post = await postByIdAny(ctx.data.bindings.DB, Number(id));
-  if (!post || post.deleted || post.apId || (post.visibility !== "public" && post.visibility !== "unlisted")) return null;
+  if (!post || post.deleted || post.apId || post.reblogOf !== null || (post.visibility !== "public" && post.visibility !== "unlisted")) return null;
   const parts = await postParts(ctx.data.bindings.DB, post.id);
   if (!parts || parts.author.domain !== ctx.data.domain.domain) return null;
   return objectFor(parts);
@@ -119,6 +119,7 @@ builder
     const posts = await postsByAccount(ctx.data.bindings.DB, account.id, ["public", "unlisted"], { maxId, limit: OUTBOX_PAGE });
     const items = [];
     for (const post of posts) {
+      if (post.reblogOf !== null) continue;
       const parts = await postParts(ctx.data.bindings.DB, post.id);
       if (parts) items.push(createFor(parts));
     }
