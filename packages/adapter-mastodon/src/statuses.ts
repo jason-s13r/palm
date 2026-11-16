@@ -1,5 +1,7 @@
-import { escapeHtml, hashtagsIn, mentionsIn, textToHtml, urls, type RequestContext } from "@palm/core";
+import { escapeHtml, hashtagsIn, mentionsIn, previewLink, textToHtml, urls, type RequestContext } from "@palm/core";
 import {
+  cardsFor,
+  type LinkCard,
   hiddenFor,
   isHidden,
   NOTHING_HIDDEN,
@@ -133,15 +135,16 @@ export function mediaAttachment(ctx: RequestContext, m: Media, domain = ctx.doma
   };
 }
 
-/** A remote post's attachment, served from where it lives. */
-function remoteAttachment(postId: number, index: number, a: Post["attachments"][number]) {
+/** A remote post's attachment, through palm's media cache. */
+function remoteAttachment(ctx: RequestContext, postId: number, index: number, a: Post["attachments"][number]) {
   const kind = a.mediaType?.split("/")[0];
   const type = kind === "video" ? "video" : kind === "audio" ? "audio" : kind === "image" || !a.mediaType ? "image" : "unknown";
+  const url = urls.proxy(ctx.domain.domain, a.url);
   return {
     id: `${postId}${String(index).padStart(2, "0")}`,
     type,
-    url: a.url,
-    preview_url: type === "image" ? a.url : null,
+    url,
+    preview_url: type === "image" ? url : null,
     remote_url: a.url,
     preview_remote_url: null,
     text_url: null,
@@ -224,6 +227,8 @@ async function renderStatuses(ctx: RequestContext, posts: Post[], viewer: Accoun
     ...[...mentioned.values()].flat(),
     ...[...parents.values()].map((p) => p.accountId),
   ]);
+  const links = new Map(posts.map((p) => [p.id, previewLink(p)]));
+  const cards = await cardsFor(db, [...links.values()].filter((l): l is string => l !== null));
   const statsFor = new Map<number, AccountStats>();
   for (const id of new Set(posts.map((p) => p.accountId))) {
     const a = people.get(id);
@@ -271,7 +276,7 @@ async function renderStatuses(ctx: RequestContext, posts: Post[], viewer: Accoun
         account: authorView,
         media_attachments: [
           ...(media.get(post.id) ?? []).map((m) => mediaAttachment(ctx, m, author.domain)),
-          ...post.attachments.map((a, i) => remoteAttachment(post.id, i, a)),
+          ...post.attachments.map((a, i) => remoteAttachment(ctx, post.id, i, a)),
         ],
         mentions: (mentioned.get(post.id) ?? []).flatMap((id) => {
           const m = people.get(id);
@@ -281,11 +286,36 @@ async function renderStatuses(ctx: RequestContext, posts: Post[], viewer: Accoun
         }),
         tags: (tags.get(post.id) ?? []).map((t) => ({ name: t, url: urls.tag(ctx.domain.domain, t) })),
         emojis: [],
-        card: null,
+        card: cardView(ctx, cards.get(links.get(post.id) ?? "")),
         poll: null,
       },
     ];
   });
+}
+
+/** Mastodon's PreviewCard for a link palm has a preview of. */
+function cardView(ctx: RequestContext, card: LinkCard | undefined) {
+  if (!card) return null;
+  return {
+    url: card.url,
+    title: card.title ?? card.url,
+    description: card.description ?? "",
+    type: "link",
+    author_name: "",
+    author_url: "",
+    provider_name: card.provider ?? "",
+    provider_url: "",
+    html: "",
+    width: card.image ? 400 : 0,
+    height: card.image ? 210 : 0,
+    image: card.image ? urls.proxy(ctx.domain.domain, card.image) : null,
+    image_description: "",
+    embed_url: "",
+    blurhash: null,
+    language: null,
+    published_at: null,
+    authors: [],
+  };
 }
 
 /** Mastodon's paging parameters. since_id and min_id both mean "newer than"; palm treats them alike. */

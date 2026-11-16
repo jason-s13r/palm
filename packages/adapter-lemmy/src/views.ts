@@ -48,8 +48,8 @@ export function person(ctx: RequestContext, account: Account): Person {
     name: account.username,
     ...(account.displayName ? { display_name: account.displayName } : {}),
     ...(account.bio ? { bio: local ? account.bio : htmlToText(account.bio) } : {}),
-    ...(account.avatarUrl ? { avatar: account.avatarUrl } : {}),
-    ...(account.headerUrl ? { banner: account.headerUrl } : {}),
+    ...(account.avatarUrl ? { avatar: local ? account.avatarUrl : urls.proxy(ctx.domain.domain, account.avatarUrl) } : {}),
+    ...(account.headerUrl ? { banner: local ? account.headerUrl : urls.proxy(ctx.domain.domain, account.headerUrl) } : {}),
     banned: false,
     published: iso(account.createdAt),
     actor_id: account.apId ?? urls.user(account.domain, account.username),
@@ -229,8 +229,8 @@ export function community(ctx: RequestContext, c: StoredCommunity): Community {
     name: c.name,
     title: c.title,
     ...(c.description ? { description: local ? c.description : htmlToText(c.description) } : {}),
-    ...(c.iconUrl ? { icon: c.iconUrl } : {}),
-    ...(c.bannerUrl ? { banner: c.bannerUrl } : {}),
+    ...(c.iconUrl ? { icon: local ? c.iconUrl : urls.proxy(ctx.domain.domain, c.iconUrl) } : {}),
+    ...(c.bannerUrl ? { banner: local ? c.bannerUrl : urls.proxy(ctx.domain.domain, c.bannerUrl) } : {}),
     removed: false,
     published: iso(c.createdAt),
     deleted: false,
@@ -286,7 +286,9 @@ export function post(ctx: RequestContext, p: ThreadPost, creator?: Account): Pos
     name: p.title ?? "",
     ...(p.linkUrl ? { url: p.linkUrl } : {}),
     // Apps show an image link as the post's picture.
-    ...(p.linkUrl && /\.(jpe?g|png|gif|webp)(\?|$)/i.test(p.linkUrl) ? { thumbnail_url: p.linkUrl } : {}),
+    ...(p.linkUrl && /\.(jpe?g|png|gif|webp)(\?|$)/i.test(p.linkUrl)
+      ? { thumbnail_url: p.linkUrl.startsWith(`https://${ctx.domain.domain}/`) ? p.linkUrl : urls.proxy(ctx.domain.domain, p.linkUrl) }
+      : {}),
     ...(p.contentSource ? { body: p.contentSource } : {}),
     creator_id: p.accountId,
     community_id: p.communityId ?? 0,

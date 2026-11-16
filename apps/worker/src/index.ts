@@ -139,6 +139,7 @@ export async function handle(
   await migrate(env.DB);
 
   const ctx = requestContext(config, surface.domain, normaliseHost(url.host), env, executionCtx);
+  if (url.pathname === "/proxy/media") return proxyMedia(request, ctx);
 
   switch (surface.kind) {
     case "lemmy":
@@ -182,6 +183,57 @@ async function federationFallback(config: PalmConfig, request: Request, url: URL
     return Response.redirect(new URL(url.pathname + url.search, config.browserRedirect).toString(), 302);
   }
   return json({ error: "not_found" }, 404);
+}
+
+const PROXY_MAX_BYTES = 40 * 1024 * 1024;
+const PROXY_TTL_SECONDS = 7 * 24 * 60 * 60;
+
+/**
+ * Other servers' pictures and video, fetched once and kept in Cloudflare's
+ * cache, so they load fast and outlast a slow or vanished server for a while.
+ * Only media from servers palm knows is fetched (so this isn't an open proxy
+ * for anyone's URLs); anything else is a redirect to the original.
+ */
+async function proxyMedia(request: Request, ctx: RequestContext): Promise<Response> {
+  const target = new URL(request.url).searchParams.get("url") ?? "";
+  let source: URL;
+  try {
+    source = new URL(target);
+  } catch {
+    return json({ error: "bad_url" }, 400);
+  }
+  if (source.protocol !== "https:" && source.protocol !== "http:") return json({ error: "bad_url" }, 400);
+  const cache = (caches as unknown as { default: Cache }).default;
+  const key = new Request(`https://${ctx.domain.domain}/proxy/media?url=${encodeURIComponent(source.href)}`);
+  const range = request.headers.get("range");
+  const cached = await cache.match(range ? new Request(key, { headers: { range } }) : key);
+  if (cached) return cached;
+  const host = source.host.toLowerCase();
+  const known = await ctx.bindings.DB.prepare(
+    `SELECT 1 FROM accounts WHERE ap_id IS NOT NULL AND (domain = ?1 OR ?1 LIKE '%.' || domain)
+     UNION ALL SELECT 1 FROM communities WHERE ap_id IS NOT NULL AND (domain = ?1 OR ?1 LIKE '%.' || domain) LIMIT 1`,
+  )
+    .bind(host)
+    .first();
+  if (!known) return Response.redirect(source.href, 302);
+  const upstream = await fetch(source.href, { headers: { "user-agent": "palm (+https://github.com/jason-s13r/palm; media)" }, redirect: "follow" }).catch(() => null);
+  const type = upstream?.headers.get("content-type") ?? "";
+  const size = Number(upstream?.headers.get("content-length") ?? 0);
+  if (!upstream?.ok || !/^(image|video|audio)\//.test(type) || type.includes("svg") || size > PROXY_MAX_BYTES) {
+    await upstream?.body?.cancel().catch(() => undefined);
+    return Response.redirect(source.href, 302);
+  }
+  const response = new Response(upstream.body, {
+    headers: {
+      "content-type": type,
+      ...(size ? { "content-length": String(size) } : {}),
+      "cache-control": `public, max-age=${PROXY_TTL_SECONDS}`,
+      "content-security-policy": "default-src 'none'",
+      "x-content-type-options": "nosniff",
+    },
+  });
+  ctx.waitUntil(cache.put(key, response.clone()).catch(() => undefined));
+  return response;
 }
 
 /** Crawlers may read the web pages; the APIs and sign-in aren't for them. */

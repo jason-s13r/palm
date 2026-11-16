@@ -27,6 +27,7 @@ import {
 import { actorUri, communityUri, createFor, followersUri, objectFor, postParts, postUri, tombstoneFor, type PostParts } from "./objects.ts";
 import type { QueueBody } from "./queue.ts";
 import { backfillProfile, backfillThread, resolve as resolveRemote, storeRemotePost } from "./remote.ts";
+import { cardForPost } from "./cards.ts";
 import { communitySenderKeys, contextsFor, federationsFor, logProblem, personKeys, recipient, recipientOf, send } from "./shared.ts";
 import { personFor } from "./people.ts";
 
@@ -131,6 +132,7 @@ export async function runTask(ctx: RequestContext, task: FederationTask): Promis
       const parts = await postParts(db, task.postId);
       if (!parts || !isLocal(parts.author)) return;
       if (task.kind === "post_created") await notifyLocally(ctx, parts);
+      if (task.kind !== "post_deleted") ctx.waitUntil(cardForPost(db, parts.post).catch(() => undefined));
       const object = objectFor(parts);
       const { toIds: tos, ccIds: ccs } = object;
       const id = postUri(parts.post, parts.author);

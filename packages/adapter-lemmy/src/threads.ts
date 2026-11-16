@@ -40,6 +40,7 @@ import {
   type ThreadSort,
   hiddenFor,
   isHidden,
+  cardsFor,
 } from "@palm/db";
 import { Hono, type Context } from "hono";
 import type {
@@ -200,12 +201,25 @@ function asLemmyPost<T extends ThreadPost>(p: T): T {
 
 async function postViews(c: C, posts: ThreadPost[]) {
   const viewer = c.get("auth")?.account ?? null;
-  const [ctxOf, hidden] = await Promise.all([contextFor(c, posts), hiddenFor(c.env.bindings.DB, viewer?.id)]);
-  return posts.flatMap((p) => {
+  const shown = posts.map(asLemmyPost);
+  const [ctxOf, hidden, cards] = await Promise.all([
+    contextFor(c, posts),
+    hiddenFor(c.env.bindings.DB, viewer?.id),
+    cardsFor(c.env.bindings.DB, shown.flatMap((p) => (p.linkUrl ? [p.linkUrl] : []))),
+  ]);
+  return shown.flatMap((p) => {
     const t = ctxOf(p);
     // Blocked people, communities and instances drop out; your own posts stay.
     if (!t || (p.accountId !== viewer?.id && isHidden(hidden, t.creator, t.community.id))) return [];
-    return [postView(c.env, asLemmyPost(p), t)];
+    const view = postView(c.env, p, t);
+    // A link's preview: its title, description and picture.
+    const card = p.linkUrl ? cards.get(p.linkUrl) : undefined;
+    if (card) {
+      if (card.title) view.post.embed_title = card.title;
+      if (card.description) view.post.embed_description = card.description;
+      if (card.image && !view.post.thumbnail_url) view.post.thumbnail_url = urls.proxy(c.env.domain.domain, card.image);
+    }
+    return [view];
   });
 }
 

@@ -179,6 +179,8 @@ export async function prune(db: D1Database, days = 30, batch = 300): Promise<num
   await db.batch([
     db.prepare("DELETE FROM notifications WHERE read = 1 AND created_at < ?").bind(now() - 90 * 24 * 60 * 60),
     db.prepare("DELETE FROM fedify_kv WHERE expires_at IS NOT NULL AND expires_at < ?").bind(now()),
+    // Link previews are fetched again if a link turns up after a month.
+    db.prepare("DELETE FROM link_cards WHERE fetched_at < ?").bind(now() - 30 * 24 * 60 * 60),
   ]);
   return ids.length;
 }

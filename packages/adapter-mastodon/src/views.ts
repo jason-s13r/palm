@@ -38,8 +38,10 @@ export const profileUrl = (ctx: RequestContext, username: string) => `https://${
 
 export function account(ctx: RequestContext, a: Account, stats?: AccountStats) {
   const local = a.apId === null;
-  const avatar = a.avatarUrl ?? avatarUrl(ctx.host);
-  const header = a.headerUrl ?? avatarUrl(ctx.host);
+  // Other servers' pictures come through palm's media cache.
+  const viaCache = (url: string | null) => (url && !local ? urls.proxy(ctx.domain.domain, url) : url);
+  const avatar = viaCache(a.avatarUrl) ?? avatarUrl(ctx.host);
+  const header = viaCache(a.headerUrl) ?? avatarUrl(ctx.host);
   return {
     id: String(a.id),
     username: a.username,

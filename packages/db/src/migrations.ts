@@ -441,6 +441,20 @@ CREATE TABLE IF NOT EXISTS user_domain_blocks (
 )
 `,
   },
+  {
+    version: 15,
+    name: "link previews",
+    sql: `
+CREATE TABLE IF NOT EXISTS link_cards (
+  url TEXT PRIMARY KEY,
+  title TEXT,
+  description TEXT,
+  image TEXT,
+  provider TEXT,
+  fetched_at INTEGER NOT NULL
+)
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

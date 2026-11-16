@@ -49,6 +49,7 @@ import {
   type RemoteAttachment,
   type Visibility,
 } from "@palm/db";
+import { cardForPost } from "./cards.ts";
 import { localDomains, logProblem } from "./shared.ts";
 
 /** How long palm trusts what it fetched about a remote actor. */
@@ -337,6 +338,8 @@ export async function storeRemotePost(
       await notify(db, { accountId: parentAuthorLocal, kind: "reply", fromAccountId: author.id, postId: post.id });
     }
   }
+  // Link previews for posts, not every comment under them; after the response.
+  if (!post.rootId) fctx.data.waitUntil(cardForPost(db, post).catch(() => undefined));
   return post;
 }
 

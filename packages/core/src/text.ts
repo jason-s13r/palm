@@ -210,3 +210,18 @@ export function markdownToHtml(markdown: string): string {
   flush();
   return out.join("");
 }
+
+/**
+ * The link a post would preview: its Lemmy link, or else the first link in
+ * its text that isn't a mention, a hashtag or one of its own attachments.
+ */
+export function previewLink(post: { linkUrl: string | null; contentHtml: string }, attached: string[] = []): string | null {
+  if (post.linkUrl) return /^https?:\/\//.test(post.linkUrl) ? post.linkUrl : null;
+  for (const match of post.contentHtml.matchAll(/<a\b([^>]*)>/gi)) {
+    const attrs = match[1]!;
+    if (/class="[^"]*\b(mention|hashtag|u-url)\b/i.test(attrs) || /rel="[^"]*\btag\b/i.test(attrs)) continue;
+    const href = attrs.match(/href="([^"]+)"/i)?.[1]?.replaceAll("&amp;", "&");
+    if (href && /^https?:\/\//.test(href) && !attached.includes(href)) return href;
+  }
+  return null;
+}

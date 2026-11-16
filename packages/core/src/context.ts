@@ -93,6 +93,8 @@ export const urls = {
   media: (domain: string, file: string) => `https://${domain}/pictrs/image/${encodeURIComponent(file)}`,
   /** A community, as Lemmy names them: `!name@domain` lives at /c/name. */
   community: (domain: string, name: string) => `https://${domain}/c/${encodeURIComponent(name.toLowerCase())}`,
+  /** Another server's picture or video, fetched and cached through palm. */
+  proxy: (domain: string, url: string) => `https://${domain}/proxy/media?url=${encodeURIComponent(url)}`,
   inbox: (domain: string) => `https://${domain}/inbox`,
   userInbox: (domain: string, username: string) => `${urls.user(domain, username)}/inbox`,
 };
