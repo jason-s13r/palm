@@ -1,8 +1,20 @@
 export { MIGRATIONS, SCHEMA_VERSION, statementsOf } from "./migrations.ts";
 export type { Migration } from "./migrations.ts";
 export { instanceSecret, migrate } from "./migrate.ts";
-export { accountById, accountForLogin, admins, countAccounts, setPasswordHash } from "./accounts.ts";
-export type { Account } from "./accounts.ts";
+export {
+  accountByApId,
+  accountByHandle,
+  accountById,
+  accountForLogin,
+  accountsByIds,
+  admins,
+  countAccounts,
+  isLocal,
+  setPasswordHash,
+  updateProfile,
+  upsertRemoteAccount,
+} from "./accounts.ts";
+export type { Account, RemoteAccount } from "./accounts.ts";
 export {
   appById,
   appByClientId,
@@ -36,29 +48,45 @@ export {
   createPost,
   deletePost,
   editPost,
+  homeTimeline,
   lastPostAt,
   localPublicPosts,
+  postByApId,
   postById,
   postByIdAny,
+  postByUri,
   postsByAccount,
+  postsByIds,
+  postsMarkedBy,
+  publicTimeline,
   repliesTo,
   restorePost,
+  updateRemotePost,
 } from "./posts.ts";
-export type { NewPost, Page, Post, Visibility } from "./posts.ts";
+export type { NewPost, Page, Post, RemoteAttachment, Visibility } from "./posts.ts";
 export {
+  acceptSubscription,
+  addCommunityFollower,
   communitiesByIds,
+  communityByApId,
   communityById,
   communityByName,
+  communityFollowers,
   communityKeys,
   countCommunities,
+  hasLocalSubscribers,
   listCommunities,
+  removeCommunityFollower,
   subscribe,
+  subscription,
+  subscriptionByFollow,
   subscriptions,
   unsubscribe,
+  upsertRemoteCommunity,
 } from "./communities.ts";
-export type { Community, CommunityListing, CommunityStats } from "./communities.ts";
-export { listThreadComments, listThreadPosts, siteCounts, threadCounts, threadSort, vote } from "./threads.ts";
-export type { CommentListing, PostListing, Tally, ThreadComment, ThreadPost, ThreadSort } from "./threads.ts";
+export type { Community, CommunityFollower, CommunityListing, CommunityStats, RemoteCommunity } from "./communities.ts";
+export { currentVote, listThreadComments, listThreadPosts, siteCounts, threadCounts, threadSort, vote } from "./threads.ts";
+export type { CommentListing, PostListing, Scope, Tally, ThreadComment, ThreadPost, ThreadSort } from "./threads.ts";
 export {
   attachMedia,
   deleteMedia,
@@ -71,3 +99,29 @@ export {
   storeMedia,
 } from "./media.ts";
 export type { Media, UploadProblem } from "./media.ts";
+export {
+  acceptFollow,
+  addMentions,
+  boost,
+  bookmark,
+  countFollowing,
+  countUnreadNotifications,
+  dismissNotifications,
+  follow,
+  followByApId,
+  followingIds,
+  followState,
+  hasLocalFollowers,
+  interactions,
+  listNotifications,
+  localFollowerIds,
+  markNotificationsRead,
+  mentionedIds,
+  notify,
+  relationships,
+  unbookmark,
+  unboost,
+  unboostByApId,
+  unfollow,
+} from "./social.ts";
+export type { FollowState, Interactions, Notification, NotificationKind } from "./social.ts";

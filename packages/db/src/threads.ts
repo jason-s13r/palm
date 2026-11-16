@@ -8,6 +8,8 @@ export interface Tally {
   downvotes: number;
   /** The viewer's vote: 1, -1 or 0. */
   myVote: number;
+  /** Whether the viewer saved (bookmarked) it. */
+  saved: boolean;
 }
 
 export interface ThreadPost extends Post, Tally {
@@ -22,14 +24,15 @@ export interface ThreadComment extends Post, Tally {
   childCount: number;
 }
 
-type TallyRow = { upvotes: number; downvotes: number; my_vote: number | null };
+type TallyRow = { upvotes: number; downvotes: number; my_vote: number | null; saved: number };
 
 const TALLY = `
   (SELECT COUNT(*) FROM votes v WHERE v.post_id = p.id AND v.score = 1) AS upvotes,
   (SELECT COUNT(*) FROM votes v WHERE v.post_id = p.id AND v.score = -1) AS downvotes,
-  (SELECT score FROM votes v WHERE v.post_id = p.id AND v.account_id = ?1) AS my_vote`;
+  (SELECT score FROM votes v WHERE v.post_id = p.id AND v.account_id = ?1) AS my_vote,
+  EXISTS (SELECT 1 FROM bookmarks k WHERE k.post_id = p.id AND k.account_id = ?1) AS saved`;
 
-const tally = (r: TallyRow): Tally => ({ upvotes: r.upvotes, downvotes: r.downvotes, myVote: r.my_vote ?? 0 });
+const tally = (r: TallyRow): Tally => ({ upvotes: r.upvotes, downvotes: r.downvotes, myVote: r.my_vote ?? 0, saved: r.saved === 1 });
 
 /** Lemmy's sorts, reduced to what palm can order by. */
 export type ThreadSort = "new" | "old" | "top" | "active" | "comments";
@@ -43,13 +46,24 @@ export function threadSort(sort: string | undefined): ThreadSort {
   return "active";
 }
 
+/** "local" is this domain's communities; "all" adds the remote ones palm knows. */
+export type Scope = "local" | "all";
+
+const scopeSql = (scope: Scope | undefined) =>
+  scope === "local" ? "c.domain = ?2 AND c.ap_id IS NULL" : "(c.ap_id IS NOT NULL OR c.domain = ?2)";
+
 export interface PostListing {
   domain: string;
+  scope?: Scope | undefined;
   communityId?: number | undefined;
   /** Only posts in communities this account subscribes to. */
   subscribedBy?: number | undefined;
   creatorId?: number | undefined;
   ids?: number[] | undefined;
+  /** Only posts this account saved. */
+  savedBy?: number | undefined;
+  /** Only posts this account voted on: 1 upvoted, -1 downvoted. */
+  votedBy?: { accountId: number; score: number } | undefined;
   /** Title or body contains this. */
   query?: string | undefined;
   sort: ThreadSort;
@@ -60,7 +74,7 @@ export interface PostListing {
 
 /** Lemmy posts (a title, in a community), with their counts. */
 export async function listThreadPosts(db: D1Database, listing: PostListing): Promise<ThreadPost[]> {
-  const where = ["p.root_id IS NULL", "p.community_id IS NOT NULL", "p.deleted_at IS NULL", "c.domain = ?2"];
+  const where = ["p.root_id IS NULL", "p.community_id IS NOT NULL", "p.deleted_at IS NULL", scopeSql(listing.scope)];
   const params: (string | number)[] = [];
   // ?1 is the viewer and ?2 the domain; the filters number from ?3.
   const bind = (sql: string, ...values: (string | number)[]) => {
@@ -73,6 +87,8 @@ export async function listThreadPosts(db: D1Database, listing: PostListing): Pro
     bind("EXISTS (SELECT 1 FROM community_subscriptions s WHERE s.community_id = p.community_id AND s.account_id = ?)", listing.subscribedBy);
   }
   if (listing.creatorId !== undefined) bind("p.account_id = ?", listing.creatorId);
+  if (listing.savedBy !== undefined) bind("EXISTS (SELECT 1 FROM bookmarks k WHERE k.post_id = p.id AND k.account_id = ?)", listing.savedBy);
+  if (listing.votedBy) bind("EXISTS (SELECT 1 FROM votes v WHERE v.post_id = p.id AND v.account_id = ? AND v.score = ?)", listing.votedBy.accountId, listing.votedBy.score);
   if (listing.query) bind("(p.title LIKE ? OR p.content_source LIKE ?)", `%${listing.query}%`, `%${listing.query}%`);
   if (listing.ids) {
     if (!listing.ids.length) return [];
@@ -102,12 +118,15 @@ export async function listThreadPosts(db: D1Database, listing: PostListing): Pro
 
 export interface CommentListing {
   domain: string;
+  scope?: Scope | undefined;
   postId?: number | undefined;
   /** Only comments below this one. */
   parentId?: number | undefined;
   communityId?: number | undefined;
   creatorId?: number | undefined;
   ids?: number[] | undefined;
+  /** Only comments this account saved. */
+  savedBy?: number | undefined;
   /** How many levels below the post (or the parent) to include. */
   maxDepth?: number | undefined;
   sort: ThreadSort;
@@ -121,7 +140,7 @@ export interface CommentListing {
  * thread keeps its shape), with their counts.
  */
 export async function listThreadComments(db: D1Database, listing: CommentListing): Promise<ThreadComment[]> {
-  const where = ["p.root_id IS NOT NULL", "c.domain = ?2"];
+  const where = ["p.root_id IS NOT NULL", scopeSql(listing.scope)];
   const params: (string | number)[] = [];
   // ?1 is the viewer and ?2 the domain; the filters number from ?3.
   const bind = (sql: string, ...values: (string | number)[]) => {
@@ -134,6 +153,7 @@ export async function listThreadComments(db: D1Database, listing: CommentListing
   if (listing.postId !== undefined) bind("p.root_id = ?", listing.postId);
   if (listing.communityId !== undefined) bind("p.community_id = ?", listing.communityId);
   if (listing.creatorId !== undefined) bind("p.account_id = ? AND p.deleted_at IS NULL", listing.creatorId);
+  if (listing.savedBy !== undefined) bind("EXISTS (SELECT 1 FROM bookmarks k WHERE k.post_id = p.id AND k.account_id = ?)", listing.savedBy);
   if (listing.parentId !== undefined) {
     const parent = await db.prepare("SELECT path FROM posts WHERE id = ?").bind(listing.parentId).first<{ path: string | null }>();
     if (!parent?.path) return [];
@@ -178,6 +198,12 @@ export async function listThreadComments(db: D1Database, listing: CommentListing
   });
 }
 
+/** An account's current vote on a post: 1, -1 or 0. */
+export async function currentVote(db: D1Database, postId: number, accountId: number): Promise<number> {
+  const row = await db.prepare("SELECT score FROM votes WHERE post_id = ? AND account_id = ?").bind(postId, accountId).first<{ score: number }>();
+  return row?.score ?? 0;
+}
+
 /** Sets an account's vote on a post or comment: 1, -1, or 0 to take it back. */
 export async function vote(db: D1Database, postId: number, accountId: number, score: number): Promise<void> {
   if (score === 0) {
@@ -211,9 +237,9 @@ export async function siteCounts(db: D1Database, domain: string): Promise<{ post
   const row = await db
     .prepare(
       `SELECT
-         (SELECT COUNT(*) FROM posts p JOIN communities c ON c.id = p.community_id WHERE c.domain = ?1 AND p.root_id IS NULL AND p.deleted_at IS NULL) AS posts,
-         (SELECT COUNT(*) FROM posts p JOIN communities c ON c.id = p.community_id WHERE c.domain = ?1 AND p.root_id IS NOT NULL AND p.deleted_at IS NULL) AS comments,
-         (SELECT COUNT(*) FROM communities WHERE domain = ?1) AS communities`,
+         (SELECT COUNT(*) FROM posts p JOIN communities c ON c.id = p.community_id WHERE c.domain = ?1 AND c.ap_id IS NULL AND p.root_id IS NULL AND p.deleted_at IS NULL) AS posts,
+         (SELECT COUNT(*) FROM posts p JOIN communities c ON c.id = p.community_id WHERE c.domain = ?1 AND c.ap_id IS NULL AND p.root_id IS NOT NULL AND p.deleted_at IS NULL) AS comments,
+         (SELECT COUNT(*) FROM communities WHERE domain = ?1 AND ap_id IS NULL) AS communities`,
     )
     .bind(domain)
     .first<{ posts: number; comments: number; communities: number }>();

@@ -27,6 +27,19 @@ export interface Post {
   path: string | null;
   createdAt: number;
   updatedAt: number | null;
+  /** Set for remote posts: their ActivityPub ID. A local post's is urls.object. */
+  apId: string | null;
+  /** A remote post's web page. */
+  url: string | null;
+  /** A remote post's attachments, as they were sent. Local posts use the media table. */
+  attachments: RemoteAttachment[];
+}
+
+/** A remote post's image or other file, kept as a link to where it lives. */
+export interface RemoteAttachment {
+  url: string;
+  mediaType: string | null;
+  description: string | null;
 }
 
 interface PostRow {
@@ -47,6 +60,9 @@ interface PostRow {
   path: string | null;
   created_at: number;
   updated_at: number | null;
+  ap_id: string | null;
+  url: string | null;
+  attachments: string | null;
 }
 
 export const toPost = (r: PostRow): Post => ({
@@ -67,20 +83,26 @@ export const toPost = (r: PostRow): Post => ({
   path: r.path ?? null,
   createdAt: r.created_at,
   updatedAt: r.updated_at ?? null,
+  apId: r.ap_id ?? null,
+  url: r.url ?? null,
+  attachments: r.attachments ? (JSON.parse(r.attachments) as RemoteAttachment[]) : [],
 });
 
 export type { PostRow };
 
 /** What a new post needs; the thread fields default to a plain status. */
-export type NewPost = Omit<Post, "id" | "createdAt" | "updatedAt" | "communityId" | "title" | "linkUrl" | "rootId" | "parentId" | "path"> &
-  Partial<Pick<Post, "communityId" | "title" | "linkUrl" | "rootId" | "parentId">>;
+export type NewPost = Omit<
+  Post,
+  "id" | "createdAt" | "updatedAt" | "communityId" | "title" | "linkUrl" | "rootId" | "parentId" | "path" | "apId" | "url" | "attachments"
+> &
+  Partial<Pick<Post, "communityId" | "title" | "linkUrl" | "rootId" | "parentId" | "apId" | "url" | "createdAt" | "updatedAt" | "attachments">>;
 
 export async function createPost(db: D1Database, post: NewPost): Promise<Post> {
   const row = await db
     .prepare(
       `INSERT INTO posts (account_id, content_source, content_html, spoiler_text, sensitive, visibility, language, in_reply_to,
-                          community_id, title, link_url, root_id, parent_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+                          community_id, title, link_url, root_id, parent_id, created_at, ap_id, url, updated_at, attachments)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .bind(
       post.accountId,
@@ -96,7 +118,11 @@ export async function createPost(db: D1Database, post: NewPost): Promise<Post> {
       post.linkUrl ?? null,
       post.rootId ?? null,
       post.parentId ?? null,
-      now(),
+      post.createdAt ?? now(),
+      post.apId ?? null,
+      post.url ?? null,
+      post.updatedAt ?? null,
+      post.attachments?.length ? JSON.stringify(post.attachments) : null,
     )
     .first<PostRow>();
   if (!row) throw new Error("Post was not created.");
@@ -120,6 +146,37 @@ export async function editPost(
        WHERE id = ? AND deleted_at IS NULL`,
     )
     .bind(edit.contentSource, edit.contentHtml, edit.title ?? null, edit.linkUrl ?? null, now(), id)
+    .run();
+}
+
+export async function postByApId(db: D1Database, apId: string): Promise<Post | null> {
+  const row = await db.prepare("SELECT * FROM posts WHERE ap_id = ? AND deleted_at IS NULL").bind(apId).first<PostRow>();
+  return row ? toPost(row) : null;
+}
+
+/** Any post, local or remote, by its ActivityPub ID (local ones by their /objects/ URL). */
+export async function postByUri(db: D1Database, uri: string, localDomains: string[]): Promise<Post | null> {
+  for (const domain of localDomains) {
+    const prefix = `https://${domain}/objects/`;
+    if (uri.startsWith(prefix)) {
+      const id = uri.slice(prefix.length);
+      return /^\d+$/.test(id) ? postById(db, Number(id)) : null;
+    }
+  }
+  return postByApId(db, uri);
+}
+
+/** Replaces a remote post's content after an Update. */
+export async function updateRemotePost(
+  db: D1Database,
+  id: number,
+  edit: { contentHtml: string; contentSource: string; title: string | null; spoilerText: string; sensitive: boolean; linkUrl: string | null },
+): Promise<void> {
+  await db
+    .prepare(
+      "UPDATE posts SET content_html = ?, content_source = ?, title = ?, spoiler_text = ?, sensitive = ?, link_url = ?, updated_at = ? WHERE id = ?",
+    )
+    .bind(edit.contentHtml, edit.contentSource, edit.title, edit.spoilerText, edit.sensitive ? 1 : 0, edit.linkUrl, now(), id)
     .run();
 }
 
@@ -150,6 +207,14 @@ export interface Page {
   /** Return posts with IDs above this one (newer). */
   minId?: number | undefined;
   limit: number;
+}
+
+/** The paging clause with numbered parameters from ?start, for queries that use ?1. */
+function pageSql(page: Page, start: number): string {
+  const parts: string[] = [];
+  if (page.maxId !== undefined) parts.push(`AND p.id < ?${start + parts.length}`);
+  if (page.minId !== undefined) parts.push(`AND p.id > ?${start + parts.length}`);
+  return parts.join(" ");
 }
 
 function pageClause(page: Page): { sql: string; params: number[] } {
@@ -232,4 +297,69 @@ export async function repliesTo(db: D1Database, apId: string, limit = 60): Promi
     .bind(apId, limit)
     .all<PostRow>();
   return results.map(toPost);
+}
+
+/**
+ * The home timeline: the account's own posts and those of everyone it
+ * follows, newest first. Followers-only posts show to followers; direct posts
+ * only where the account is the author or is mentioned. Lemmy comments stay in
+ * their threads.
+ */
+export async function homeTimeline(db: D1Database, accountId: number, page: Page): Promise<Post[]> {
+  const { params } = pageClause(page);
+  const { results } = await db
+    .prepare(
+      `SELECT p.* FROM posts p
+       WHERE p.deleted_at IS NULL AND p.root_id IS NULL
+         AND (p.account_id = ?1
+              OR (p.visibility IN ('public', 'unlisted', 'private')
+                  AND p.account_id IN (SELECT target_id FROM account_follows WHERE account_id = ?1 AND state = 'accepted'))
+              OR EXISTS (SELECT 1 FROM mentions m WHERE m.post_id = p.id AND m.account_id = ?1))
+         ${pageSql(page, 2)}
+       ORDER BY p.id DESC LIMIT ?${2 + params.length}`,
+    )
+    .bind(accountId, ...params, page.limit)
+    .all<PostRow>();
+  return results.map(toPost);
+}
+
+/** Public posts palm knows, newest first: this domain's only, or everything it has. */
+export async function publicTimeline(db: D1Database, scope: { local: boolean; domain: string }, page: Page): Promise<Post[]> {
+  const { sql, params } = pageClause(page);
+  const { results } = await db
+    .prepare(
+      `SELECT p.* FROM posts p JOIN accounts a ON a.id = p.account_id
+       WHERE p.deleted_at IS NULL AND p.visibility = 'public' AND p.root_id IS NULL
+         AND ${scope.local ? "a.ap_id IS NULL AND a.domain = ?" : "(a.ap_id IS NOT NULL OR a.domain = ?)"}
+         ${sql.replaceAll("id ", "p.id ")}
+       ORDER BY p.id DESC LIMIT ?`,
+    )
+    .bind(scope.domain, ...params, page.limit)
+    .all<PostRow>();
+  return results.map(toPost);
+}
+
+/** Posts an account bookmarked or favourited, newest first. */
+export async function postsMarkedBy(db: D1Database, accountId: number, mark: "bookmarks" | "favourites", page: Page): Promise<Post[]> {
+  const { sql, params } = pageClause(page);
+  const marked =
+    mark === "bookmarks"
+      ? "EXISTS (SELECT 1 FROM bookmarks k WHERE k.post_id = p.id AND k.account_id = ?)"
+      : "EXISTS (SELECT 1 FROM votes v WHERE v.post_id = p.id AND v.account_id = ? AND v.score = 1)";
+  const { results } = await db
+    .prepare(`SELECT p.* FROM posts p WHERE p.deleted_at IS NULL AND ${marked}${sql.replaceAll("id ", "p.id ")} ORDER BY p.id DESC LIMIT ?`)
+    .bind(accountId, ...params, page.limit)
+    .all<PostRow>();
+  return results.map(toPost);
+}
+
+/** Posts by ID, in no particular order; deleted ones left out. */
+export async function postsByIds(db: D1Database, ids: number[]): Promise<Map<number, Post>> {
+  const unique = [...new Set(ids)];
+  if (!unique.length) return new Map();
+  const { results } = await db
+    .prepare(`SELECT * FROM posts WHERE deleted_at IS NULL AND id IN (${unique.map(() => "?").join(", ")})`)
+    .bind(...unique)
+    .all<PostRow>();
+  return new Map(results.map((r) => [r.id, toPost(r)]));
 }

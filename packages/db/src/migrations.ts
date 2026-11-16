@@ -215,6 +215,117 @@ CREATE TABLE IF NOT EXISTS media (
 CREATE INDEX IF NOT EXISTS media_post ON media (post_id, position) WHERE post_id IS NOT NULL
 `,
   },
+  {
+    version: 6,
+    name: "remote actors, follows and notifications",
+    sql: `
+ALTER TABLE accounts ADD COLUMN ap_id TEXT
+;
+ALTER TABLE accounts ADD COLUMN inbox TEXT
+;
+ALTER TABLE accounts ADD COLUMN shared_inbox TEXT
+;
+ALTER TABLE accounts ADD COLUMN profile_url TEXT
+;
+ALTER TABLE accounts ADD COLUMN avatar_url TEXT
+;
+ALTER TABLE accounts ADD COLUMN header_url TEXT
+;
+ALTER TABLE accounts ADD COLUMN actor_type TEXT
+;
+ALTER TABLE accounts ADD COLUMN fetched_at INTEGER
+;
+CREATE UNIQUE INDEX IF NOT EXISTS accounts_ap_id ON accounts (ap_id) WHERE ap_id IS NOT NULL
+;
+ALTER TABLE communities ADD COLUMN ap_id TEXT
+;
+ALTER TABLE communities ADD COLUMN inbox TEXT
+;
+ALTER TABLE communities ADD COLUMN shared_inbox TEXT
+;
+ALTER TABLE communities ADD COLUMN profile_url TEXT
+;
+ALTER TABLE communities ADD COLUMN icon_url TEXT
+;
+ALTER TABLE communities ADD COLUMN banner_url TEXT
+;
+ALTER TABLE communities ADD COLUMN outbox_url TEXT
+;
+ALTER TABLE communities ADD COLUMN fetched_at INTEGER
+;
+CREATE UNIQUE INDEX IF NOT EXISTS communities_ap_id ON communities (ap_id) WHERE ap_id IS NOT NULL
+;
+ALTER TABLE posts ADD COLUMN ap_id TEXT
+;
+ALTER TABLE posts ADD COLUMN url TEXT
+;
+ALTER TABLE posts ADD COLUMN attachments TEXT
+;
+CREATE UNIQUE INDEX IF NOT EXISTS posts_ap_id ON posts (ap_id) WHERE ap_id IS NOT NULL
+;
+CREATE INDEX IF NOT EXISTS posts_in_reply_to_all ON posts (in_reply_to) WHERE in_reply_to IS NOT NULL
+;
+ALTER TABLE community_subscriptions ADD COLUMN state TEXT NOT NULL DEFAULT 'accepted'
+;
+ALTER TABLE community_subscriptions ADD COLUMN follow_ap_id TEXT
+;
+CREATE TABLE IF NOT EXISTS account_follows (
+  account_id INTEGER NOT NULL REFERENCES accounts (id),
+  target_id INTEGER NOT NULL REFERENCES accounts (id),
+  state TEXT NOT NULL DEFAULT 'accepted' CHECK (state IN ('pending', 'accepted')),
+  follow_ap_id TEXT,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (account_id, target_id)
+)
+;
+CREATE INDEX IF NOT EXISTS account_follows_target ON account_follows (target_id)
+;
+CREATE TABLE IF NOT EXISTS community_followers (
+  community_id INTEGER NOT NULL REFERENCES communities (id),
+  actor_id TEXT NOT NULL,
+  inbox TEXT NOT NULL,
+  shared_inbox TEXT,
+  follow_id TEXT,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (community_id, actor_id)
+)
+;
+CREATE TABLE IF NOT EXISTS boosts (
+  post_id INTEGER NOT NULL REFERENCES posts (id),
+  account_id INTEGER NOT NULL REFERENCES accounts (id),
+  ap_id TEXT,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (post_id, account_id)
+)
+;
+CREATE INDEX IF NOT EXISTS boosts_account ON boosts (account_id, created_at)
+;
+CREATE TABLE IF NOT EXISTS bookmarks (
+  post_id INTEGER NOT NULL REFERENCES posts (id),
+  account_id INTEGER NOT NULL REFERENCES accounts (id),
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (post_id, account_id)
+)
+;
+CREATE TABLE IF NOT EXISTS notifications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  account_id INTEGER NOT NULL REFERENCES accounts (id),
+  kind TEXT NOT NULL CHECK (kind IN ('mention', 'reply', 'follow', 'follow_request', 'favourite', 'reblog')),
+  from_account_id INTEGER NOT NULL REFERENCES accounts (id),
+  post_id INTEGER REFERENCES posts (id),
+  read INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+)
+;
+CREATE INDEX IF NOT EXISTS notifications_account ON notifications (account_id, id)
+;
+CREATE TABLE IF NOT EXISTS mentions (
+  post_id INTEGER NOT NULL REFERENCES posts (id),
+  account_id INTEGER NOT NULL REFERENCES accounts (id),
+  PRIMARY KEY (post_id, account_id)
+)
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

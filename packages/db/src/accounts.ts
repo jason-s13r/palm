@@ -1,3 +1,8 @@
+/**
+ * A person. Local accounts sign in here; remote ones are other servers'
+ * people that palm has met, kept so posts, votes and follows can point at
+ * them. A remote account has an `apId`; a local one's comes from urls.user.
+ */
 export interface Account {
   id: number;
   domain: string;
@@ -6,6 +11,18 @@ export interface Account {
   bio: string | null;
   role: "user" | "admin";
   createdAt: number;
+  /** Set for remote accounts: their ActivityPub ID. */
+  apId: string | null;
+  inbox: string | null;
+  sharedInbox: string | null;
+  /** A remote account's profile page. */
+  profileUrl: string | null;
+  avatarUrl: string | null;
+  headerUrl: string | null;
+  /** Person, Service (a bot) and so on; null for local accounts. */
+  actorType: string | null;
+  /** When a remote account was last fetched. */
+  fetchedAt: number | null;
 }
 
 interface AccountRow {
@@ -17,11 +34,20 @@ interface AccountRow {
   password_hash: string | null;
   role: "user" | "admin";
   created_at: number;
+  ap_id: string | null;
+  inbox: string | null;
+  shared_inbox: string | null;
+  profile_url: string | null;
+  avatar_url: string | null;
+  header_url: string | null;
+  actor_type: string | null;
+  fetched_at: number | null;
 }
 
-const COLUMNS = "id, domain, username, display_name, bio, password_hash, role, created_at";
+const COLUMNS =
+  "id, domain, username, display_name, bio, password_hash, role, created_at, ap_id, inbox, shared_inbox, profile_url, avatar_url, header_url, actor_type, fetched_at";
 
-function toAccount(row: AccountRow): Account {
+export function toAccount(row: AccountRow): Account {
   return {
     id: row.id,
     domain: row.domain,
@@ -30,7 +56,119 @@ function toAccount(row: AccountRow): Account {
     bio: row.bio,
     role: row.role,
     createdAt: row.created_at,
+    apId: row.ap_id ?? null,
+    inbox: row.inbox ?? null,
+    sharedInbox: row.shared_inbox ?? null,
+    profileUrl: row.profile_url ?? null,
+    avatarUrl: row.avatar_url ?? null,
+    headerUrl: row.header_url ?? null,
+    actorType: row.actor_type ?? null,
+    fetchedAt: row.fetched_at ?? null,
   };
+}
+
+export type { AccountRow };
+
+/** Whether an account lives here (it has no ActivityPub ID of its own). */
+export const isLocal = (account: Pick<Account, "apId">) => account.apId === null;
+
+const now = () => Math.floor(Date.now() / 1000);
+
+/** Accounts by ID, for building many views at once. */
+export async function accountsByIds(db: D1Database, ids: number[]): Promise<Map<number, Account>> {
+  const unique = [...new Set(ids)];
+  if (!unique.length) return new Map();
+  const { results } = await db
+    .prepare(`SELECT ${COLUMNS} FROM accounts WHERE id IN (${unique.map(() => "?").join(", ")})`)
+    .bind(...unique)
+    .all<AccountRow>();
+  return new Map(results.map((r) => [r.id, toAccount(r)]));
+}
+
+export async function accountByApId(db: D1Database, apId: string): Promise<Account | null> {
+  const row = await db.prepare(`SELECT ${COLUMNS} FROM accounts WHERE ap_id = ?`).bind(apId).first<AccountRow>();
+  return row ? toAccount(row) : null;
+}
+
+/** An account by handle: a local username, or a remote one palm already knows. */
+export async function accountByHandle(db: D1Database, username: string, domain: string): Promise<Account | null> {
+  const row = await db
+    .prepare(`SELECT ${COLUMNS} FROM accounts WHERE domain = ? AND username = ?`)
+    .bind(domain.toLowerCase(), username)
+    .first<AccountRow>();
+  return row ? toAccount(row) : null;
+}
+
+/** What palm keeps of a remote person. */
+export interface RemoteAccount {
+  apId: string;
+  domain: string;
+  username: string;
+  displayName: string | null;
+  bio: string | null;
+  inbox: string;
+  sharedInbox: string | null;
+  profileUrl: string | null;
+  avatarUrl: string | null;
+  headerUrl: string | null;
+  actorType: string;
+}
+
+/** Records a remote person, or refreshes what palm knows of them. */
+export async function upsertRemoteAccount(db: D1Database, remote: RemoteAccount): Promise<Account> {
+  const row = await db
+    .prepare(
+      `INSERT INTO accounts (domain, username, display_name, bio, role, created_at, ap_id, inbox, shared_inbox, profile_url, avatar_url, header_url, actor_type, fetched_at)
+       VALUES (?, ?, ?, ?, 'user', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (ap_id) WHERE ap_id IS NOT NULL DO UPDATE SET
+         display_name = excluded.display_name, bio = excluded.bio, inbox = excluded.inbox,
+         shared_inbox = excluded.shared_inbox, profile_url = excluded.profile_url, avatar_url = excluded.avatar_url,
+         header_url = excluded.header_url, actor_type = excluded.actor_type, fetched_at = excluded.fetched_at
+       RETURNING ${COLUMNS}`,
+    )
+    .bind(
+      remote.domain.toLowerCase(),
+      remote.username,
+      remote.displayName,
+      remote.bio,
+      now(),
+      remote.apId,
+      remote.inbox,
+      remote.sharedInbox,
+      remote.profileUrl,
+      remote.avatarUrl,
+      remote.headerUrl,
+      remote.actorType,
+      now(),
+    )
+    .first<AccountRow>();
+  return toAccount(row!);
+}
+
+/** Changes a local account's profile. Undefined fields stay as they are. */
+export async function updateProfile(
+  db: D1Database,
+  id: number,
+  profile: {
+    displayName?: string | null | undefined;
+    bio?: string | null | undefined;
+    avatarUrl?: string | null | undefined;
+    headerUrl?: string | null | undefined;
+  },
+): Promise<void> {
+  const sets: string[] = [];
+  const params: (string | null)[] = [];
+  const set = (column: string, value: string | null | undefined) => {
+    if (value === undefined) return;
+    sets.push(`${column} = ?`);
+    params.push(value);
+  };
+  set("display_name", profile.displayName);
+  set("bio", profile.bio);
+  set("avatar_url", profile.avatarUrl);
+  set("header_url", profile.headerUrl);
+  if (!sets.length) return;
+  await db.prepare(`UPDATE accounts SET ${sets.join(", ")} WHERE id = ? AND ap_id IS NULL`).bind(...params, id).run();
 }
 
 export async function accountById(db: D1Database, id: number): Promise<Account | null> {
@@ -45,7 +183,7 @@ export async function accountForLogin(
   username: string,
 ): Promise<{ account: Account; passwordHash: string | null } | null> {
   const row = await db
-    .prepare(`SELECT ${COLUMNS} FROM accounts WHERE domain = ? AND username = ?`)
+    .prepare(`SELECT ${COLUMNS} FROM accounts WHERE domain = ? AND username = ? AND ap_id IS NULL`)
     .bind(domain, username)
     .first<AccountRow>();
   return row ? { account: toAccount(row), passwordHash: row.password_hash } : null;
@@ -56,7 +194,7 @@ export async function setPasswordHash(db: D1Database, id: number, passwordHash: 
 }
 
 export async function countAccounts(db: D1Database, domain: string): Promise<number> {
-  const row = await db.prepare("SELECT COUNT(*) AS n FROM accounts WHERE domain = ?").bind(domain).first<{ n: number }>();
+  const row = await db.prepare("SELECT COUNT(*) AS n FROM accounts WHERE domain = ? AND ap_id IS NULL").bind(domain).first<{ n: number }>();
   return row?.n ?? 0;
 }
 
