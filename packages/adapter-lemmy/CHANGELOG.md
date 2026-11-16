@@ -1,0 +1,55 @@
+# Changelog
+
+## adapter-lemmy@0.1.0 (2026-11-16)
+
+### Features
+
+- answer the endpoints apps keep asking for
+  From the unknown_endpoint logs: Mastodon's extended description, peers
+  and weekly activity, and Lemmy's modlog and registration applications.
+  Streaming answers 404 without being logged, since apps fall back to
+  polling.
+
+- show people's statuses to Lemmy apps as person communities
+  Lemmy apps only show posts in communities, so each person gets one in
+  palm's Lemmy API: !name@host, with their public statuses as its posts
+  (titled from the first line) and the replies under them as comments,
+  threaded by what they reply to. Subscribing follows the person and
+  their statuses join the Subscribed feed. A comment is sent as a reply
+  that mentions the person it answers, so Mastodon notifies them.
+
+  These communities exist only in the API, with IDs above 1,000,000,000.
+  Replies to statuses keep their shape, so Mastodon apps see nothing new.
+
+- refresh a remote thread's comments when it's opened
+
+- serve uploads with range requests
+
+- invite sign-up, bans, removals, blocked servers, profile settings and Markdown
+
+- subscribe to remote communities, resolve objects, saves and the inbox
+
+- take image uploads at pict-rs's paths, serve them, and answer the report queues
+
+- serve communities, posts, comments and votes
+
+- report palm's version as build metadata in nodeinfo
+
+- serve site, login and empty feeds for Lemmy apps
+  Typed against lemmy-js-client 0.19. Unknown endpoints are logged so the next
+  ones to build show up in the Worker's logs.
+
+### Fixes
+
+- put the API host in the JWT's iss
+  Voyager reads iss to know which server an account is on. palm put the
+  federation domain there, so after a restart Voyager connected to the bare
+  domain, saw nodeinfo report palm rather than Lemmy, and refused it.
+
+- rehash passwords made with an old setting after login
+
+### Dependencies
+
+- core: 0.1.0 -> 1.0.0
+- auth: 0.0.0 -> 0.1.0
+- db: 0.0.0 -> 0.1.0

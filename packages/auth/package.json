@@ -1,6 +1,6 @@
 {
   "name": "@palm/auth",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "Password hashing, tokens and JWTs for palm, on Web Crypto so the Worker and the CLI share them.",
