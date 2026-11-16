@@ -1,4 +1,4 @@
-import { signJwt, verifyJwt, verifyPassword } from "@palm/auth";
+import { hashPassword, needsRehash, signJwt, verifyJwt, verifyPassword } from "@palm/auth";
 import type { RequestContext } from "@palm/core";
 import {
   accountById,
@@ -7,6 +7,7 @@ import {
   countAccounts,
   createSession,
   instanceSecret,
+  setPasswordHash,
   revokeSession,
   sessionAccount,
   type Account,
@@ -134,6 +135,9 @@ app.post("/api/v3/user/login", async (c) => {
   const found = await accountForLogin(db, domain, username);
   if (!found?.passwordHash || !(await verifyPassword(body.password, found.passwordHash))) {
     return fail(c, "incorrect_login");
+  }
+  if (needsRehash(found.passwordHash)) {
+    c.env.waitUntil(hashPassword(body.password).then((hash) => setPasswordHash(db, found.account.id, hash)));
   }
   const sessionId = await createSession(db, found.account.id, "lemmy");
   const jwt = await signJwt(
