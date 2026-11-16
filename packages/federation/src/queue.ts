@@ -1,4 +1,5 @@
 import type { MessageQueue, MessageQueueEnqueueOptions } from "@fedify/fedify";
+import type { FederationTask } from "@palm/core";
 
 /**
  * Everything palm puts on its Cloudflare Queue. One queue carries both:
@@ -8,15 +9,10 @@ import type { MessageQueue, MessageQueueEnqueueOptions } from "@fedify/fedify";
  */
 export type QueueBody =
   | { palm: "fedify"; federation: FederationName; message: unknown }
-  | { palm: "task"; domain: string; task: Task };
+  | { palm: "task"; domain: string; task: FederationTask };
 
 /** palm runs two Fedify federations: one for people, one for communities. */
 export type FederationName = "people" | "communities";
-
-/** Work a request hands to the queue. */
-export type Task =
-  | { kind: "post_created"; postId: number }
-  | { kind: "post_deleted"; postId: number; accountId: number; visibility: string; communityId: number | null };
 
 /** Queues are capped at 24 hours of delay; Fedify's backoff stays well inside it. */
 const MAX_DELAY_SECONDS = 24 * 60 * 60;
