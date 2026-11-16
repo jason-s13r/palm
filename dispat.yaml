@@ -71,6 +71,9 @@ dependencies:
     - core
     - auth
     - db
+  federation:
+    - core
+    - db
   cli:
     - auth
   worker:
@@ -79,6 +82,7 @@ dependencies:
     - db
     - adapter-lemmy
     - adapter-mastodon
+    - federation
 
 # Scopes that are deliberately not packages.
 #   release  dispat's own release-commit scope

@@ -17,9 +17,15 @@ outside this repo (the Palm project's `palm-decisions.md`).
 - `packages/adapter-lemmy`, `packages/adapter-mastodon`: the client APIs as
   Hono apps over palm's data. Unknown endpoints are logged as
   `{"palm":"unknown_endpoint"}` so the next one to build shows in the logs.
-- `packages/cli`: admin commands run locally (`pnpm palm user create ...`).
+- `packages/federation`: ActivityPub on Fedify: WebFinger, Person actors,
+  followers, the inboxes and nodeinfo, with Fedify's key-value store on D1
+  (`D1KvStore`).
+- `packages/cli`: admin commands run locally (`pnpm palm user create ...`,
+  `pnpm palm user keys ...`). Signing keys are generated here, not in the
+  Worker, because key generation is too slow for the free CPU limit.
 
-All of these are internal and never published.
+All of the above are internal and never published.
+
 - `apps/worker` (`@jason-s13r/palm-worker`): the one published package.
   `createPalm(config)` returns the Worker for a deployment. Built with tsup into
   a single bundle with `@palm/*` inlined.
@@ -27,7 +33,12 @@ All of these are internal and never published.
   Workers Builds. Real deployments live in their own repos (see
   `wrangler.template.jsonc`).
 
-Federation (Fedify, WebFinger, actors, the inbox) arrives next.
+`@fedify/fedify` stays external to the bundle and is the published package's
+one dependency.
+
+The client APIs also answer on the bare domain (`/api/v3/*` for Lemmy;
+`/api/v1`, `/api/v2` and `/oauth/*` for Mastodon), since their paths don't
+overlap with federation's.
 
 ## Commands
 
