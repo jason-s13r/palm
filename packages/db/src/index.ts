@@ -59,3 +59,15 @@ export {
 export type { Community, CommunityListing, CommunityStats } from "./communities.ts";
 export { listThreadComments, listThreadPosts, siteCounts, threadCounts, threadSort, vote } from "./threads.ts";
 export type { CommentListing, PostListing, Tally, ThreadComment, ThreadPost, ThreadSort } from "./threads.ts";
+export {
+  attachMedia,
+  deleteMedia,
+  describeMedia,
+  MAX_MEDIA_SIZE,
+  MEDIA_TYPES,
+  mediaById,
+  mediaForPosts,
+  mediaResponse,
+  storeMedia,
+} from "./media.ts";
+export type { Media, UploadProblem } from "./media.ts";

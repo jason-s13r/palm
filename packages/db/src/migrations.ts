@@ -196,6 +196,25 @@ CREATE TABLE IF NOT EXISTS votes (
 )
 `,
   },
+  {
+    version: 5,
+    name: "media",
+    sql: `
+CREATE TABLE IF NOT EXISTS media (
+  id TEXT PRIMARY KEY,
+  account_id INTEGER NOT NULL REFERENCES accounts (id),
+  content_type TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  description TEXT,
+  delete_token TEXT NOT NULL,
+  post_id INTEGER REFERENCES posts (id),
+  position INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+)
+;
+CREATE INDEX IF NOT EXISTS media_post ON media (post_id, position) WHERE post_id IS NOT NULL
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;
