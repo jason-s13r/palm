@@ -36,9 +36,10 @@ All of the above are internal and never published.
 `@fedify/fedify` stays external to the bundle and is the published package's
 one dependency.
 
-The client APIs also answer on the bare domain (`/api/v3/*` for Lemmy;
-`/api/v1`, `/api/v2` and `/oauth/*` for Mastodon), since their paths don't
-overlap with federation's.
+The client APIs answer only on their own hosts; the bare domain is federation
+only, and its nodeinfo reports "palm". Voyager assumes the API lives on the
+handle's domain, so it doesn't work with this split (it signs in, then refuses
+the bare domain); other Lemmy apps are untested.
 
 ## Commands
 
