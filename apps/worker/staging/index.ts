@@ -7,6 +7,8 @@ interface StagingEnv extends PalmEnv {
   STAGING_DOMAIN: string;
   STAGING_LEMMY_HOST?: string;
   STAGING_MASTODON_HOST?: string;
+  /** Where browsers on the bare domain go; unset means a plain 404. */
+  STAGING_BROWSER_REDIRECT?: string;
 }
 
 export default createPalm<StagingEnv>((env) => ({
@@ -20,4 +22,5 @@ export default createPalm<StagingEnv>((env) => ({
     },
   ],
   instance: { name: "palm staging", description: "palm's test instance. Accounts here are wiped without notice." },
+  ...(env.STAGING_BROWSER_REDIRECT ? { browserRedirect: env.STAGING_BROWSER_REDIRECT } : {}),
 }));
