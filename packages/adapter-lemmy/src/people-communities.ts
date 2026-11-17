@@ -1,5 +1,5 @@
 import { htmlToText, urls, type RequestContext } from "@palm/core";
-import type { Account, Community, CommunityStats, Post } from "@palm/db";
+import type { Account, Community, CommunityStats, HomeFeed, Post } from "@palm/db";
 
 /**
  * Lemmy apps only show posts that sit in a community, so a person's statuses
@@ -10,13 +10,62 @@ import type { Account, Community, CommunityStats, Post } from "@palm/db";
  * These communities exist only in palm's Lemmy API. They're never sent to
  * other servers, and their IDs sit above PERSON_COMMUNITY_BASE so they can't
  * meet a real community's. Lemmy's IDs are 32-bit, which leaves room for a
- * billion of each.
+ * billion people; palm's feeds (!following, !local) sit above them.
  */
 export const PERSON_COMMUNITY_BASE = 1_000_000_000;
 
-export const isPersonCommunityId = (id: number) => id >= PERSON_COMMUNITY_BASE;
+
+/**
+ * palm's own feeds, as communities: !following, the statuses of everyone the
+ * viewer follows (like a multireddit of their person communities), and
+ * !local, the public statuses of this domain's people. Subscribing to one
+ * puts its statuses in the Home feed. Their IDs sit above the person
+ * communities' billion.
+ */
+export const FEEDS = {
+  following: {
+    id: 2_100_000_000,
+    title: "Following",
+    description: "Posts from the people you follow. Subscribe to see them in Home.",
+  },
+  local: {
+    id: 2_100_000_001,
+    title: "Local",
+    description: "Posts from everyone on this server. Subscribe to see them in Home.",
+  },
+} as const satisfies Record<HomeFeed, { id: number; title: string; description: string }>;
+
+export const feedOfCommunity = (id: number): HomeFeed | null =>
+  id === FEEDS.following.id ? "following" : id === FEEDS.local.id ? "local" : null;
+
+export const isFeedName = (name: string): name is HomeFeed => name === "following" || name === "local";
+
+export const isPersonCommunityId = (id: number) => id > PERSON_COMMUNITY_BASE && feedOfCommunity(id) === null;
 export const personCommunityId = (accountId: number) => PERSON_COMMUNITY_BASE + accountId;
 export const accountIdOfCommunity = (id: number) => id - PERSON_COMMUNITY_BASE;
+
+/** Communities that exist only in palm's Lemmy API: the feeds and person communities. */
+export const isVirtualCommunityId = (id: number) => id > PERSON_COMMUNITY_BASE;
+
+export function feedCommunity(feed: HomeFeed, domain: string, createdAt: number): Community {
+  return {
+    id: FEEDS[feed].id,
+    domain,
+    name: feed,
+    title: FEEDS[feed].title,
+    description: FEEDS[feed].description,
+    nsfw: false,
+    createdAt,
+    apId: `https://${domain}/c/${feed}`,
+    inbox: null,
+    sharedInbox: null,
+    profileUrl: null,
+    iconUrl: null,
+    bannerUrl: null,
+    outboxUrl: null,
+    fetchedAt: null,
+  };
+}
 
 /** Whether an account can have a person community: people, not Lemmy communities. */
 export const hasPersonCommunity = (account: Account) => account.actorType !== "Group" && !account.banned;

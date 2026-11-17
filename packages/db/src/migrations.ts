@@ -674,6 +674,18 @@ ALTER TABLE accounts ADD COLUMN move_sent_at INTEGER
 ALTER TABLE accounts ADD COLUMN deleted_at INTEGER
 `,
   },
+  {
+    version: 22,
+    name: "virtual feeds in home",
+    sql: `
+CREATE TABLE IF NOT EXISTS home_feeds (
+  account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  feed TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (account_id, feed)
+)
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

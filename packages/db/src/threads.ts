@@ -268,8 +268,10 @@ const REPLY_VISIBLE = "x.reblog_of IS NULL AND x.visibility IN ('public', 'unlis
 export interface StatusListing {
   /** Only these authors' statuses. */
   authorIds?: number[] | undefined;
-  /** Only statuses by people this account follows. */
+  /** Statuses by people this account follows; with `localDomain`, either. */
   followedBy?: number | undefined;
+  /** Public statuses by this domain's own people; with `followedBy`, either. */
+  localDomain?: string | undefined;
   ids?: number[] | undefined;
   sort: ThreadSort;
   viewerId: number | null;
@@ -291,9 +293,11 @@ export async function listStatusPosts(db: D1Database, listing: StatusListing): P
     if (!listing.authorIds.length) return [];
     bind(`p.account_id IN (${listing.authorIds.map(() => "?").join(", ")})`, ...listing.authorIds);
   }
-  if (listing.followedBy !== undefined) {
-    bind("p.account_id IN (SELECT target_id FROM account_follows WHERE account_id = ? AND state = 'accepted')", listing.followedBy);
-  }
+  const followed = "p.account_id IN (SELECT target_id FROM account_follows WHERE account_id = ? AND state = 'accepted')";
+  const local = "(p.visibility = 'public' AND p.account_id IN (SELECT id FROM accounts WHERE ap_id IS NULL AND domain = ? AND deleted_at IS NULL))";
+  if (listing.followedBy !== undefined && listing.localDomain !== undefined) bind(`(${followed} OR ${local})`, listing.followedBy, listing.localDomain);
+  else if (listing.followedBy !== undefined) bind(followed, listing.followedBy);
+  else if (listing.localDomain !== undefined) bind(local, listing.localDomain);
   if (listing.ids) {
     if (!listing.ids.length) return [];
     bind(`p.id IN (${listing.ids.map(() => "?").join(", ")})`, ...listing.ids);

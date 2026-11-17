@@ -84,7 +84,8 @@ moderationRoutes.post("/api/v3/community", async (c) => {
   if (!auth) return fail(c, "not_logged_in", 401);
   const params = await body(c);
   const name = String(params.name ?? "").trim().toLowerCase();
-  if (!NAME.test(name)) return fail(c, "invalid_name");
+  // !following and !local are palm's own feeds.
+  if (!NAME.test(name) || name === "following" || name === "local") return fail(c, "invalid_name");
   const title = String(params.title ?? name).trim().slice(0, 100) || name;
   const created = await createLocalCommunity(
     c.env.bindings.DB,

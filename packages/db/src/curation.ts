@@ -211,3 +211,25 @@ export async function postMarks(db: D1Database, accountId: number | null | undef
   ]);
   return { read: new Set(read!.results.map((r) => r.post_id)), hidden: new Set(hidden!.results.map((r) => r.post_id)) };
 }
+
+/**
+ * Palm's own Lemmy feeds (!following, !local) an account has subscribed to,
+ * which puts their statuses in its Home feed. None by default.
+ */
+export type HomeFeed = "following" | "local";
+
+export async function homeFeeds(db: D1Database, accountId: number): Promise<Set<HomeFeed>> {
+  const { results } = await db.prepare("SELECT feed FROM home_feeds WHERE account_id = ?").bind(accountId).all<{ feed: HomeFeed }>();
+  return new Set(results.map((r) => r.feed));
+}
+
+export async function setHomeFeed(db: D1Database, accountId: number, feed: HomeFeed, on: boolean): Promise<void> {
+  await (on
+    ? db.prepare("INSERT OR IGNORE INTO home_feeds (account_id, feed, created_at) VALUES (?, ?, ?)").bind(accountId, feed, Math.floor(Date.now() / 1000))
+    : db.prepare("DELETE FROM home_feeds WHERE account_id = ? AND feed = ?").bind(accountId, feed)
+  ).run();
+}
+
+export async function countHomeFeed(db: D1Database, feed: HomeFeed): Promise<number> {
+  return (await db.prepare("SELECT COUNT(*) AS n FROM home_feeds WHERE feed = ?").bind(feed).first<{ n: number }>())?.n ?? 0;
+}

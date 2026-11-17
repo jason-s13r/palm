@@ -222,8 +222,11 @@ export {
   setPostMarks,
   setTagFollow,
   updateList,
+  countHomeFeed,
+  homeFeeds,
+  setHomeFeed,
 } from "./curation.ts";
-export type { Filter, List } from "./curation.ts";
+export type { Filter, HomeFeed, List } from "./curation.ts";
 export {
   addRemotePollVote,
   cancelScheduled,

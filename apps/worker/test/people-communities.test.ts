@@ -58,8 +58,23 @@ describe("Person communities", () => {
     // Their statuses are its posts, titled from the first line.
     const inCommunity = await (await reader.get(`/post/list?community_id=${community.id}`)).json<{ posts: PostView[] }>();
     expect(inCommunity.posts.map((p) => p.post.name)).toEqual(["First line of a status"]);
-    const feed = await (await reader.get("/post/list?type_=Subscribed&sort=New")).json<{ posts: PostView[] }>();
-    expect(feed.posts.map((p) => p.post.id)).toContain(Number(status.id));
+    // Home leaves them out until the reader subscribes to !following.
+    const home = async () => (await (await reader.get("/post/list?type_=Subscribed&sort=New")).json<{ posts: PostView[] }>()).posts.map((p) => p.post.id);
+    expect(await home()).not.toContain(Number(status.id));
+    const following = await (await reader.get("/community?name=following")).json<{ community_view: CommunityView }>();
+    expect(following.community_view.subscribed).toBe("NotSubscribed");
+    const inFollowing = await (await reader.get(`/post/list?community_id=${following.community_view.community.id}`)).json<{ posts: PostView[] }>();
+    expect(inFollowing.posts.map((p) => p.post.id)).toContain(Number(status.id));
+    await reader.post("/community/follow", { community_id: following.community_view.community.id, follow: true });
+    expect(await home()).toContain(Number(status.id));
+    const listedFeeds = await (await reader.get("/community/list?type_=Subscribed")).json<{ communities: CommunityView[] }>();
+    expect(listedFeeds.communities[0]!.community.name).toBe("following");
+
+    // !local is every local person's public statuses, followed or not.
+    const local = await (await reader.get("/community?name=local")).json<{ community_view: CommunityView }>();
+    const inLocal = await (await reader.get(`/post/list?community_id=${local.community_view.community.id}`)).json<{ posts: PostView[] }>();
+    expect(inLocal.posts.map((p) => p.post.id)).toContain(Number(status.id));
+    expect((await reader.post("/post", { community_id: local.community_view.community.id, name: "nope" })).status).toBe(400);
     const one = await (await reader.get(`/post?id=${status.id}`)).json<{ post_view: PostView; community_view: CommunityView }>();
     expect(one.community_view.community.id).toBe(community.id);
 

@@ -11,6 +11,10 @@ import {
   communitiesByIds,
   communityById,
   communityByName,
+  countHomeFeed,
+  homeFeeds,
+  setHomeFeed,
+  type HomeFeed,
   createPost,
   currentVote,
   deletePost,
@@ -63,6 +67,10 @@ import {
   followStates,
   hasPersonCommunity,
   isPersonCommunityId,
+  isVirtualCommunityId,
+  feedCommunity,
+  feedOfCommunity,
+  isFeedName,
   personCommunity,
   personCommunityStats,
   statusTitle,
@@ -115,6 +123,8 @@ async function communityNamed(c: C, name: string): Promise<Community | null> {
   const [local, rawHost] = name.replace(/^!/, "").split("@");
   if (!local) return null;
   const host = rawHost?.toLowerCase() ?? c.env.domain.domain;
+  const lower = local.toLowerCase();
+  if (host === c.env.domain.domain && isFeedName(lower)) return feed(c, lower);
   const db = c.env.bindings.DB;
   const known = await communityByName(db, host, local);
   if (known && (known.apId !== null || host === c.env.domain.domain)) return known;
@@ -137,6 +147,9 @@ async function personNamed(c: C, username: string, host: string): Promise<Accoun
   return account && hasPersonCommunity(account) ? account : null;
 }
 
+/** One of palm's feeds as a community, dated from when the viewer joined so apps show a sensible date. */
+const feed = (c: C, name: HomeFeed) => feedCommunity(name, c.env.domain.domain, c.get("auth")?.account.createdAt ?? 0);
+
 async function personCommunityById(c: C, id: number): Promise<Community | null> {
   const account = await accountById(c.env.bindings.DB, accountIdOfCommunity(id));
   return account && hasPersonCommunity(account) ? personCommunity(account) : null;
@@ -148,6 +161,8 @@ const visible = (c: C, community: Community | null) =>
 
 export async function communityFor(c: C, id: number | undefined, name: string | undefined): Promise<Community | null | undefined> {
   if (id !== undefined) {
+    const named = feedOfCommunity(id);
+    if (named) return feed(c, named);
     if (isPersonCommunityId(id)) return personCommunityById(c, id);
     return visible(c, await communityById(c.env.bindings.DB, id));
   }
@@ -303,7 +318,7 @@ export async function commentResponse(c: C, id: number) {
 
 /** A community's moderators, as Lemmy lists them. */
 export async function moderatorViews(c: C, community: Community) {
-  if (isPersonCommunityId(community.id) || community.apId) return [];
+  if (isVirtualCommunityId(community.id) || community.apId) return [];
   const people = await accountsByIds(c.env.bindings.DB, await moderatorIds(c.env.bindings.DB, community.id));
   const view = communityView(c.env, { ...community, subscribers: 0, posts: 0, comments: 0, subscribed: false, pending: false }).community;
   return [...people.values()].map((p) => ({ community: view, moderator: personView(c.env, p).person }));
@@ -330,6 +345,13 @@ async function crossPosts(c: C, post: ThreadPost): Promise<ThreadPost[]> {
 
 export async function communityStats(c: C, community: Community) {
   const viewer = c.get("auth")?.account.id ?? null;
+  const named = feedOfCommunity(community.id);
+  if (named) {
+    const db = c.env.bindings.DB;
+    const [subscribers, mine] = await Promise.all([countHomeFeed(db, named), viewer === null ? new Set<HomeFeed>() : homeFeeds(db, viewer)]);
+    const subscribed = mine.has(named);
+    return { ...community, subscribers, posts: 0, comments: 0, subscribed, pending: false };
+  }
   if (isPersonCommunityId(community.id)) {
     const owner = await accountById(c.env.bindings.DB, accountIdOfCommunity(community.id));
     if (owner) return personCommunityStats(c.env, owner, viewer);
@@ -383,8 +405,13 @@ threadRoutes.get("/api/v3/community/list", async (c) => {
     offset,
   });
   const views = found.map((x) => communityView(c.env, x));
-  // Subscribed takes in the people followed, as person communities, on the first page.
-  if (type === "Subscribed" && viewer && offset === 0) views.push(...(await followedPeopleCommunities(c, viewer.id)));
+  // Subscribed takes in palm's feeds (!following, !local) subscribed to, and the people followed, as
+  // person communities, on the first page.
+  if (type === "Subscribed" && viewer && offset === 0) {
+    const mine = [...(await homeFeeds(c.env.bindings.DB, viewer.id))];
+    views.unshift(...(await Promise.all(mine.map(async (name) => communityView(c.env, await communityStats(c, feed(c, name)))))));
+    views.push(...(await followedPeopleCommunities(c, viewer.id)));
+  }
   return c.json({ communities: views } satisfies ListCommunitiesResponse);
 });
 
@@ -408,6 +435,11 @@ threadRoutes.post("/api/v3/community/follow", async (c) => {
   const community = await communityFor(c, int(params.community_id), undefined);
   if (!community) return fail(c, "couldnt_find_community", 404);
   const db = c.env.bindings.DB;
+  const named = feedOfCommunity(community.id);
+  if (named) {
+    await setHomeFeed(db, auth.account.id, named, params.follow !== false);
+    return c.json({ community_view: communityView(c.env, await communityStats(c, community)), discussion_languages: [] } satisfies CommunityResponse);
+  }
   if (isPersonCommunityId(community.id)) {
     await followPerson(c, auth.account, accountIdOfCommunity(community.id), params.follow !== false);
     return c.json({ community_view: communityView(c.env, await communityStats(c, community)), discussion_languages: [] } satisfies CommunityResponse);
@@ -463,9 +495,15 @@ threadRoutes.get("/api/v3/post/list", async (c) => {
   const mine = bool(c.req.query("saved_only")) || bool(c.req.query("liked_only")) || bool(c.req.query("disliked_only"));
   if ((mine || (!community && type === "Subscribed")) && !viewer) return c.json({ posts: [] } satisfies GetPostsResponse);
   const sort = threadSort(c.req.query("sort"));
-  if (community && isPersonCommunityId(community.id)) {
+  if (community && isVirtualCommunityId(community.id)) {
+    const named = feedOfCommunity(community.id);
+    if (named === "following" && !viewer) return c.json({ posts: [] } satisfies GetPostsResponse);
     const posts = await listStatusPosts(c.env.bindings.DB, {
-      authorIds: [accountIdOfCommunity(community.id)],
+      ...(named === "following"
+        ? { followedBy: viewer!.id }
+        : named === "local"
+          ? { localDomain: c.env.domain.domain }
+          : { authorIds: [accountIdOfCommunity(community.id)] }),
       sort,
       viewerId: viewer?.id ?? null,
       limit,
@@ -475,7 +513,9 @@ threadRoutes.get("/api/v3/post/list", async (c) => {
     if (posts.length === limit) response.next_page = `o${offset + limit}`;
     return c.json(response);
   }
-  const withStatuses = !community && !mine && type === "Subscribed" && viewer;
+  // Statuses join Home from the feeds the viewer subscribes to (!following, !local).
+  const feeds = !community && !mine && type === "Subscribed" && viewer ? await homeFeeds(c.env.bindings.DB, viewer.id) : new Set<HomeFeed>();
+  const withStatuses = viewer && feeds.size > 0;
   const posts = await listThreadPosts(c.env.bindings.DB, {
     domain: c.env.domain.domain,
     scope: community ? "all" : scopeOf(type),
@@ -494,7 +534,10 @@ threadRoutes.get("/api/v3/post/list", async (c) => {
   });
   let page = posts;
   if (withStatuses) {
-    const statuses = await listStatusPosts(c.env.bindings.DB, { followedBy: viewer.id, sort, viewerId: viewer.id, limit: offset + limit, offset: 0 });
+    const statuses = await listStatusPosts(c.env.bindings.DB, {
+      followedBy: feeds.has("following") ? viewer.id : undefined,
+      localDomain: feeds.has("local") ? c.env.domain.domain : undefined,
+      sort, viewerId: viewer.id, limit: offset + limit, offset: 0 });
     page = mergeSorted(posts, statuses, sort).slice(offset, offset + limit);
   }
   // Read posts drop out when asked (show_read=false); hidden ones unless asked for.
@@ -544,7 +587,7 @@ threadRoutes.post("/api/v3/post", async (c) => {
   const community = await communityFor(c, int(params.community_id), undefined);
   if (!community) return fail(c, "couldnt_find_community", 404);
   // A person community holds that person's own statuses.
-  if (isPersonCommunityId(community.id)) return fail(c, "only_mods_can_post_in_community");
+  if (isVirtualCommunityId(community.id)) return fail(c, "only_mods_can_post_in_community");
   if (await isCommunityBanned(c.env.bindings.DB, community.id, auth.account.id)) return fail(c, "banned_from_community");
   const title = str(params.name)?.trim() ?? "";
   if (!title || title.length > MAX_TITLE) return fail(c, "invalid_post_title");
