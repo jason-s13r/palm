@@ -1,5 +1,12 @@
 # Changelog
 
+## db@0.4.0 (2026-11-17)
+
+### Features
+
+- Mastodon follows no longer show as Lemmy subscriptions
+
+
 ## db@0.3.0 (2026-11-17)
 
 ### Features

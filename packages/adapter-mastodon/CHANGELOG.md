@@ -1,5 +1,16 @@
 # Changelog
 
+## adapter-mastodon@0.4.0 (2026-11-17)
+
+### Features
+
+- Mastodon follows no longer show as Lemmy subscriptions
+
+### Dependencies
+
+- db: 0.3.0 -> 0.4.0
+
+
 ## adapter-mastodon@0.3.0 (2026-11-17)
 
 ### Features
