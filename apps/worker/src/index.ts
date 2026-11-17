@@ -5,7 +5,7 @@ import { contextScope, defineConfig, enterContext, normaliseHost, resolveSurface
 import { domainOf, migrate, pendingDeletes, pendingMoves, prune } from "@palm/db";
 import { handleWeb } from "@palm/web";
 import { avatarResponse } from "./assets.ts";
-import { servePublic } from "./public-cache.ts";
+import { servePublic, serveUpload } from "./public-cache.ts";
 import { VERSION } from "./version.ts";
 
 export { ConfigError, defineConfig } from "@palm/core";
@@ -161,30 +161,39 @@ export async function handle(
     return json({ error: "unknown_host" }, 421);
   }
 
-  // Everything past here touches the database; bring it up to this release's
-  // schema first (a no-op after the first request in each isolate).
-  await migrate(env.DB);
+  const served = surface;
+  // Uploads come from cache when they can, before any database work.
+  if (url.pathname.startsWith("/pictrs/image/") && !url.pathname.startsWith("/pictrs/image/delete/")) {
+    return serveUpload(request, url, surface.domain.domain, (p) => executionCtx.waitUntil(p), () => routeRequest());
+  }
+  return routeRequest();
 
-  const ctx = requestContext(config, surface.domain, normaliseHost(url.host), env, executionCtx);
-  if (url.pathname === "/proxy/media") return proxyMedia(request, ctx);
+  async function routeRequest(): Promise<Response> {
+    // Everything past here touches the database; bring it up to this release's
+    // schema first (a no-op after the first request in each isolate).
+    await migrate(env.DB);
 
-  switch (surface.kind) {
-    case "lemmy":
-      return handleLemmy(request, ctx);
-    case "mastodon":
-      return handleMastodon(request, ctx);
-    case "federation":
-      // Both client APIs answer on the bare domain as well as their own hosts.
-      // Apps show the handle with the host they signed in to (Voyager and the
-      // Mastodon app both do), so signing in with the bare domain gives
-      // @name@domain. Their paths don't overlap: Lemmy's API is /api/v3,
-      // Mastodon's /api/v1 and /api/v2. Discovery (WebFinger, nodeinfo) stays
-      // with federation, which answers nodeinfo as Lemmy.
-      // Uploaded images live where Lemmy keeps them, for both kinds of app.
-      if (url.pathname.startsWith("/api/v3/") || url.pathname.startsWith("/pictrs/")) return handleLemmy(request, ctx);
-      if (isMastodonPath(url.pathname)) return handleMastodon(request, ctx);
-      // Actors, collections, WebFinger and nodeinfo come from cache when they can.
-      return servePublic(request, ctx, () => handleFederation(request, ctx, (req) => federationFallback(config, req, new URL(req.url), ctx)));
+    const ctx = requestContext(config, served.domain, normaliseHost(url.host), env, executionCtx);
+    if (url.pathname === "/proxy/media") return proxyMedia(request, ctx);
+
+    switch (served.kind) {
+      case "lemmy":
+        return handleLemmy(request, ctx);
+      case "mastodon":
+        return handleMastodon(request, ctx);
+      case "federation":
+        // Both client APIs answer on the bare domain as well as their own hosts.
+        // Apps show the handle with the host they signed in to (Voyager and the
+        // Mastodon app both do), so signing in with the bare domain gives
+        // @name@domain. Their paths don't overlap: Lemmy's API is /api/v3,
+        // Mastodon's /api/v1 and /api/v2. Discovery (WebFinger, nodeinfo) stays
+        // with federation, which answers nodeinfo as Lemmy.
+        // Uploaded images live where Lemmy keeps them, for both kinds of app.
+        if (url.pathname.startsWith("/api/v3/") || url.pathname.startsWith("/pictrs/")) return handleLemmy(request, ctx);
+        if (isMastodonPath(url.pathname)) return handleMastodon(request, ctx);
+        // Actors, collections, WebFinger and nodeinfo come from cache when they can.
+        return servePublic(request, ctx, () => handleFederation(request, ctx, (req) => federationFallback(config, req, new URL(req.url), ctx)));
+    }
   }
 }
 

@@ -1,5 +1,5 @@
 import { hashPassword, needsRehash, signJwt, verifyJwt, verifyPassword } from "@palm/auth";
-import { nodeinfoVersion, type RequestContext } from "@palm/core";
+import { nodeinfoVersion, uploadCacheKey, type RequestContext } from "@palm/core";
 import {
   accountByHandle,
   accountById,
@@ -127,6 +127,9 @@ app.get("/pictrs/image/delete/:token/:file", async (c) => {
   const media = await mediaById(c.env.bindings.DB, c.req.param("file"));
   if (!media || media.deleteToken !== c.req.param("token")) return c.json({ msg: "not_found" }, 404);
   await deleteMedia(c.env.bindings.DB, c.env.bindings.MEDIA, media);
+  // This data centre's copy goes now; others' expire within a day.
+  const cache = (globalThis as unknown as { caches?: { default: Cache } }).caches?.default;
+  if (cache) c.env.waitUntil(cache.delete(uploadCacheKey(c.env.domain.domain, media.id)));
   return c.body(null, 204);
 });
 

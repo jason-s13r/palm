@@ -56,6 +56,13 @@ describe("Media", () => {
     ).json<{ post_view: { post: { url: string; thumbnail_url: string } } }>();
     expect(post.post_view.post).toMatchObject({ url, thumbnail_url: url });
 
+    // Served from cache after the first fetch, until it's deleted.
+    await (await worker.fetch(url)).arrayBuffer();
+    await new Promise((r) => setTimeout(r, 50));
+    const again = await worker.fetch(url);
+    expect(again.headers.get("x-palm-cache")).toBe("hit");
+    expect(new Uint8Array(await again.arrayBuffer())).toEqual(PNG);
+
     expect((await worker.fetch(`${DOMAIN}/pictrs/image/delete/wrong/${file!.file}`)).status).toBe(404);
     expect((await worker.fetch(`${DOMAIN}/pictrs/image/delete/${file!.delete_token}/${file!.file}`)).status).toBe(204);
     expect((await worker.fetch(url)).status).toBe(404);

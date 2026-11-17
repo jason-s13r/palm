@@ -1,4 +1,4 @@
-import type { RequestContext } from "@palm/core";
+import { uploadCacheKey, type RequestContext } from "@palm/core";
 import { profileVersion } from "@palm/db";
 
 /**
@@ -99,6 +99,43 @@ export async function servePublic(request: Request, ctx: RequestContext, serve: 
     copy.headers.set("cache-control", `public, max-age=${rule.ttl}`);
     copy.headers.delete("set-cookie");
     ctx.waitUntil(store.put(key.href, copy));
+  }
+  return response;
+}
+
+const UPLOAD = /^\/pictrs\/image\/([a-z0-9]+)(\.[a-z0-9]+)?$/i;
+/** How long a data centre keeps an upload: a deleted one can show that long elsewhere. */
+const UPLOAD_SECONDS = 24 * 60 * 60;
+
+/**
+ * Uploads (avatars, banners, attachments) from cache. Other servers fetch a
+ * person's avatar and banner each time they see them, about four a minute
+ * here; their names are random and never reused, so a copy stays right.
+ * Range requests (video) are answered from a cached copy when there is one.
+ */
+export async function serveUpload(
+  request: Request,
+  url: URL,
+  domain: string,
+  waitUntil: (p: Promise<unknown>) => void,
+  serve: () => Promise<Response>,
+): Promise<Response> {
+  const store = cache();
+  const id = UPLOAD.exec(url.pathname)?.[1];
+  if (!store || !id || request.method !== "GET") return serve();
+  const key = uploadCacheKey(domain, id.toLowerCase());
+  const range = request.headers.get("range");
+  const hit = await store.match(range ? new Request(key, { headers: { range } }) : key);
+  if (hit) {
+    const marked = new Response(hit.body, hit);
+    marked.headers.set("x-palm-cache", "hit");
+    return marked;
+  }
+  const response = await serve();
+  if (!range && response.status === 200) {
+    const copy = new Response(response.clone().body, response);
+    copy.headers.set("cache-control", `public, max-age=${UPLOAD_SECONDS}`);
+    waitUntil(store.put(key, copy));
   }
   return response;
 }
