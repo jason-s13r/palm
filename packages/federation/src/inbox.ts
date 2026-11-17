@@ -141,7 +141,10 @@ async function onReject(ctx: Ctx, reject: Reject): Promise<void> {
   if (!followId) return;
   if (await answerQuote(ctx, followId, reject.actorId, null)) return;
   const follow = await followByApId(db, followId.href);
-  if (follow) return unfollow(db, follow.accountId, follow.targetId);
+  if (follow) {
+    await unfollow(db, follow.accountId, follow.targetId);
+    return;
+  }
   const sub = await subscriptionByFollow(db, followId.href);
   if (sub) await unsubscribe(db, sub.communityId, sub.accountId);
 }
@@ -386,10 +389,14 @@ async function onMove(ctx: Ctx, move: Move): Promise<void> {
   for (const id of await localFollowersOf(db, from.id)) {
     const local = await accountById(db, id);
     if (!local) continue;
+    // The new account is followed from whichever apps followed the old one.
+    const old = await followState(db, id, from.id);
     await unfollow(db, id, from.id);
-    if (await followState(db, id, to.id)) continue;
+    if (!old || (await followState(db, id, to.id))) continue;
     const followApId = `${urls.user(local.domain, local.username)}#follows/${to.id}-${Date.now()}`;
-    await followAccount(db, id, to.id, to.apId || to.locked ? { followApId } : undefined);
+    const pending = to.apId || to.locked ? { followApId } : undefined;
+    if (old.mastodon) await followAccount(db, id, to.id, pending, "mastodon");
+    if (old.lemmy) await followAccount(db, id, to.id, pending, "lemmy");
     ctx.data.activities.enqueue({ kind: "followed", accountId: id, targetId: to.id, followApId, undo: false });
   }
 }

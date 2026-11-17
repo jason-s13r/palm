@@ -23,10 +23,11 @@ The name is MLAP backwards: Mastodon, Lemmy, ActivityPub.
   posting with images and video, replies, edits, direct messages, boosts,
   favourites, bookmarks, follows, profiles and grouped notifications.
 - **Both at once**: a Lemmy comment is a Mastodon reply, an upvote is a
-  favourite, a save is a bookmark. Lemmy apps see the people you follow as
-  person communities (`!name@their.server`), with their statuses as posts.
-  `!following` gathers everyone you follow and `!local` everyone on the
-  server; subscribing to either puts its statuses in Home.
+  favourite, a save is a bookmark. In Lemmy apps each person is a
+  community (`!name@their.server`), with their statuses as posts; subscribing
+  to it is separate from following them in a Mastodon app. `!following`
+  gathers everyone you follow in Mastodon apps and `!local` everyone on the
+  server; subscribing to either puts its statuses in Lemmy's Home.
 - **Federation** with Lemmy, Mastodon and other ActivityPub servers: people
   and communities follow and are followed, remote threads and profiles fill
   in their history when opened.

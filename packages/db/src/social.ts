@@ -4,36 +4,54 @@ const now = () => Math.floor(Date.now() / 1000);
 
 export type FollowState = "pending" | "accepted";
 
-/** Follows another account. A remote one stays pending until it accepts `followApId`. */
+/**
+ * Which app a follow belongs to. One ActivityPub follow sits under both: a
+ * Mastodon follow puts someone in Home and Following, a Lemmy subscription
+ * to their person community puts them in Voyager's list and Home. Each app
+ * turns its own on and off; the other server sees one follow while either is on.
+ */
+export type FollowVia = "mastodon" | "lemmy";
+
+/** Follows another account from one app. A remote one stays pending until it accepts `followApId`. */
 export async function follow(
   db: D1Database,
   accountId: number,
   targetId: number,
   pending?: { followApId: string },
+  via: FollowVia = "mastodon",
 ): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO account_follows (account_id, target_id, state, follow_ap_id, created_at) VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT (account_id, target_id) DO NOTHING`,
+      `INSERT INTO account_follows (account_id, target_id, state, follow_ap_id, created_at, mastodon, lemmy) VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (account_id, target_id) DO UPDATE SET ${via} = 1`,
     )
-    .bind(accountId, targetId, pending ? "pending" : "accepted", pending?.followApId ?? null, now())
+    .bind(accountId, targetId, pending ? "pending" : "accepted", pending?.followApId ?? null, now(), via === "mastodon" ? 1 : 0, via === "lemmy" ? 1 : 0)
     .run();
 }
 
-export async function unfollow(db: D1Database, accountId: number, targetId: number): Promise<void> {
-  await db.prepare("DELETE FROM account_follows WHERE account_id = ? AND target_id = ?").bind(accountId, targetId).run();
+/**
+ * Ends one app's follow, or with no app named, the follow itself. Returns
+ * whether the follow is gone, so the other server needs an Undo.
+ */
+export async function unfollow(db: D1Database, accountId: number, targetId: number, via?: FollowVia): Promise<boolean> {
+  if (via) await db.prepare(`UPDATE account_follows SET ${via} = 0 WHERE account_id = ? AND target_id = ?`).bind(accountId, targetId).run();
+  const removed = await db
+    .prepare(`DELETE FROM account_follows WHERE account_id = ? AND target_id = ?${via ? " AND mastodon = 0 AND lemmy = 0" : ""}`)
+    .bind(accountId, targetId)
+    .run();
+  return (removed.meta.changes ?? 0) > 0;
 }
 
 export async function followState(
   db: D1Database,
   accountId: number,
   targetId: number,
-): Promise<{ state: FollowState; followApId: string | null } | null> {
+): Promise<{ state: FollowState; followApId: string | null; mastodon: boolean; lemmy: boolean } | null> {
   const row = await db
-    .prepare("SELECT state, follow_ap_id FROM account_follows WHERE account_id = ? AND target_id = ?")
+    .prepare("SELECT state, follow_ap_id, mastodon, lemmy FROM account_follows WHERE account_id = ? AND target_id = ?")
     .bind(accountId, targetId)
-    .first<{ state: FollowState; follow_ap_id: string | null }>();
-  return row ? { state: row.state, followApId: row.follow_ap_id } : null;
+    .first<{ state: FollowState; follow_ap_id: string | null; mastodon: number; lemmy: number }>();
+  return row ? { state: row.state, followApId: row.follow_ap_id, mastodon: row.mastodon === 1, lemmy: row.lemmy === 1 } : null;
 }
 
 /** The follow a Follow ID belongs to, for matching an Accept or Reject. */
@@ -52,7 +70,7 @@ export async function acceptFollow(db: D1Database, accountId: number, targetId: 
 /** Accounts this one follows (accepted), newest first. */
 export async function followingIds(db: D1Database, accountId: number, limit = 80, offset = 0): Promise<number[]> {
   const { results } = await db
-    .prepare("SELECT target_id FROM account_follows WHERE account_id = ? AND state = 'accepted' ORDER BY created_at DESC LIMIT ? OFFSET ?")
+    .prepare("SELECT target_id FROM account_follows WHERE account_id = ? AND state = 'accepted' AND mastodon = 1 ORDER BY created_at DESC LIMIT ? OFFSET ?")
     .bind(accountId, limit, offset)
     .all<{ target_id: number }>();
   return results.map((r) => r.target_id);
@@ -61,7 +79,7 @@ export async function followingIds(db: D1Database, accountId: number, limit = 80
 /** Local accounts following this one, newest first (remote followers live in `followers`). */
 export async function localFollowerIds(db: D1Database, targetId: number, limit = 80, offset = 0): Promise<number[]> {
   const { results } = await db
-    .prepare("SELECT account_id FROM account_follows WHERE target_id = ? AND state = 'accepted' ORDER BY created_at DESC LIMIT ? OFFSET ?")
+    .prepare("SELECT account_id FROM account_follows WHERE target_id = ? AND state = 'accepted' AND mastodon = 1 ORDER BY created_at DESC LIMIT ? OFFSET ?")
     .bind(targetId, limit, offset)
     .all<{ account_id: number }>();
   return results.map((r) => r.account_id);
@@ -69,7 +87,7 @@ export async function localFollowerIds(db: D1Database, targetId: number, limit =
 
 export async function countFollowing(db: D1Database, accountId: number): Promise<number> {
   const row = await db
-    .prepare("SELECT COUNT(*) AS n FROM account_follows WHERE account_id = ? AND state = 'accepted'")
+    .prepare("SELECT COUNT(*) AS n FROM account_follows WHERE account_id = ? AND state = 'accepted' AND mastodon = 1")
     .bind(accountId)
     .first<{ n: number }>();
   return row?.n ?? 0;
@@ -91,8 +109,8 @@ export async function relationships(
   if (!ids.length) return out;
   const marks = ids.map(() => "?").join(", ");
   const [mine, theirs] = await Promise.all([
-    db.prepare(`SELECT target_id, state FROM account_follows WHERE account_id = ? AND target_id IN (${marks})`).bind(viewerId, ...ids).all<{ target_id: number; state: FollowState }>(),
-    db.prepare(`SELECT account_id FROM account_follows WHERE target_id = ? AND state = 'accepted' AND account_id IN (${marks})`).bind(viewerId, ...ids).all<{ account_id: number }>(),
+    db.prepare(`SELECT target_id, state FROM account_follows WHERE account_id = ? AND mastodon = 1 AND target_id IN (${marks})`).bind(viewerId, ...ids).all<{ target_id: number; state: FollowState }>(),
+    db.prepare(`SELECT account_id FROM account_follows WHERE target_id = ? AND state = 'accepted' AND mastodon = 1 AND account_id IN (${marks})`).bind(viewerId, ...ids).all<{ account_id: number }>(),
   ]);
   for (const id of ids) out.set(id, { following: null, followedBy: false });
   for (const r of mine.results) out.get(r.target_id)!.following = r.state;

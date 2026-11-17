@@ -268,9 +268,11 @@ const REPLY_VISIBLE = "x.reblog_of IS NULL AND x.visibility IN ('public', 'unlis
 export interface StatusListing {
   /** Only these authors' statuses. */
   authorIds?: number[] | undefined;
-  /** Statuses by people this account follows; with `localDomain`, either. */
+  /** Statuses by people this account follows in Mastodon apps (!following). */
   followedBy?: number | undefined;
-  /** Public statuses by this domain's own people; with `followedBy`, either. */
+  /** Statuses by people whose person communities this account subscribes to in Lemmy apps. */
+  personSubscriber?: number | undefined;
+  /** Public statuses by this domain's own people. The three combine as any of them. */
   localDomain?: string | undefined;
   ids?: number[] | undefined;
   sort: ThreadSort;
@@ -293,11 +295,14 @@ export async function listStatusPosts(db: D1Database, listing: StatusListing): P
     if (!listing.authorIds.length) return [];
     bind(`p.account_id IN (${listing.authorIds.map(() => "?").join(", ")})`, ...listing.authorIds);
   }
-  const followed = "p.account_id IN (SELECT target_id FROM account_follows WHERE account_id = ? AND state = 'accepted')";
+  const followed = "p.account_id IN (SELECT target_id FROM account_follows WHERE account_id = ? AND state = 'accepted' AND mastodon = 1)";
+  const subscribed = "p.account_id IN (SELECT target_id FROM account_follows WHERE account_id = ? AND state = 'accepted' AND lemmy = 1)";
   const local = "(p.visibility = 'public' AND p.account_id IN (SELECT id FROM accounts WHERE ap_id IS NULL AND domain = ? AND deleted_at IS NULL))";
-  if (listing.followedBy !== undefined && listing.localDomain !== undefined) bind(`(${followed} OR ${local})`, listing.followedBy, listing.localDomain);
-  else if (listing.followedBy !== undefined) bind(followed, listing.followedBy);
-  else if (listing.localDomain !== undefined) bind(local, listing.localDomain);
+  const any: [string, string | number][] = [];
+  if (listing.followedBy !== undefined) any.push([followed, listing.followedBy]);
+  if (listing.personSubscriber !== undefined) any.push([subscribed, listing.personSubscriber]);
+  if (listing.localDomain !== undefined) any.push([local, listing.localDomain]);
+  if (any.length) bind(`(${any.map(([sql]) => sql).join(" OR ")})`, ...any.map(([, value]) => value));
   if (listing.ids) {
     if (!listing.ids.length) return [];
     bind(`p.id IN (${listing.ids.map(() => "?").join(", ")})`, ...listing.ids);

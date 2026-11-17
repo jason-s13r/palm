@@ -147,7 +147,7 @@ export {
   unboostByApId,
   unfollow,
 } from "./social.ts";
-export type { FollowState, Interactions, Notification, NotificationKind } from "./social.ts";
+export type { FollowState, FollowVia, Interactions, Notification, NotificationKind } from "./social.ts";
 export {
   bannedAccounts,
   blockedDomains,

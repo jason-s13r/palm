@@ -58,17 +58,14 @@ describe("Person communities", () => {
     // Their statuses are its posts, titled from the first line.
     const inCommunity = await (await reader.get(`/post/list?community_id=${community.id}`)).json<{ posts: PostView[] }>();
     expect(inCommunity.posts.map((p) => p.post.name)).toEqual(["First line of a status"]);
-    // Home leaves them out until the reader subscribes to !following.
+    // Subscribing puts their statuses in Home.
     const home = async () => (await (await reader.get("/post/list?type_=Subscribed&sort=New")).json<{ posts: PostView[] }>()).posts.map((p) => p.post.id);
-    expect(await home()).not.toContain(Number(status.id));
+    expect(await home()).toContain(Number(status.id));
+    // A Lemmy subscription isn't a Mastodon follow: !following leaves them out.
     const following = await (await reader.get("/community?name=following")).json<{ community_view: CommunityView }>();
     expect(following.community_view.subscribed).toBe("NotSubscribed");
     const inFollowing = await (await reader.get(`/post/list?community_id=${following.community_view.community.id}`)).json<{ posts: PostView[] }>();
-    expect(inFollowing.posts.map((p) => p.post.id)).toContain(Number(status.id));
-    await reader.post("/community/follow", { community_id: following.community_view.community.id, follow: true });
-    expect(await home()).toContain(Number(status.id));
-    const listedFeeds = await (await reader.get("/community/list?type_=Subscribed")).json<{ communities: CommunityView[] }>();
-    expect(listedFeeds.communities[0]!.community.name).toBe("following");
+    expect(inFollowing.posts.map((p) => p.post.id)).not.toContain(Number(status.id));
 
     // !local is every local person's public statuses, followed or not.
     const local = await (await reader.get("/community?name=local")).json<{ community_view: CommunityView }>();

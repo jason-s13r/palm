@@ -158,11 +158,15 @@ peopleRoutes.post("/api/v1/accounts/:id{[0-9]+}/follow", async (c) => {
   const db = c.env.bindings.DB;
   const target = showable(c, await accountById(db, Number(c.req.param("id"))));
   if (!target || target.id === me.id) return fail(c, "Record not found", 404);
-  if (!(await followState(db, me.id, target.id))) {
+  const existing = await followState(db, me.id, target.id);
+  if (!existing) {
     const followApId = `${urls.user(me.domain, me.username)}#follows/${target.id}-${Date.now()}`;
     // A remote account says yes or no; a local one follows straight away, unless it's locked.
-    await follow(db, me.id, target.id, target.apId || target.locked ? { followApId } : undefined);
+    await follow(db, me.id, target.id, target.apId || target.locked ? { followApId } : undefined, "mastodon");
     c.env.activities.enqueue({ kind: "followed", accountId: me.id, targetId: target.id, followApId, undo: false });
+  } else if (!existing.mastodon) {
+    // Already followed from a Lemmy app: the Mastodon side joins that follow.
+    await follow(db, me.id, target.id, undefined, "mastodon");
   }
   const [relationship] = await relationshipViews(c, me, [target.id]);
   return c.json(relationship);
@@ -175,8 +179,8 @@ peopleRoutes.post("/api/v1/accounts/:id{[0-9]+}/unfollow", async (c) => {
   const target = await accountById(db, Number(c.req.param("id")));
   if (!target) return fail(c, "Record not found", 404);
   const existing = await followState(db, me.id, target.id);
-  if (existing) {
-    await unfollow(db, me.id, target.id);
+  // A Lemmy subscription to their person community keeps the follow itself going.
+  if (existing?.mastodon && (await unfollow(db, me.id, target.id, "mastodon"))) {
     if (target.apId && existing.followApId) {
       c.env.activities.enqueue({ kind: "followed", accountId: me.id, targetId: target.id, followApId: existing.followApId, undo: true });
     }

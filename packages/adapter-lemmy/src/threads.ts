@@ -405,27 +405,27 @@ threadRoutes.get("/api/v3/community/list", async (c) => {
     offset,
   });
   const views = found.map((x) => communityView(c.env, x));
-  // Subscribed takes in palm's feeds (!following, !local) subscribed to, and the people followed, as
-  // person communities, on the first page.
+  // Subscribed takes in palm's feeds (!following, !local) and the person
+  // communities subscribed to, on the first page. People followed only in
+  // Mastodon apps stay out; !following gathers them.
   if (type === "Subscribed" && viewer && offset === 0) {
-    const mine = [...(await homeFeeds(c.env.bindings.DB, viewer.id))];
-    views.unshift(...(await Promise.all(mine.map(async (name) => communityView(c.env, await communityStats(c, feed(c, name)))))));
-    views.push(...(await followedPeopleCommunities(c, viewer.id)));
+    views.unshift(...(await subscribedFeeds(c, viewer.id)).map((x) => communityView(c.env, x)));
+    views.push(...(await subscribedPeople(c, viewer.id)).map((x) => communityView(c.env, x)));
   }
   return c.json({ communities: views } satisfies ListCommunitiesResponse);
 });
 
-/** Person communities for the people an account follows, or has asked to. */
-export async function followedPeople(c: C, accountId: number): Promise<Community[]> {
+/** The person communities an account subscribes to in Lemmy apps, with their counts. */
+export async function subscribedPeople(c: C, accountId: number) {
   const db = c.env.bindings.DB;
-  const states = await followStates(db, accountId);
-  const people = await accountsByIds(db, [...states.keys()]);
-  return [...people.values()].filter(hasPersonCommunity).map(personCommunity);
+  const people = await accountsByIds(db, [...(await followStates(db, accountId)).keys()]);
+  return Promise.all([...people.values()].filter(hasPersonCommunity).map((p) => communityStats(c, personCommunity(p))));
 }
 
-async function followedPeopleCommunities(c: C, accountId: number) {
-  const communities = await followedPeople(c, accountId);
-  return Promise.all(communities.map(async (x) => communityView(c.env, await communityStats(c, x))));
+/** palm's feeds (!following, !local) an account subscribes to, with their counts. */
+export async function subscribedFeeds(c: C, accountId: number) {
+  const mine = [...(await homeFeeds(c.env.bindings.DB, accountId))];
+  return Promise.all(mine.map((name) => communityStats(c, feed(c, name))));
 }
 
 threadRoutes.post("/api/v3/community/follow", async (c) => {
@@ -466,7 +466,11 @@ threadRoutes.post("/api/v3/community/follow", async (c) => {
   return c.json({ community_view: communityView(c.env, await communityStats(c, community)), discussion_languages: [] } satisfies CommunityResponse);
 });
 
-/** Subscribing to a person community: following the person, as Mastodon apps do. */
+/**
+ * Subscribing to a person community follows the person from Lemmy apps. It's
+ * apart from following them in Mastodon apps: either can be on alone, and
+ * their server is told only when the first starts or the last stops.
+ */
 async function followPerson(c: C, me: Account, targetId: number, on: boolean): Promise<void> {
   const db = c.env.bindings.DB;
   const target = await accountById(db, targetId);
@@ -474,10 +478,11 @@ async function followPerson(c: C, me: Account, targetId: number, on: boolean): P
   const existing = await followState(db, me.id, target.id);
   if (on && !existing) {
     const followApId = `${urls.user(me.domain, me.username)}#follows/${target.id}-${Date.now()}`;
-    await follow(db, me.id, target.id, target.apId ? { followApId } : undefined);
+    await follow(db, me.id, target.id, target.apId || target.locked ? { followApId } : undefined, "lemmy");
     c.env.activities.enqueue({ kind: "followed", accountId: me.id, targetId: target.id, followApId, undo: false });
-  } else if (!on && existing) {
-    await unfollow(db, me.id, target.id);
+  } else if (on && existing && !existing.lemmy) {
+    await follow(db, me.id, target.id, undefined, "lemmy");
+  } else if (!on && existing?.lemmy && (await unfollow(db, me.id, target.id, "lemmy"))) {
     if (target.apId && existing.followApId) {
       c.env.activities.enqueue({ kind: "followed", accountId: me.id, targetId: target.id, followApId: existing.followApId, undo: true });
     }
@@ -513,9 +518,11 @@ threadRoutes.get("/api/v3/post/list", async (c) => {
     if (posts.length === limit) response.next_page = `o${offset + limit}`;
     return c.json(response);
   }
-  // Statuses join Home from the feeds the viewer subscribes to (!following, !local).
-  const feeds = !community && !mine && type === "Subscribed" && viewer ? await homeFeeds(c.env.bindings.DB, viewer.id) : new Set<HomeFeed>();
-  const withStatuses = viewer && feeds.size > 0;
+  // Statuses join Home from the person communities the viewer subscribes to,
+  // and from palm's feeds they subscribe to (!following, !local).
+  const home = !community && !mine && type === "Subscribed" && viewer ? viewer : null;
+  const feeds = home ? await homeFeeds(c.env.bindings.DB, home.id) : new Set<HomeFeed>();
+  const withStatuses = home !== null;
   const posts = await listThreadPosts(c.env.bindings.DB, {
     domain: c.env.domain.domain,
     scope: community ? "all" : scopeOf(type),
@@ -533,11 +540,16 @@ threadRoutes.get("/api/v3/post/list", async (c) => {
     offset: withStatuses ? 0 : offset,
   });
   let page = posts;
-  if (withStatuses) {
+  if (home) {
     const statuses = await listStatusPosts(c.env.bindings.DB, {
-      followedBy: feeds.has("following") ? viewer.id : undefined,
+      personSubscriber: home.id,
+      followedBy: feeds.has("following") ? home.id : undefined,
       localDomain: feeds.has("local") ? c.env.domain.domain : undefined,
-      sort, viewerId: viewer.id, limit: offset + limit, offset: 0 });
+      sort,
+      viewerId: home.id,
+      limit: offset + limit,
+      offset: 0,
+    });
     page = mergeSorted(posts, statuses, sort).slice(offset, offset + limit);
   }
   // Read posts drop out when asked (show_read=false); hidden ones unless asked for.

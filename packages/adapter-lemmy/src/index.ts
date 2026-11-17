@@ -57,7 +57,7 @@ import { accountRoutes } from "./account.ts";
 import { blockRoutes, blocksOf } from "./blocks.ts";
 import { messageRoutes } from "./messages.ts";
 import { moderationRoutes } from "./moderation.ts";
-import { followedPeople, inboxItems, lemmyInboxCounts, personThreads, resolveObject, searchThreads, threadRoutes } from "./threads.ts";
+import { inboxItems, lemmyInboxCounts, personThreads, resolveObject, searchThreads, subscribedFeeds, subscribedPeople, threadRoutes } from "./threads.ts";
 import { LEMMY_VERSION, myUserInfo, personView, siteView } from "./views.ts";
 
 export { LEMMY_VERSION };
@@ -168,9 +168,14 @@ app.get("/api/v3/site", async (c) => {
     countAccounts(db, domain),
     admins(db, domain),
     siteCounts(db, domain),
-    // Communities subscribed to, and the people followed as person communities.
+    // Communities subscribed to, palm's feeds, and person communities subscribed
+    // to. People followed only in Mastodon apps stay out; !following gathers them.
     auth
-      ? Promise.all([subscriptions(db, auth.account.id), followedPeople(c, auth.account.id)]).then(([a, b]) => [...a, ...b])
+      ? Promise.all([subscriptions(db, auth.account.id), subscribedFeeds(c, auth.account.id), subscribedPeople(c, auth.account.id)]).then(([a, b, p]) => [
+          ...a,
+          ...b,
+          ...p,
+        ])
       : Promise.resolve([]),
   ]);
   const body: GetSiteResponse = {

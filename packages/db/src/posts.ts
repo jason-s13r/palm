@@ -378,7 +378,7 @@ export async function homeTimeline(db: D1Database, accountId: number, page: Page
        WHERE p.deleted_at IS NULL AND p.root_id IS NULL
          AND (p.account_id = ?1
               OR (p.visibility IN ('public', 'unlisted', 'private')
-                  AND p.account_id IN (SELECT target_id FROM account_follows WHERE account_id = ?1 AND state = 'accepted'))
+                  AND p.account_id IN (SELECT target_id FROM account_follows WHERE account_id = ?1 AND state = 'accepted' AND mastodon = 1))
               OR EXISTS (SELECT 1 FROM mentions m WHERE m.post_id = p.id AND m.account_id = ?1)
               OR (p.visibility = 'public' AND p.reblog_of IS NULL
                   AND EXISTS (SELECT 1 FROM post_tags t JOIN followed_tags f ON f.tag = t.tag WHERE t.post_id = p.id AND f.account_id = ?1)))

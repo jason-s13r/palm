@@ -93,11 +93,11 @@ export function personCommunity(account: Account): Community {
 
 export type FollowStates = Map<number, "accepted" | "pending">;
 
-/** The people an account follows (or has asked to), by account ID. */
+/** The people whose person communities an account subscribes to (or has asked to), by account ID. */
 export async function followStates(db: D1Database, accountId: number | null): Promise<FollowStates> {
   if (accountId === null) return new Map();
   const { results } = await db
-    .prepare("SELECT target_id, state FROM account_follows WHERE account_id = ?")
+    .prepare("SELECT target_id, state FROM account_follows WHERE account_id = ? AND lemmy = 1")
     .bind(accountId)
     .all<{ target_id: number; state: string }>();
   return new Map(results.map((r) => [r.target_id, r.state === "accepted" ? "accepted" : "pending"]));
@@ -116,7 +116,7 @@ export async function personCommunityStats(
          (SELECT COUNT(*) FROM account_follows WHERE target_id = ?1 AND state = 'accepted') AS followers,
          (SELECT COUNT(*) FROM posts WHERE account_id = ?1 AND community_id IS NULL AND parent_id IS NULL AND in_reply_to IS NULL
             AND reblog_of IS NULL AND deleted_at IS NULL AND visibility IN ('public', 'unlisted')) AS statuses,
-         (SELECT state FROM account_follows WHERE account_id = ?2 AND target_id = ?1) AS state`,
+         (SELECT state FROM account_follows WHERE account_id = ?2 AND target_id = ?1 AND lemmy = 1) AS state`,
     )
     .bind(account.id, viewerId ?? -1)
     .first<{ followers: number; statuses: number; state: string | null }>();

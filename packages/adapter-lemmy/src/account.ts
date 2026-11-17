@@ -105,9 +105,15 @@ accountRoutes.post("/api/v3/user/import_settings", async (c) => {
   for (const id of strings(params.followed_communities)) {
     if (id.endsWith(PERSON)) {
       const target = await personFor(id.slice(0, -PERSON.length));
-      if (!target || target.id === me.id || (await followState(db, me.id, target.id))) continue;
+      if (!target || target.id === me.id) continue;
+      const existing = await followState(db, me.id, target.id);
+      if (existing?.lemmy) continue;
+      if (existing) {
+        await follow(db, me.id, target.id, undefined, "lemmy");
+        continue;
+      }
       const followApId = `${urls.user(me.domain, me.username)}#follows/${target.id}-${Date.now()}`;
-      await follow(db, me.id, target.id, target.apId || target.locked ? { followApId } : undefined);
+      await follow(db, me.id, target.id, target.apId || target.locked ? { followApId } : undefined, "lemmy");
       ctx.activities.enqueue({ kind: "followed", accountId: me.id, targetId: target.id, followApId, undo: false });
       continue;
     }

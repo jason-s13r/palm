@@ -114,7 +114,7 @@ export async function exportAccount(db: D1Database, accountId: number): Promise<
   const ids = async (sql: string) => (await db.prepare(sql).bind(accountId).all<{ id: string }>()).results.map((r) => r.id);
   const [communities, people, blockedCommunities, blockedPeople, blockedDomains, saved] = await Promise.all([
     ids(`SELECT ${apIdOf("c")} AS id FROM community_subscriptions s JOIN communities c ON c.id = s.community_id WHERE s.account_id = ?`),
-    ids(`SELECT ${apIdOf("u")} AS id FROM account_follows f JOIN accounts a ON a.id = f.target_id WHERE f.account_id = ?`),
+    ids(`SELECT ${apIdOf("u")} AS id FROM account_follows f JOIN accounts a ON a.id = f.target_id WHERE f.account_id = ? AND f.lemmy = 1`),
     ids(`SELECT ${apIdOf("c")} AS id FROM community_blocks b JOIN communities c ON c.id = b.community_id WHERE b.account_id = ?`),
     ids(`SELECT ${apIdOf("u")} AS id FROM account_blocks b JOIN accounts a ON a.id = b.target_id WHERE b.account_id = ? AND b.kind = 'block'`),
     ids("SELECT domain AS id FROM user_domain_blocks WHERE account_id = ?"),

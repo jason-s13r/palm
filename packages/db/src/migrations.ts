@@ -709,6 +709,15 @@ CREATE TABLE IF NOT EXISTS quote_authorizations (
 )
 `,
   },
+  {
+    version: 24,
+    name: "follows per app",
+    sql: `
+ALTER TABLE account_follows ADD COLUMN mastodon INTEGER NOT NULL DEFAULT 1
+;
+ALTER TABLE account_follows ADD COLUMN lemmy INTEGER NOT NULL DEFAULT 0
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;
