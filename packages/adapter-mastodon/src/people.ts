@@ -46,7 +46,7 @@ import {
   type OAuthApp,
 } from "@palm/db";
 import { Hono, type Context } from "hono";
-import { accountStats, statuses, tagView } from "./statuses.ts";
+import { accountStats, accountStatsMany, statuses, tagView } from "./statuses.ts";
 import { account, credentialAccount, iso } from "./views.ts";
 
 /**
@@ -64,6 +64,12 @@ const showable = (c: C, a: Account | null) => (a && (a.apId !== null || a.domain
 
 async function accountView(c: C, a: Account) {
   return account(c.env, a, await accountStats(c.env, a));
+}
+
+/** Accounts with their counts, counted in one query: apps show a search result's or list's counts as the profile's. */
+async function accountViews(c: C, accounts: Account[]) {
+  const stats = await accountStatsMany(c.env, accounts);
+  return accounts.map((a) => account(c.env, a, stats.get(a.id)));
 }
 
 /**
@@ -284,7 +290,7 @@ for (const [method, on] of [["post", true], ["delete", false]] as const) {
 peopleRoutes.get("/api/v1/accounts/:id{[0-9]+}/following", async (c) => {
   const db = c.env.bindings.DB;
   const found = await accountsByIds(db, await followingIds(db, Number(c.req.param("id"))));
-  return c.json([...found.values()].map((a) => account(c.env, a)));
+  return c.json(await accountViews(c, [...found.values()]));
 });
 
 // Followers: local ones by their follows, remote ones as far as palm has met them.
@@ -293,7 +299,7 @@ peopleRoutes.get("/api/v1/accounts/:id{[0-9]+}/followers", async (c) => {
   const id = Number(c.req.param("id"));
   const local = await accountsByIds(db, await localFollowerIds(db, id));
   const remote = await Promise.all((await followers(db, id)).slice(0, 80).map((f) => accountByApId(db, f.actorId)));
-  return c.json([...local.values(), ...remote.filter((a): a is Account => a !== null)].map((a) => account(c.env, a)));
+  return c.json(await accountViews(c, [...local.values(), ...remote.filter((a): a is Account => a !== null)]));
 });
 
 // --- the signed-in account's profile ------------------------------------------------
@@ -509,7 +515,7 @@ peopleRoutes.get("/api/v2/search", async (c) => {
     .bind(`%${name}%`, c.env.domain.domain)
     .all<{ id: number }>();
   const found = await accountsByIds(db, results.map((r) => r.id));
-  out.accounts.push(...[...found.values()].map((a) => account(c.env, a)));
+  out.accounts.push(...(await accountViews(c, [...found.values()])));
   return c.json(out);
 });
 

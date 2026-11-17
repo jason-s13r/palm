@@ -224,6 +224,11 @@ export async function runTask(ctx: RequestContext, task: FederationTask): Promis
         }
         return;
       }
+      // A follow, unfollow and follow again leave several of these queued, and
+      // a retried old one can arrive after a newer one: an old Undo would
+      // then end the new follow. Only the current state goes out.
+      const current = await followState(db, account.id, target.id);
+      if (task.undo ? current !== null : current?.followApId !== task.followApId) return;
       const follow = new Follow({ id: new URL(task.followApId), actor: actorUri(account), object: actorUri(target) });
       const activity = task.undo ? new Undo({ id: new URL(`${task.followApId}/undo`), actor: actorUri(account), object: follow }) : follow;
       const to = recipientOf(target);
