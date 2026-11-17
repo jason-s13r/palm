@@ -1,5 +1,12 @@
 # Changelog
 
+## federation@0.4.2 (2026-11-17)
+
+### Fixes
+
+- quick follow/unfollow could end the newer follow; search results showed zero counts
+
+
 ## federation@0.4.1 (2026-11-17)
 
 ### Fixes

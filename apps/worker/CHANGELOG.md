@@ -1,5 +1,17 @@
 # Changelog
 
+## worker@0.6.2 (2026-11-17)
+
+### Fixes
+
+- quick follow/unfollow could end the newer follow; search results showed zero counts
+
+### Dependencies
+
+- adapter-mastodon: 0.4.1 -> 0.4.2
+- federation: 0.4.1 -> 0.4.2
+
+
 ## worker@0.6.1 (2026-11-17)
 
 ### Fixes
