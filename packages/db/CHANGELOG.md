@@ -1,5 +1,12 @@
 # Changelog
 
+## db@0.4.1 (2026-11-17)
+
+### Fixes
+
+- lighter Mastodon timelines; link previews fetched apart from deliveries
+
+
 ## db@0.4.0 (2026-11-17)
 
 ### Features

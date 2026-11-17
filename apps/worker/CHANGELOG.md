@@ -1,5 +1,20 @@
 # Changelog
 
+## worker@0.6.1 (2026-11-17)
+
+### Fixes
+
+- lighter Mastodon timelines; link previews fetched apart from deliveries
+
+- opening a slow server's profile or thread no longer stalls the app
+
+### Dependencies
+
+- db: 0.4.0 -> 0.4.1
+- adapter-mastodon: 0.4.0 -> 0.4.1
+- federation: 0.4.0 -> 0.4.1
+
+
 ## worker@0.6.0 (2026-11-17)
 
 ### Features

@@ -1,5 +1,16 @@
 # Changelog
 
+## adapter-mastodon@0.4.1 (2026-11-17)
+
+### Fixes
+
+- lighter Mastodon timelines; link previews fetched apart from deliveries
+
+### Dependencies
+
+- db: 0.4.0 -> 0.4.1
+
+
 ## adapter-mastodon@0.4.0 (2026-11-17)
 
 ### Features
