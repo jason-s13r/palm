@@ -36,7 +36,7 @@ export interface AccountStats {
  */
 export const profileUrl = (ctx: RequestContext, username: string) => `https://${ctx.host}/@${encodeURIComponent(username)}`;
 
-export function account(ctx: RequestContext, a: Account, stats?: AccountStats) {
+export function account(ctx: RequestContext, a: Account, stats?: AccountStats, moved?: object | null) {
   const local = a.apId === null;
   // Other servers' pictures come through palm's media cache.
   const viaCache = (url: string | null) => (url && !local ? urls.proxy(ctx.domain.domain, url) : url);
@@ -67,6 +67,8 @@ export function account(ctx: RequestContext, a: Account, stats?: AccountStats) {
     statuses_count: stats?.statuses ?? 0,
     last_status_at: stats?.lastStatusAt ? iso(stats.lastStatusAt).slice(0, 10) : null,
     hide_collections: false,
+    // The account it moved to: apps show a "moved" banner pointing there.
+    ...(moved ? { moved } : {}),
     noindex: true,
     emojis: [],
     roles: [],

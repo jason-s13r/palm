@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createAccount, createCommunity, db, giveKeys, json, worker } from "./helpers.ts";
+import { createAccount, createCommunity, db, giveKeys, json, MASTODON, mastodonToken, worker } from "./helpers.ts";
 
 const SITE = "https://palm.test";
 const AP = { accept: "application/activity+json" };
@@ -40,6 +40,15 @@ describe("Account lifecycle", () => {
     const actor = await (await worker.fetch(`${SITE}/users/lc_mover`, { headers: AP })).json<{ alsoKnownAs: unknown; movedTo: string }>();
     expect(actor.movedTo).toBe("https://new.example/users/mover");
     expect([actor.alsoKnownAs].flat()).toContain("https://old.example/users/mover");
+
+    // Mastodon apps show where it went.
+    await lemmyAs("lc_newhome");
+    await db.prepare("UPDATE accounts SET moved_to = ? WHERE id = ?").bind("https://palm.test/users/lc_newhome", id).run();
+    const viewer = await createAccount("lc_viewer", "pw");
+    const view = await (
+      await worker.fetch(`${MASTODON}/api/v1/accounts/${id}`, { headers: { authorization: `Bearer ${await mastodonToken(viewer)}` } })
+    ).json<{ moved?: { acct: string } }>();
+    expect(view.moved?.acct).toBe("lc_newhome");
   });
 
   it("deletes an account from a Lemmy app", async () => {

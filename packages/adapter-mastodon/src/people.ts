@@ -63,13 +63,30 @@ const fail = (c: C, error: string, status: 401 | 403 | 404 | 422 = 422) => c.jso
 const showable = (c: C, a: Account | null) => (a && (a.apId !== null || a.domain === c.env.domain.domain) ? a : null);
 
 async function accountView(c: C, a: Account) {
-  return account(c.env, a, await accountStats(c.env, a));
+  const [stats, moved] = await Promise.all([accountStats(c.env, a), movedTo(c, a)]);
+  return account(c.env, a, stats, moved ? account(c.env, moved) : null);
+}
+
+/** The account another has moved to, when palm knows it (or can look it up). */
+async function movedTo(c: C, a: Account): Promise<Account | null> {
+  if (!a.movedTo) return null;
+  const db = c.env.bindings.DB;
+  const known = await accountByApId(db, a.movedTo);
+  if (known) return known;
+  const local = new URL(a.movedTo);
+  const name = /^\/users\/([^/]+)$/.exec(local.pathname)?.[1];
+  if (name && local.host === c.env.domain.domain) return (await accountForLogin(db, c.env.domain.domain, name))?.account ?? null;
+  const found = await c.env.activities.resolve(a.movedTo).catch(() => null);
+  return found?.kind === "account" ? accountById(db, found.id) : null;
 }
 
 /** Accounts with their counts, counted in one query: apps show a search result's or list's counts as the profile's. */
 async function accountViews(c: C, accounts: Account[]) {
-  const stats = await accountStatsMany(c.env, accounts);
-  return accounts.map((a) => account(c.env, a, stats.get(a.id)));
+  const [stats, moved] = await Promise.all([accountStatsMany(c.env, accounts), Promise.all(accounts.map((a) => movedTo(c, a)))]);
+  return accounts.map((a, i) => {
+    const target = moved[i];
+    return account(c.env, a, stats.get(a.id), target ? account(c.env, target) : null);
+  });
 }
 
 /**
