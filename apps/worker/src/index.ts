@@ -5,6 +5,7 @@ import { contextScope, defineConfig, enterContext, normaliseHost, resolveSurface
 import { domainOf, migrate, pendingDeletes, pendingMoves, prune } from "@palm/db";
 import { handleWeb } from "@palm/web";
 import { avatarResponse } from "./assets.ts";
+import { servePublic } from "./public-cache.ts";
 import { VERSION } from "./version.ts";
 
 export { ConfigError, defineConfig } from "@palm/core";
@@ -182,7 +183,8 @@ export async function handle(
       // Uploaded images live where Lemmy keeps them, for both kinds of app.
       if (url.pathname.startsWith("/api/v3/") || url.pathname.startsWith("/pictrs/")) return handleLemmy(request, ctx);
       if (isMastodonPath(url.pathname)) return handleMastodon(request, ctx);
-      return handleFederation(request, ctx, (req) => federationFallback(config, req, new URL(req.url), ctx));
+      // Actors, collections, WebFinger and nodeinfo come from cache when they can.
+      return servePublic(request, ctx, () => handleFederation(request, ctx, (req) => federationFallback(config, req, new URL(req.url), ctx)));
   }
 }
 

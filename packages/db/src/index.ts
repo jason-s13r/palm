@@ -5,6 +5,7 @@ export {
   accountByApId,
   accountByHandle,
   accountById,
+  profileVersion,
   accountForLogin,
   accountsByIds,
   admins,

@@ -216,6 +216,8 @@ export async function updateProfile(
 ): Promise<void> {
   const sets: string[] = [];
   const params: (string | number | null)[] = [];
+  // Other servers' cached copies of the actor are keyed by this (see the worker's public-cache.ts).
+  sets.push("profile_version = profile_version + 1");
   if (profile.locked !== undefined) {
     sets.push("locked = ?");
     params.push(profile.locked ? 1 : 0);
@@ -271,4 +273,17 @@ export async function admins(db: D1Database, domain: string): Promise<Account[]>
 /** Records that palm read a remote account's outbox just now. */
 export async function markOutboxFetched(db: D1Database, id: number): Promise<void> {
   await db.prepare("UPDATE accounts SET outbox_fetched_at = ? WHERE id = ?").bind(now(), id).run();
+}
+
+/**
+ * A local account's profile version, which goes up whenever its actor
+ * document changes; null for no such account. Cached copies of the actor
+ * are keyed by it, so a change reaches every data centre at once.
+ */
+export async function profileVersion(db: D1Database, domain: string, username: string): Promise<number | null> {
+  const row = await db
+    .prepare("SELECT profile_version FROM accounts WHERE domain = ? AND username = ? AND ap_id IS NULL")
+    .bind(domain, username)
+    .first<{ profile_version: number }>();
+  return row?.profile_version ?? null;
 }

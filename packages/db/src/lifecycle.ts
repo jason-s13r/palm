@@ -9,7 +9,7 @@ const now = () => Math.floor(Date.now() / 1000);
 /** The other IDs an account says are also it (Mastodon's aliases). */
 export async function setAlsoKnownAs(db: D1Database, accountId: number, ids: string[]): Promise<void> {
   await db
-    .prepare("UPDATE accounts SET also_known_as = ? WHERE id = ?")
+    .prepare("UPDATE accounts SET also_known_as = ?, profile_version = profile_version + 1 WHERE id = ?")
     .bind(ids.length ? JSON.stringify([...new Set(ids)]) : null, accountId)
     .run();
 }
@@ -19,7 +19,7 @@ export async function setAlsoKnownAs(db: D1Database, accountId: number, ids: str
  * next cron run (`pendingMoves`), so the CLI can set it too.
  */
 export async function setMovedTo(db: D1Database, accountId: number, target: string | null): Promise<void> {
-  await db.prepare("UPDATE accounts SET moved_to = ?, move_sent_at = NULL WHERE id = ?").bind(target, accountId).run();
+  await db.prepare("UPDATE accounts SET moved_to = ?, move_sent_at = NULL, profile_version = profile_version + 1 WHERE id = ?").bind(target, accountId).run();
 }
 
 /** Local accounts whose Move hasn't been sent yet. */
@@ -67,7 +67,7 @@ export async function localFollowersOf(db: D1Database, targetId: number): Promis
 export async function deleteLocalAccount(db: D1Database, accountId: number, content: boolean): Promise<void> {
   const t = now();
   await db.batch([
-    db.prepare("UPDATE accounts SET deleted_at = ?, banned_at = COALESCE(banned_at, ?), password_hash = NULL, display_name = NULL, bio = NULL, avatar_url = NULL, header_url = NULL WHERE id = ?").bind(t, t, accountId),
+    db.prepare("UPDATE accounts SET deleted_at = ?, banned_at = COALESCE(banned_at, ?), profile_version = profile_version + 1, password_hash = NULL, display_name = NULL, bio = NULL, avatar_url = NULL, header_url = NULL WHERE id = ?").bind(t, t, accountId),
     db.prepare("DELETE FROM sessions WHERE account_id = ?").bind(accountId),
     db.prepare("DELETE FROM oauth_tokens WHERE account_id = ?").bind(accountId),
     db.prepare("DELETE FROM oauth_codes WHERE account_id = ?").bind(accountId),

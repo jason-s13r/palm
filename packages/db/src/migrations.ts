@@ -718,6 +718,13 @@ ALTER TABLE account_follows ADD COLUMN mastodon INTEGER NOT NULL DEFAULT 1
 ALTER TABLE account_follows ADD COLUMN lemmy INTEGER NOT NULL DEFAULT 0
 `,
   },
+  {
+    version: 25,
+    name: "profile versions",
+    sql: `
+ALTER TABLE accounts ADD COLUMN profile_version INTEGER NOT NULL DEFAULT 0
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

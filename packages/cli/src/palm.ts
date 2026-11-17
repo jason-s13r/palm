@@ -77,7 +77,8 @@ const sqlString = (value: string) => `'${value.replaceAll("'", "''")}'`;
 /** SQL that gives an account fresh RSA and Ed25519 signing keys, replacing any it had. */
 async function keySql(domain: string, username: string): Promise<string> {
   const account = `(SELECT id FROM accounts WHERE domain = ${sqlString(domain)} AND username = ${sqlString(username)})`;
-  return keyRows("actor_keys", "account_id", account);
+  // New keys change the actor document other servers keep a copy of.
+  return `${await keyRows("actor_keys", "account_id", account)}\nUPDATE accounts SET profile_version = profile_version + 1 WHERE id = ${account};`;
 }
 
 /** INSERTs of a fresh RSA and Ed25519 key pair into `table`, for the row `owner` selects. */
@@ -178,7 +179,7 @@ const actorId = (value: string) => {
 function userAlias(args: string[]): void {
   const { rest, username, domain, db, local } = userArgs(args);
   const ids = rest.map(actorId);
-  run(db, local, `UPDATE accounts SET also_known_as = ${ids.length ? sqlString(JSON.stringify(ids)) : "NULL"} WHERE id = ${accountSql(domain, username)};`);
+  run(db, local, `UPDATE accounts SET also_known_as = ${ids.length ? sqlString(JSON.stringify(ids)) : "NULL"}, profile_version = profile_version + 1 WHERE id = ${accountSql(domain, username)};`);
   if (db) console.log(ids.length ? `\n@${username}@${domain} is also: ${ids.join(", ")}` : `\nCleared @${username}@${domain}'s aliases.`);
 }
 
@@ -187,7 +188,7 @@ function userMove(args: string[]): void {
   const { rest, username, domain, db, local } = userArgs(args);
   if (!rest[0]) throw new Error(USAGE);
   const target = actorId(rest[0]);
-  run(db, local, `UPDATE accounts SET moved_to = ${sqlString(target)}, move_sent_at = NULL WHERE id = ${accountSql(domain, username)};`);
+  run(db, local, `UPDATE accounts SET moved_to = ${sqlString(target)}, move_sent_at = NULL, profile_version = profile_version + 1 WHERE id = ${accountSql(domain, username)};`);
   if (db) console.log(`\n@${username}@${domain} moves to ${target}; its followers are told on the next cron run.`);
 }
 
@@ -197,7 +198,7 @@ function userDelete(args: string[]): void {
   const id = accountSql(domain, username);
   const now = Math.floor(Date.now() / 1000);
   const sql = [
-    `UPDATE accounts SET deleted_at = ${now}, banned_at = COALESCE(banned_at, ${now}), password_hash = NULL, display_name = NULL, bio = NULL, avatar_url = NULL, header_url = NULL WHERE id = ${id};`,
+    `UPDATE accounts SET deleted_at = ${now}, banned_at = COALESCE(banned_at, ${now}), profile_version = profile_version + 1, password_hash = NULL, display_name = NULL, bio = NULL, avatar_url = NULL, header_url = NULL WHERE id = ${id};`,
     ...["sessions", "oauth_tokens", "oauth_codes", "push_subscriptions", "community_subscriptions", "notifications"].map((t) => `DELETE FROM ${t} WHERE account_id = ${id};`),
     `DELETE FROM account_follows WHERE account_id = ${id} OR target_id = ${id};`,
     ...(values["keep-posts"] ? [] : [`UPDATE posts SET deleted_at = ${now} WHERE account_id = ${id} AND deleted_at IS NULL;`]),
