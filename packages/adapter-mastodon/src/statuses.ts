@@ -51,6 +51,7 @@ import {
   lastPostAt,
   mediaById,
   mediaForPosts,
+  postIdsByApIds,
   accountCounts,
   followState,
   authorizeQuote,
@@ -210,11 +211,17 @@ export async function statuses(ctx: RequestContext, rows: Post[], viewer: Accoun
   const db = ctx.bindings.DB;
   // People, servers and communities the viewer blocked or muted drop out,
   // boosts of them included; the viewer's own posts always show.
-  const hidden = await hiddenFor(db, viewer?.id);
+  const [hidden, filters, boosted] = await Promise.all([
+    hiddenFor(db, viewer?.id),
+    viewer ? filtersOf(db, viewer.id) : Promise.resolve([]),
+    postsByIds(db, rows.map((r) => r.reblogOf).filter((id): id is number => id !== null)),
+  ]);
   if (hidden !== NOTHING_HIDDEN) {
-    const authors = await accountsByIds(db, rows.map((r) => r.accountId));
-    const originals = await postsByIds(db, rows.map((r) => r.reblogOf).filter((id): id is number => id !== null));
-    const originalAuthors = await accountsByIds(db, [...originals.values()].map((p) => p.accountId));
+    const originals = boosted;
+    const [authors, originalAuthors] = await Promise.all([
+      accountsByIds(db, rows.map((r) => r.accountId)),
+      accountsByIds(db, [...originals.values()].map((p) => p.accountId)),
+    ]);
     rows = rows.filter((r) => {
       if (r.accountId === viewer!.id) return true;
       if (isHidden(hidden, authors.get(r.accountId), r.communityId)) return false;
@@ -223,13 +230,16 @@ export async function statuses(ctx: RequestContext, rows: Post[], viewer: Accoun
     });
   }
   // Boosts are rows that point at the post they boost: show the post inside.
-  const boosted = await postsByIds(db, rows.map((r) => r.reblogOf).filter((id): id is number => id !== null));
-  const inner = await renderStatuses(ctx, [...boosted.values()], viewer);
-  const innerById = new Map(inner.map((s) => [s.id, s]));
-  const plain = await renderStatuses(ctx, rows.filter((r) => r.reblogOf === null), viewer);
-  const plainById = new Map(plain.map((s) => [s.id, s]));
-  const boosters = await accountsByIds(db, rows.filter((r) => r.reblogOf !== null).map((r) => r.accountId));
-  const filters = viewer ? await filtersOf(db, viewer.id) : [];
+  // Boosted and plain posts are rendered together, in one set of lookups.
+  const toRender = new Map<number, Post>();
+  for (const p of boosted.values()) toRender.set(p.id, p);
+  for (const r of rows) if (r.reblogOf === null) toRender.set(r.id, r);
+  const [rendered, boosters] = await Promise.all([
+    renderStatuses(ctx, [...toRender.values()], viewer),
+    accountsByIds(db, rows.filter((r) => r.reblogOf !== null).map((r) => r.accountId)),
+  ]);
+  const innerById = new Map(rendered.map((s) => [s.id, s]));
+  const plainById = innerById;
   const shown = rows.flatMap((row) => {
     if (row.reblogOf === null) return plainById.has(String(row.id)) ? [plainById.get(String(row.id))!] : [];
     const original = innerById.get(String(row.reblogOf));
@@ -289,39 +299,37 @@ export async function statuses(ctx: RequestContext, rows: Post[], viewer: Accoun
 async function renderStatuses(ctx: RequestContext, posts: Post[], viewer: Account | null, nested = false) {
   const db = ctx.bindings.DB;
   const parentIds = posts.map((p) => p.parentId).filter((id): id is number => id !== null);
-  const [media, mentioned, counts, parents, tags] = await Promise.all([
-    mediaForPosts(db, posts.map((p) => p.id)),
-    mentionedIds(db, posts.map((p) => p.id)),
-    interactions(db, posts.map((p) => p.id), viewer?.id ?? null),
+  const ids = posts.map((p) => p.id);
+  const links = new Map(posts.map((p) => [p.id, previewLink(p)]));
+  const authorIds = [...new Set(posts.map((p) => p.accountId))];
+  // Everything that depends only on the posts, in one round.
+  const [media, mentioned, counts, parents, tags, pins, polls, choices, cards, followed, quotedPosts] = await Promise.all([
+    mediaForPosts(db, ids),
+    mentionedIds(db, ids),
+    interactions(db, ids, viewer?.id ?? null),
     postsByIds(db, parentIds),
-    tagsFor(db, posts.map((p) => p.id)),
+    tagsFor(db, ids),
+    pinnedIds(db, ids),
+    pollsFor(db, ids),
+    pollChoices(db, viewer?.id, ids),
+    cardsFor(db, [...links.values()].filter((l): l is string => l !== null)),
+    followedAmong(db, viewer, authorIds),
+    nested ? Promise.resolve(new Map<string, Post>()) : quotedPostsFor(ctx, posts),
   ]);
   const people = await accountsByIds(db, [
-    ...posts.map((p) => p.accountId),
+    ...authorIds,
     ...[...mentioned.values()].flat(),
     ...[...parents.values()].map((p) => p.accountId),
   ]);
-  const [pins, polls, choices] = await Promise.all([
-    pinnedIds(db, posts.map((p) => p.id)),
-    pollsFor(db, posts.map((p) => p.id)),
-    pollChoices(db, viewer?.id, posts.map((p) => p.id)),
-  ]);
   // Quoted posts palm holds, shown inside the quote (one level deep).
-  const quotedPosts = new Map<string, Post>();
-  for (const p of posts) {
-    if (!p.quoteOf || quotedPosts.has(p.quoteOf)) continue;
-    const quoted = await postByUri(db, p.quoteOf, [ctx.domain.domain]);
-    if (quoted && (quoted.visibility === "public" || quoted.visibility === "unlisted")) quotedPosts.set(p.quoteOf, quoted);
-  }
-  const quotedStatuses: { id: string }[] = quotedPosts.size && !nested ? ((await renderStatuses(ctx, [...quotedPosts.values()], viewer, true)) as { id: string }[]) : [];
+  const quotedRender: Promise<{ id: string }[]> = quotedPosts.size
+    ? (renderStatuses(ctx, [...quotedPosts.values()], viewer, true) as Promise<unknown> as Promise<{ id: string }[]>)
+    : Promise.resolve([]);
+  const [statsFor, quotedStatuses]: [Map<number, AccountStats>, { id: string }[]] = await Promise.all([
+    accountStatsMany(ctx, authorIds.flatMap((id) => people.get(id) ?? [])),
+    quotedRender,
+  ]);
   const quotedById = new Map<string, unknown>(quotedStatuses.map((s) => [s.id, s]));
-  const links = new Map(posts.map((p) => [p.id, previewLink(p)]));
-  const cards = await cardsFor(db, [...links.values()].filter((l): l is string => l !== null));
-  const followed = await followedAmong(db, viewer, [...new Set(posts.map((p) => p.accountId))]);
-  const statsFor = await accountStatsMany(
-    ctx,
-    [...new Set(posts.map((p) => p.accountId))].flatMap((id) => people.get(id) ?? []),
-  );
 
   return posts.flatMap((post) => {
     const author = people.get(post.accountId);
@@ -383,6 +391,30 @@ async function renderStatuses(ctx: RequestContext, posts: Post[], viewer: Accoun
       },
     ];
   });
+}
+
+/** The public or unlisted posts palm holds that these posts quote, by the quoted post's ID, in two queries. */
+async function quotedPostsFor(ctx: RequestContext, posts: Post[]): Promise<Map<string, Post>> {
+  const db = ctx.bindings.DB;
+  const uris = [...new Set(posts.flatMap((p) => (p.quoteOf ? [p.quoteOf] : [])))];
+  if (!uris.length) return new Map();
+  const byApId = await postIdsByApIds(db, uris);
+  // Posts here have no ap_id: their ID is in their URL.
+  const idOf = (uri: string) => {
+    const found = byApId.get(uri);
+    if (found !== undefined) return found;
+    const url = new URL(uri);
+    const local = url.host === ctx.domain.domain ? /^\/objects\/(\d+)$/.exec(url.pathname) : null;
+    return local ? Number(local[1]) : undefined;
+  };
+  const idByUri = new Map(uris.flatMap((u) => { const id = idOf(u); return id === undefined ? [] : [[u, id] as const]; }));
+  const found = await postsByIds(db, [...idByUri.values()]);
+  const out = new Map<string, Post>();
+  for (const [uri, id] of idByUri) {
+    const post = found.get(id);
+    if (post && (post.visibility === "public" || post.visibility === "unlisted")) out.set(uri, post);
+  }
+  return out;
 }
 
 /** Which of `authorIds` the viewer follows. */
