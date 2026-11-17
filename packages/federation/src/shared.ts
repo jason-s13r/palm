@@ -11,6 +11,7 @@ import type { Activity, Recipient } from "@fedify/fedify/vocab";
 import { type RequestContext } from "@palm/core";
 import { communityKeys, type Account, type Community } from "@palm/db";
 import { D1KvStore } from "./kv.ts";
+import { signRefusedFetches } from "./signed-fetch.ts";
 import { CloudflareMessageQueue, type FederationName } from "./queue.ts";
 
 /**
@@ -52,7 +53,11 @@ export function federationsFor(bindings: RequestContext["bindings"]): Promise<Fe
         : {}),
     });
     found = Promise.all([peopleBuilder.build(options("people")), communitiesBuilder.build(options("communities"))]).then(
-      ([people, communities]) => ({ people, communities }),
+      ([people, communities]) => {
+        signRefusedFetches(people);
+        signRefusedFetches(communities);
+        return { people, communities };
+      },
     );
     built.set(bindings.DB, found);
   }
