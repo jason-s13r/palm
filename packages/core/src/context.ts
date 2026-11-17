@@ -95,7 +95,9 @@ export type FederationTask =
   /** A local account was deleted: its followers are sent a Delete of it. */
   | { kind: "account_deleted"; accountId: number }
   /** Fetches a remote community's recent posts after the first local subscription. */
-  | { kind: "backfill"; communityId: number };
+  | { kind: "backfill"; communityId: number }
+  /** One post of a community's backfill, in a job of its own. */
+  | { kind: "backfill_post"; communityId: number; url: string };
 
 /**
  * ActivityPub IDs. These are permanent once another server has seen them, so

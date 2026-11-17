@@ -477,12 +477,20 @@ export async function searchTags(db: D1Database, prefix: string, limit = 10): Pr
  * Claims a remote thread for refreshing: true if nobody has refreshed it in
  * the last `ttlSeconds`, and marks it refreshed now.
  */
-export async function claimThreadRefresh(db: D1Database, postId: number, ttlSeconds: number): Promise<boolean> {
+export async function claimThreadRefresh(db: D1Database, postId: number, ttlSeconds: number, leaseSeconds = 60): Promise<boolean> {
+  // Claimed for `leaseSeconds` only: a fetch cut off part way (Workers stops
+  // background work about 30 seconds after the response) is tried again on
+  // the next open after that, carrying on from the comments it stored.
   const result = await db
     .prepare("UPDATE posts SET thread_fetched_at = ? WHERE id = ? AND (thread_fetched_at IS NULL OR thread_fetched_at < ?)")
-    .bind(now(), postId, now() - ttlSeconds)
+    .bind(now() - ttlSeconds + leaseSeconds, postId, now() - ttlSeconds)
     .run();
   return (result.meta.changes ?? 0) > 0;
+}
+
+/** A thread's fetch finished: it isn't fetched again for the full time. */
+export async function finishThreadRefresh(db: D1Database, postId: number): Promise<void> {
+  await db.prepare("UPDATE posts SET thread_fetched_at = ? WHERE id = ?").bind(now(), postId).run();
 }
 
 /** Several accounts' counts in one query: posts, followers here, following, and their last post. */
@@ -504,5 +512,20 @@ export async function accountCounts(
     .bind(...ids)
     .all<{ id: number; statuses: number; last_at: number | null; followers: number; following: number }>();
   for (const r of results) out.set(r.id, { statuses: r.statuses, followers: r.followers, following: r.following, lastStatusAt: r.last_at });
+  return out;
+}
+
+/** Which of these ActivityPub IDs palm holds, as post IDs: one query for a whole thread. */
+export async function postIdsByApIds(db: D1Database, apIds: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  // D1 binds at most 100 parameters a statement.
+  for (let i = 0; i < apIds.length; i += 90) {
+    const chunk = apIds.slice(i, i + 90);
+    const { results } = await db
+      .prepare(`SELECT id, ap_id FROM posts WHERE ap_id IN (${chunk.map(() => "?").join(", ")})`)
+      .bind(...chunk)
+      .all<{ id: number; ap_id: string }>();
+    for (const r of results) out.set(r.ap_id, r.id);
+  }
   return out;
 }

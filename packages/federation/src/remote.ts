@@ -32,6 +32,8 @@ import {
   setPostQuotePolicy,
   accountForLogin,
   claimThreadRefresh,
+  finishThreadRefresh,
+  postIdsByApIds,
   markOutboxFetched,
   postById,
   addMentions,
@@ -586,6 +588,18 @@ export async function backfillThread(fctx: Context<RequestContext>, postId: numb
   const root = await postById(db, postId);
   if (!root?.apId || root.rootId !== null) return;
   if (!(await claimThreadRefresh(db, root.id, THREAD_TTL_SECONDS))) return;
+  try {
+    await fetchThread(fctx, root as Post & { apId: string });
+  } finally {
+    // Counted as fetched once it finishes or fails; a fetch cut off part way
+    // is tried again when its claim runs out.
+    await finishThreadRefresh(db, root.id);
+  }
+}
+
+async function fetchThread(fctx: Context<RequestContext>, root: Post & { apId: string }): Promise<void> {
+  const ctx = fctx.data;
+  const db = ctx.bindings.DB;
   const origin = new URL(root.apId);
   if (await isBlockedHost(db, origin.host)) return;
 
@@ -599,13 +613,16 @@ export async function backfillThread(fctx: Context<RequestContext>, postId: numb
     // Parents first: Lemmy's path is "0.<ancestors>.<id>", so sort by depth.
     const comments = (data?.comments ?? []).sort((a, b) => a.comment.path.split(".").length - b.comment.path.split(".").length);
     const apIdByOriginId = new Map(comments.map((c) => [String(c.comment.id), c.comment.ap_id]));
+    // What's already here, in one query rather than two per comment.
+    const known = await postIdsByApIds(db, [root.apId, ...comments.map((c) => c.comment.ap_id)]);
+    known.set(root.apId, root.id);
     for (const view of comments) {
       const c = view.comment;
-      if (c.deleted || c.removed || (await postByUri(db, c.ap_id, localDomains(ctx)))) continue;
+      if (c.deleted || c.removed || known.has(c.ap_id)) continue;
       const ids = c.path.split(".");
       const parentApId = ids.length > 2 ? apIdByOriginId.get(ids[ids.length - 2]!) : root.apId;
-      const parent = parentApId ? await postByUri(db, parentApId, localDomains(ctx)) : null;
-      if (!parent) continue;
+      const parentId = parentApId ? known.get(parentApId) : undefined;
+      if (parentId === undefined) continue;
       const author = await placeholderAccount(db, {
         apId: view.creator.actor_id,
         username: view.creator.name,
@@ -623,13 +640,16 @@ export async function backfillThread(fctx: Context<RequestContext>, postId: numb
         inReplyTo: parentApId!,
         communityId: root.communityId,
         rootId: root.id,
-        parentId: parent.id,
+        parentId,
         apId: c.ap_id,
         url: c.ap_id,
         createdAt: seconds(c.published),
         ...(c.updated ? { updatedAt: seconds(c.updated) } : {}),
       }).catch(() => null);
-      if (created) await vote(db, created.id, author.id, 1);
+      if (created) {
+        known.set(c.ap_id, created.id);
+        await vote(db, created.id, author.id, 1);
+      }
     }
     return;
   }
@@ -639,12 +659,14 @@ export async function backfillThread(fctx: Context<RequestContext>, postId: numb
     const statuses = data?.descendants ?? [];
     const uriByOriginId = new Map(statuses.map((s) => [s.id, s.uri]));
     uriByOriginId.set(mastodonStatus[1]!, root.apId);
+    const known = await postIdsByApIds(db, [root.apId, ...statuses.map((s) => s.uri)]);
+    known.set(root.apId, root.id);
     for (const status of statuses.slice(0, THREAD_LIMIT)) {
       if (status.visibility !== "public" && status.visibility !== "unlisted") continue;
-      if (await postByUri(db, status.uri, localDomains(ctx))) continue;
+      if (known.has(status.uri)) continue;
       const parentUri = status.in_reply_to_id ? uriByOriginId.get(status.in_reply_to_id) : null;
-      const parent = parentUri ? await postByUri(db, parentUri, localDomains(ctx)) : null;
-      if (!parent) continue;
+      const parentId = parentUri ? known.get(parentUri) : undefined;
+      if (parentId === undefined) continue;
       const author = await placeholderAccount(db, {
         apId: status.account.uri ?? status.account.url,
         username: status.account.username,
@@ -652,7 +674,7 @@ export async function backfillThread(fctx: Context<RequestContext>, postId: numb
         avatarUrl: status.account.avatar || null,
       });
       const html = sanitizeHtml(status.content);
-      await createPost(db, {
+      const created = await createPost(db, {
         accountId: author.id,
         contentSource: htmlToText(html),
         contentHtml: html,
@@ -661,7 +683,7 @@ export async function backfillThread(fctx: Context<RequestContext>, postId: numb
         visibility: status.visibility,
         language: null,
         inReplyTo: parentUri!,
-        parentId: parent.id,
+        parentId,
         // In a Lemmy community's thread, a reply is a comment there too.
         ...(root.communityId ? { communityId: root.communityId, rootId: root.id } : {}),
         apId: status.uri,
@@ -669,6 +691,7 @@ export async function backfillThread(fctx: Context<RequestContext>, postId: numb
         createdAt: seconds(status.created_at),
         ...(status.edited_at ? { updatedAt: seconds(status.edited_at) } : {}),
       }).catch(() => null);
+      if (created) known.set(status.uri, created.id);
     }
     return;
   }

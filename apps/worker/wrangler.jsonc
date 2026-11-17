@@ -24,7 +24,8 @@
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PalmStreaming"] }],
   "queues": {
     "producers": [{ "binding": "QUEUE", "queue": "palm-staging" }],
-    "consumers": [{ "queue": "palm-staging", "max_batch_size": 5, "max_retries": 5 }]
+    // One message per run: each queue job then has the free plan's CPU time to itself.
+    "consumers": [{ "queue": "palm-staging", "max_batch_size": 1, "max_retries": 5 }]
   },
   // Staging lives on a throwaway host under 1j.nz. Anything staging mints is
   // disposable; 1j.nz itself is not.

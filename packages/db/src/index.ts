@@ -49,6 +49,8 @@ export type { Follower, KeyAlgorithm, StoredKeyPair } from "./federation.ts";
 export {
   addTags,
   claimThreadRefresh,
+  postIdsByApIds,
+  finishThreadRefresh,
   postsTagged,
   searchTags,
   tagsFor,

@@ -28,7 +28,8 @@
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PalmStreaming"] }],
   "queues": {
     "producers": [{ "binding": "QUEUE", "queue": "<queue-name>" }],
-    "consumers": [{ "queue": "<queue-name>", "max_batch_size": 5, "max_retries": 5 }]
+    // One message per run: each queue job then has the free plan's CPU time to itself.
+    "consumers": [{ "queue": "<queue-name>", "max_batch_size": 1, "max_retries": 5 }]
   },
   // The domain, whole: palm serves its own paths and sends browsers on.
   "routes": [

@@ -346,21 +346,22 @@ export async function runTask(ctx: RequestContext, task: FederationTask): Promis
       return;
     }
     case "backfill": {
+      // A community's recent posts when someone here first subscribes. Each
+      // post is stored in a job of its own: storing 25 in one job took over
+      // 700 ms of CPU. This job only reads their IDs from the outbox.
       const community = await communityById(db, task.communityId);
       if (!community?.outboxUrl) return;
-      const outbox = await people.lookupObject(community.outboxUrl).catch(() => null);
-      if (!outbox || !("getFirst" in outbox)) return;
-      let count = 0;
-      for await (const item of traverseCollection(outbox as Parameters<typeof traverseCollection>[0], {
-        documentLoader: people.documentLoader,
-        contextLoader: people.contextLoader,
-      })) {
-        if (++count > 25) break;
-        // Lemmy's outbox holds the community's Announces of Creates.
-        const inner = item instanceof Announce ? await item.getObject({ crossOrigin: "trust" }).catch(() => null) : item;
-        const object = inner instanceof Create ? await inner.getObject({ crossOrigin: "trust" }).catch(() => null) : null;
-        if (object) await storeRemotePost(people, object, { community }).catch(() => null);
-      }
+      const urls = await outboxPostIds(people, community.outboxUrl, BACKFILL_POSTS);
+      for (const url of urls) ctx.activities.enqueue({ kind: "backfill_post", communityId: community.id, url });
+      return;
+    }
+    case "backfill_post": {
+      const community = await communityById(db, task.communityId);
+      if (!community || (await postByUri(db, task.url, localDomains(ctx)))) return;
+      let object = await people.lookupObject(task.url).catch(() => null);
+      // An outbox that names its Creates, not the posts in them.
+      if (object instanceof Create) object = await object.getObject({ crossOrigin: "trust" }).catch(() => null);
+      if (object) await storeRemotePost(people, object, { community }).catch(() => null);
       return;
     }
   }
@@ -463,4 +464,36 @@ async function requestQuote(ctx: RequestContext, people: Context<RequestContext>
     to,
     new QuoteRequest({ id: quoteRequestId(id), actor: actorUri(author), object: quotedId, instrument: object }),
   );
+}
+
+/** How many of a community's recent posts a first subscription brings in. */
+const BACKFILL_POSTS = 25;
+
+/**
+ * The IDs of the newest posts in an outbox. The documents are read as they
+ * come, without Fedify's full parsing, which for Lemmy's outbox (Announces
+ * of Creates, each with its post inside) costs more than storing the posts.
+ */
+async function outboxPostIds(people: Context<RequestContext>, url: string, limit: number): Promise<string[]> {
+  const load = async (u: string) => ((await people.documentLoader(u).catch(() => null))?.document ?? null) as Record<string, unknown> | null;
+  const idOf = (value: unknown): string | null =>
+    typeof value === "string" ? value : value && typeof value === "object" && typeof (value as { id?: unknown }).id === "string" ? (value as { id: string }).id : null;
+  const objectOf = (value: unknown): unknown => (value && typeof value === "object" ? (value as { object?: unknown }).object : null);
+  const typeOf = (value: unknown): unknown => (value && typeof value === "object" ? (value as { type?: unknown }).type : null);
+
+  let page = await load(url);
+  const first = page?.first;
+  if (page && !page.orderedItems && !page.items && first) page = typeof first === "string" ? await load(first) : (first as Record<string, unknown>);
+  const items = (page?.orderedItems ?? page?.items ?? []) as unknown[];
+  const ids: string[] = [];
+  for (const item of Array.isArray(items) ? items : []) {
+    // Lemmy: Announce of a Create of the post; others: a Create, or the post.
+    let inner: unknown = item;
+    if (typeOf(inner) === "Announce") inner = objectOf(inner);
+    if (typeOf(inner) === "Create") inner = objectOf(inner);
+    const id = idOf(inner);
+    if (id && /^https:\/\//.test(id)) ids.push(id);
+    if (ids.length >= limit) break;
+  }
+  return ids;
 }
