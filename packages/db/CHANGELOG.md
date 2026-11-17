@@ -1,5 +1,18 @@
 # Changelog
 
+## db@0.3.0 (2026-11-17)
+
+### Features
+
+- quote permissions and approvals
+
+- !following and !local feeds; statuses leave Home unless subscribed
+
+### Fixes
+
+- keep values, not pending promises, between requests
+
+
 ## db@0.2.0 (2026-11-17)
 
 ### Features

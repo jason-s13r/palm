@@ -1,5 +1,16 @@
 # Changelog
 
+## adapter-lemmy@0.3.0 (2026-11-17)
+
+### Features
+
+- !following and !local feeds; statuses leave Home unless subscribed
+
+### Dependencies
+
+- db: 0.2.0 -> 0.3.0
+
+
 ## adapter-lemmy@0.2.0 (2026-11-17)
 
 ### Features

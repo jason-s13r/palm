@@ -1,5 +1,20 @@
 # Changelog
 
+## federation@0.3.0 (2026-11-17)
+
+### Features
+
+- quote permissions and approvals
+
+### Fixes
+
+- keep values, not pending promises, between requests
+
+### Dependencies
+
+- db: 0.2.0 -> 0.3.0
+
+
 ## federation@0.2.0 (2026-11-17)
 
 ### Features

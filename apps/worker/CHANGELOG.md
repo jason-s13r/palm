@@ -1,5 +1,25 @@
 # Changelog
 
+## worker@0.5.0 (2026-11-17)
+
+### Features
+
+- quote permissions and approvals
+
+- !following and !local feeds; statuses leave Home unless subscribed
+
+### Fixes
+
+- keep values, not pending promises, between requests
+
+### Dependencies
+
+- db: 0.2.0 -> 0.3.0
+- adapter-lemmy: 0.2.0 -> 0.3.0
+- adapter-mastodon: 0.2.0 -> 0.3.0
+- federation: 0.2.0 -> 0.3.0
+
+
 ## worker@0.4.0 (2026-11-17)
 
 ### Features

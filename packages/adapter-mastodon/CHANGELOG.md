@@ -1,5 +1,16 @@
 # Changelog
 
+## adapter-mastodon@0.3.0 (2026-11-17)
+
+### Features
+
+- quote permissions and approvals
+
+### Dependencies
+
+- db: 0.2.0 -> 0.3.0
+
+
 ## adapter-mastodon@0.2.0 (2026-11-17)
 
 ### Features
