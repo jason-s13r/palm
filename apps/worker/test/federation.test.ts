@@ -75,6 +75,12 @@ describe("federation", () => {
     expect((await post({ type: "Announce", actor: "https://elsewhere.test/c/x", object: like })).status).toBe(202);
     expect((await post({ type: "Undo", actor: "https://elsewhere.test/u/x", object: like })).status).toBe(202);
     expect((await post({ type: "Delete", actor: "https://elsewhere.test/u/y", object: "https://elsewhere.test/u/y" })).status).toBe(202);
+    // A community nobody here subscribes to anymore: whatever it relays.
+    await db
+      .prepare("INSERT INTO communities (domain, name, title, created_at, ap_id) VALUES ('gone.test', 'old', 'old', 0, 'https://gone.test/c/old')")
+      .run();
+    const create = { type: "Create", actor: "https://gone.test/u/z", object: { type: "Page", id: "https://gone.test/post/9", name: "hi" } };
+    expect((await post({ type: "Announce", actor: "https://gone.test/c/old", object: create })).status).toBe(202);
     // A vote on a local post still goes through the signature check.
     expect((await post({ ...like, object: "https://palm.test/objects/1" })).status).toBeGreaterThanOrEqual(400);
   });

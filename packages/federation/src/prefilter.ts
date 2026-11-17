@@ -12,6 +12,9 @@ import { placeholderAccount } from "./remote.ts";
  *   without Fedify parsing it or fetching the voter's profile: a stranger
  *   voting gets a placeholder account, filled in if they ever matter.
  *
+ * - Anything a community relays (Announce) when nobody here subscribes to it
+ *   is dropped: its server may have missed an unsubscribe.
+ *
  * Everything else, including votes on local posts (which notify their
  * author), goes through Fedify as before.
  */
@@ -92,6 +95,28 @@ export async function triage(
     activity = JSON.parse(body);
   } catch {
     return "fedify";
+  }
+  // A community nobody here subscribes to anymore, still relaying to palm
+  // (its server missed the unsubscribe): everything it sends is dropped,
+  // before it writes posts, comments and votes nobody here would see.
+  if (typeOf(activity) === "Announce") {
+    const from = idOf((activity as Json).actor);
+    let fromHost: string | null = null;
+    try {
+      fromHost = from ? new URL(from).host.toLowerCase() : null;
+    } catch {
+      fromHost = null;
+    }
+    if (from && fromHost && !localHosts.includes(fromHost)) {
+      const row = await db
+        .prepare(
+          `SELECT EXISTS (SELECT 1 FROM communities WHERE ap_id = ?1) AS known,
+                  EXISTS (SELECT 1 FROM community_subscriptions s JOIN communities c ON c.id = s.community_id WHERE c.ap_id = ?1) AS subscribed`,
+        )
+        .bind(from)
+        .first<{ known: number; subscribed: number }>();
+      if (row?.known && !row.subscribed) return "drop";
+    }
   }
   const act = actOf(activity);
   if (!act) return "fedify";
