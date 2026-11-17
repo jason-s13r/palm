@@ -10,26 +10,25 @@ interface Factories {
   authenticatedDocumentLoaderFactory: AuthFactory;
 }
 
-const signers = new WeakMap<D1Database, Map<string, Promise<{ keyId: URL; privateKey: CryptoKey } | null>>>();
+type Signer = { keyId: URL; privateKey: CryptoKey };
+// Found signers, kept between requests as values: a pending promise is tied to
+// the request that started it.
+const signers = new WeakMap<D1Database, Map<string, Signer>>();
 
 /** The deployment's first admin signs fetches for servers that want them signed. */
-function signerFor(db: D1Database, domain: string) {
+async function signerFor(db: D1Database, domain: string): Promise<Signer | null> {
   let byDomain = signers.get(db);
   if (!byDomain) signers.set(db, (byDomain = new Map()));
-  let found = byDomain.get(domain);
-  if (!found) {
-    found = (async () => {
-      for (const admin of await admins(db, domain)) {
-        const rsa = (await actorKeys(db, admin.id)).find((k) => k.algorithm === "RSASSA-PKCS1-v1_5");
-        if (rsa) return { keyId: new URL(`${urls.user(domain, admin.username)}#main-key`), privateKey: await importJwk(rsa.privateJwk, "private") };
-      }
-      // None yet: look again next time rather than caching the miss.
-      byDomain!.delete(domain);
-      return null;
-    })();
-    byDomain.set(domain, found);
+  const known = byDomain.get(domain);
+  if (known) return known;
+  for (const admin of await admins(db, domain)) {
+    const rsa = (await actorKeys(db, admin.id)).find((k) => k.algorithm === "RSASSA-PKCS1-v1_5");
+    if (!rsa) continue;
+    const signer = { keyId: new URL(`${urls.user(domain, admin.username)}#main-key`), privateKey: await importJwk(rsa.privateJwk, "private") };
+    byDomain.set(domain, signer);
+    return signer;
   }
-  return found;
+  return null;
 }
 
 const refused = (error: unknown) => {

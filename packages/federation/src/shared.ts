@@ -32,35 +32,33 @@ export interface Federations {
   communities: Federation<RequestContext>;
 }
 
-// One pair per database per isolate: building them is the costly part.
-const built = new WeakMap<D1Database, Promise<Federations>>();
+// One pair per database per isolate: building them is the costly part. The
+// built pair is kept, not a pending promise, which is tied to its request.
+const built = new WeakMap<D1Database, Federations>();
 
-export function federationsFor(bindings: RequestContext["bindings"]): Promise<Federations> {
-  let found = built.get(bindings.DB);
-  if (!found) {
-    const options = (name: FederationName) => ({
-      kv: new D1KvStore(bindings.DB),
-      // With a queue, outgoing deliveries become queue jobs, which the
-      // Worker's queue handler runs (see processQueueMessage). Received
-      // activities are handled in the request: a busy Lemmy community sends
-      // over a thousand an hour, and each queued one costs three of the free
-      // plan's 10,000 daily queue operations.
-      ...(bindings.QUEUE
-        ? (() => {
-            const queue = new CloudflareMessageQueue(bindings.QUEUE, name);
-            return { queue: { outbox: queue, fanout: queue }, manuallyStartQueue: true };
-          })()
-        : {}),
-    });
-    found = Promise.all([peopleBuilder.build(options("people")), communitiesBuilder.build(options("communities"))]).then(
-      ([people, communities]) => {
-        signRefusedFetches(people);
-        signRefusedFetches(communities);
-        return { people, communities };
-      },
-    );
-    built.set(bindings.DB, found);
-  }
+export async function federationsFor(bindings: RequestContext["bindings"]): Promise<Federations> {
+  const known = built.get(bindings.DB);
+  if (known) return known;
+  const options = (name: FederationName) => ({
+    kv: new D1KvStore(bindings.DB),
+    // With a queue, outgoing deliveries become queue jobs, which the
+    // Worker's queue handler runs (see processQueueMessage). Received
+    // activities are handled in the request: a busy Lemmy community sends
+    // over a thousand an hour, and each queued one costs three of the free
+    // plan's 10,000 daily queue operations.
+    ...(bindings.QUEUE
+      ? (() => {
+          const queue = new CloudflareMessageQueue(bindings.QUEUE, name);
+          return { queue: { outbox: queue, fanout: queue }, manuallyStartQueue: true };
+        })()
+      : {}),
+  });
+  const [people, communities] = await Promise.all([peopleBuilder.build(options("people")), communitiesBuilder.build(options("communities"))]);
+  signRefusedFetches(people);
+  signRefusedFetches(communities);
+  // Two requests arriving together may both build; the first one kept wins.
+  const found = built.get(bindings.DB) ?? { people, communities };
+  built.set(bindings.DB, found);
   return found;
 }
 
