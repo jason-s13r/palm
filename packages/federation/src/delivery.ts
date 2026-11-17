@@ -9,6 +9,7 @@ import {
   Flag,
   Follow,
   Like,
+  Move,
   Note,
   Reject,
   PUBLIC_COLLECTION,
@@ -20,6 +21,8 @@ import {
 import type { ActivitySink, FederationTask, RequestContext, Resolved } from "@palm/core";
 import {
   pollChoices,
+  clearFollowers,
+  markMoveSent,
   reportById,
   followState,
   accountById,
@@ -292,6 +295,36 @@ export async function runTask(ctx: RequestContext, task: FederationTask): Promis
           { preferSharedInbox: true },
         );
       }
+      return;
+    }
+    case "moved": {
+      const account = await accountById(db, task.accountId);
+      if (!account || !isLocal(account) || !account.movedTo) return;
+      const to = await allowed(db, (await followers(db, account.id)).map(recipient));
+      if (to.length) {
+        await send(people,
+          await personKeys(people, account),
+          to,
+          new Move({ id: new URL(`${actorUri(account).href}#moves/${Date.now()}`), actor: actorUri(account), object: actorUri(account), target: new URL(account.movedTo), tos: [followersUri(account)] }),
+          { preferSharedInbox: true },
+        );
+      }
+      await markMoveSent(db, account.id);
+      return;
+    }
+    case "account_deleted": {
+      const account = await accountById(db, task.accountId);
+      if (!account || !isLocal(account) || !account.deleted) return;
+      const to = await allowed(db, (await followers(db, account.id)).map(recipient));
+      if (to.length) {
+        await send(people,
+          await personKeys(people, account),
+          to,
+          new Delete({ id: new URL(`${actorUri(account).href}#delete`), actor: actorUri(account), object: actorUri(account), tos: [PUBLIC_COLLECTION] }),
+          { preferSharedInbox: true },
+        );
+      }
+      await clearFollowers(db, account.id);
       return;
     }
     case "backfill": {

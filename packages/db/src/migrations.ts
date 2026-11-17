@@ -661,6 +661,19 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
 CREATE INDEX IF NOT EXISTS push_subscriptions_account ON push_subscriptions (account_id)
 `,
   },
+  {
+    version: 21,
+    name: "account moves and deletion",
+    sql: `
+ALTER TABLE accounts ADD COLUMN moved_to TEXT
+;
+ALTER TABLE accounts ADD COLUMN also_known_as TEXT
+;
+ALTER TABLE accounts ADD COLUMN move_sent_at INTEGER
+;
+ALTER TABLE accounts ADD COLUMN deleted_at INTEGER
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

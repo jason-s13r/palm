@@ -12,13 +12,20 @@ import {
   Follow,
   Group,
   Like,
+  Move,
   Reject,
   Undo,
   Update,
 } from "@fedify/fedify/vocab";
-import type { RequestContext } from "@palm/core";
+import { urls, type RequestContext } from "@palm/core";
 import {
   addRemotePollVote,
+  accountById,
+  follow as followAccount,
+  followState,
+  forgetRemoteAccount,
+  localFollowersOf,
+  setMovedTo,
   pollsFor,
   createReport,
   acceptFollow,
@@ -184,8 +191,13 @@ async function onUpdate(ctx: Ctx, update: Update, via: Via): Promise<void> {
 async function onDelete(ctx: Ctx, del: Delete, via: Via): Promise<void> {
   const objectId = del.objectId;
   if (!objectId || !del.actorId) return;
-  // An account deleting itself: palm keeps the row (posts point at it) and moves on.
-  if (objectId.href === del.actorId.href) return;
+  // An account deleting itself: palm keeps the row (posts point at it) and
+  // drops its posts and follows.
+  if (objectId.href === del.actorId.href) {
+    const account = await accountByApId(ctx.data.bindings.DB, objectId.href);
+    if (account?.apId) await forgetRemoteAccount(ctx.data.bindings.DB, account.id, account.apId);
+    return;
+  }
   const post = await postFor(ctx, objectId);
   if (!post?.apId) return;
   const actor = await ensureAccount(ctx, del.actorId);
@@ -293,6 +305,35 @@ const gated =
     await handler(ctx, activity);
   };
 
+/**
+ * A remote account moved. If the new account names the old one as an alias,
+ * local followers of the old one follow the new one instead, as Mastodon does.
+ */
+async function onMove(ctx: Ctx, move: Move): Promise<void> {
+  const old = move.actorId;
+  const targetId = move.targetId;
+  if (!old || !targetId || move.objectId?.href !== old.href) return;
+  const db = ctx.data.bindings.DB;
+  const from = await accountByApId(db, old.href);
+  if (!from) return;
+  const target = await ctx.lookupObject(targetId).catch(() => null);
+  const aliases = target && "aliasIds" in target ? (target.aliasIds as URL[]) : [];
+  if (!target || !aliases.some((u) => u.href === old.href)) return;
+  const moved = await ensureActor(ctx, target);
+  if (!moved || !("account" in moved) || moved.account.id === from.id) return;
+  const to = moved.account;
+  await setMovedTo(db, from.id, targetId.href);
+  for (const id of await localFollowersOf(db, from.id)) {
+    const local = await accountById(db, id);
+    if (!local) continue;
+    await unfollow(db, id, from.id);
+    if (await followState(db, id, to.id)) continue;
+    const followApId = `${urls.user(local.domain, local.username)}#follows/${to.id}-${Date.now()}`;
+    await followAccount(db, id, to.id, to.apId || to.locked ? { followApId } : undefined);
+    ctx.data.activities.enqueue({ kind: "followed", accountId: id, targetId: to.id, followApId, undo: false });
+  }
+}
+
 /** Registers palm's inbox listeners on a federation builder. */
 export function registerInbox(
   builder: FederationBuilder<RequestContext>,
@@ -311,7 +352,8 @@ export function registerInbox(
     .on(Dislike, gated<Dislike>((ctx, dislike) => dispatch(ctx, dislike, direct)))
     .on(Undo, gated<Undo>((ctx, undo) => dispatch(ctx, undo, direct)))
     .on(Announce, gated<Announce>((ctx, announce) => onAnnounce(ctx, announce)))
-    .on(Flag, gated<Flag>((ctx, flag) => onFlag(ctx, flag)));
+    .on(Flag, gated<Flag>((ctx, flag) => onFlag(ctx, flag)))
+    .on(Move, gated<Move>((ctx, move) => onMove(ctx, move)));
 }
 
 /**

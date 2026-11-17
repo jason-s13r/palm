@@ -88,6 +88,10 @@ export type FederationTask =
   | { kind: "follow_answered"; accountId: number; followerId: number; followId: string; accept: boolean }
   | { kind: "subscribed"; accountId: number; communityId: number; followApId: string; undo: boolean }
   | { kind: "profile_updated"; accountId: number }
+  /** A local account moved elsewhere: its followers are sent a Move. */
+  | { kind: "moved"; accountId: number }
+  /** A local account was deleted: its followers are sent a Delete of it. */
+  | { kind: "account_deleted"; accountId: number }
   /** Fetches a remote community's recent posts after the first local subscription. */
   | { kind: "backfill"; communityId: number };
 

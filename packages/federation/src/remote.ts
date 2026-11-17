@@ -155,6 +155,8 @@ async function recordActor(ctx: RequestContext, actor: APObject): Promise<{ acco
       followersCount,
       followingCount,
       statusesCount,
+      movedTo: "successorId" in a ? (a.successorId?.href ?? null) : null,
+      alsoKnownAs: "aliasIds" in a ? a.aliasIds.map((u) => u.href) : [],
     }),
   };
 }

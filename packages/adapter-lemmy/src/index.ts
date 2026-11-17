@@ -53,6 +53,7 @@ import type {
   SearchResponse,
   SuccessResponse,
 } from "lemmy-js-client";
+import { accountRoutes } from "./account.ts";
 import { blockRoutes, blocksOf } from "./blocks.ts";
 import { messageRoutes } from "./messages.ts";
 import { moderationRoutes } from "./moderation.ts";
@@ -336,6 +337,7 @@ async function personNamed(c: C, name: string): Promise<Account | null> {
 }
 
 app.route("/", blockRoutes);
+app.route("/", accountRoutes);
 app.route("/", messageRoutes);
 app.route("/", moderationRoutes);
 app.route("/", threadRoutes);

@@ -7,6 +7,10 @@
  *   pnpm palm user keys <username> --domain <domain> --db <d1-name>
  *   pnpm palm invite create --domain <domain> --db <d1-name> [--count <n>]
  *   pnpm palm community create <name> --domain <domain> --db <d1-name> [--title <title>] [--description <text>]
+ *   pnpm palm user alias <username> [<actor-id>...]
+ *   pnpm palm user move <username> <actor-id>
+ *   pnpm palm user delete <username> [--keep-posts]
+ *   pnpm palm user export <username> [--out <file>]
  *
  * Signing keys (RSA for HTTP Signatures, Ed25519 for integrity proofs) are
  * generated here rather than in the Worker, because key generation is too slow
@@ -21,7 +25,7 @@
  * jason --admin` is enough there. Flags win over both.
  */
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { parseArgs } from "node:util";
 import { hashPassword } from "@palm/auth";
@@ -30,6 +34,10 @@ const USAGE = [
   "Usage:",
   "  pnpm palm user create <username> --domain <domain> [--db <d1-name>] [--admin] [--password <pw>] [--local]",
   "  pnpm palm user keys <username> --domain <domain> [--db <d1-name>] [--local]",
+  "  pnpm palm user alias <username> [<actor-id>...] [--local]   (the accounts this one moved from; none clears)",
+  "  pnpm palm user move <username> <actor-id> [--local]          (followers are moved on the next cron run)",
+  "  pnpm palm user delete <username> [--keep-posts] [--local]",
+  "  pnpm palm user export <username> [--out <file>] [--local]",
   "  pnpm palm community create <name> --domain <domain> [--db <d1-name>] [--title <title>] [--description <text>] [--local]",
   "  pnpm palm invite create --domain <domain> [--db <d1-name>] [--count <n>] [--local]",
   "  pnpm palm keys stock [--db <d1-name>] [--count <n>] [--local]   (keys for communities made in apps)",
@@ -139,6 +147,94 @@ async function userKeys(args: string[]): Promise<void> {
   if (values.db) console.log(`\nNew signing keys for @${username}@${values.domain}.`);
 }
 
+const accountSql = (domain: string, username: string) =>
+  `(SELECT id FROM accounts WHERE domain = ${sqlString(domain)} AND username = ${sqlString(username)} AND ap_id IS NULL)`;
+
+/** Arguments of the account commands: a username, then their own options. */
+function userArgs(args: string[]) {
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+    options: {
+      domain: { type: "string" },
+      db: { type: "string" },
+      local: { type: "boolean", default: false },
+      "keep-posts": { type: "boolean", default: false },
+      out: { type: "string" },
+    },
+  });
+  const username = positionals[0]?.toLowerCase();
+  if (!username || !values.domain) throw new Error(USAGE);
+  return { values, rest: positionals.slice(1), username, domain: values.domain, db: values.db, local: values.local === true };
+}
+
+const actorId = (value: string) => {
+  const url = new URL(value);
+  if (url.protocol !== "https:") throw new Error(`Not an https actor ID: ${value}`);
+  return url.href;
+};
+
+/** The other accounts this one says are also it: a move here from elsewhere needs it. */
+function userAlias(args: string[]): void {
+  const { rest, username, domain, db, local } = userArgs(args);
+  const ids = rest.map(actorId);
+  run(db, local, `UPDATE accounts SET also_known_as = ${ids.length ? sqlString(JSON.stringify(ids)) : "NULL"} WHERE id = ${accountSql(domain, username)};`);
+  if (db) console.log(ids.length ? `\n@${username}@${domain} is also: ${ids.join(", ")}` : `\nCleared @${username}@${domain}'s aliases.`);
+}
+
+/** Moves an account's followers to another account, which must list this one as an alias. */
+function userMove(args: string[]): void {
+  const { rest, username, domain, db, local } = userArgs(args);
+  if (!rest[0]) throw new Error(USAGE);
+  const target = actorId(rest[0]);
+  run(db, local, `UPDATE accounts SET moved_to = ${sqlString(target)}, move_sent_at = NULL WHERE id = ${accountSql(domain, username)};`);
+  if (db) console.log(`\n@${username}@${domain} moves to ${target}; its followers are told on the next cron run.`);
+}
+
+/** Deletes an account. Its name stays taken; other servers are told on the next cron run. */
+function userDelete(args: string[]): void {
+  const { values, username, domain, db, local } = userArgs(args);
+  const id = accountSql(domain, username);
+  const now = Math.floor(Date.now() / 1000);
+  const sql = [
+    `UPDATE accounts SET deleted_at = ${now}, banned_at = COALESCE(banned_at, ${now}), password_hash = NULL, display_name = NULL, bio = NULL, avatar_url = NULL, header_url = NULL WHERE id = ${id};`,
+    ...["sessions", "oauth_tokens", "oauth_codes", "push_subscriptions", "community_subscriptions", "notifications"].map((t) => `DELETE FROM ${t} WHERE account_id = ${id};`),
+    `DELETE FROM account_follows WHERE account_id = ${id} OR target_id = ${id};`,
+    ...(values["keep-posts"] ? [] : [`UPDATE posts SET deleted_at = ${now} WHERE account_id = ${id} AND deleted_at IS NULL;`]),
+  ].join("\n");
+  run(db, local, sql);
+  if (db) console.log(`\nDeleted @${username}@${domain}.`);
+}
+
+/** An account's profile, posts, follows and followers, as JSON. */
+function userExport(args: string[]): void {
+  const { values, username, domain, db, local } = userArgs(args);
+  if (!db) throw new Error("export needs --db");
+  const id = accountSql(domain, username);
+  const query = (sql: string) => {
+    const out = execFileSync("npx", ["wrangler", "d1", "execute", db, local ? "--local" : "--remote", "--json", "--command", sql], { encoding: "utf8" });
+    return (JSON.parse(out) as { results: Record<string, unknown>[] }[])[0]?.results ?? [];
+  };
+  const data = {
+    exported_at: new Date().toISOString(),
+    account: query(`SELECT username, domain, display_name, bio, avatar_url, header_url, created_at, also_known_as, moved_to FROM accounts WHERE id = ${id}`)[0] ?? null,
+    posts: query(
+      `SELECT id, title, content_source, content_html, link_url, visibility, parent_id, community_id, created_at, updated_at FROM posts WHERE account_id = ${id} AND deleted_at IS NULL ORDER BY id`,
+    ),
+    following: query(
+      `SELECT COALESCE(a.ap_id, 'https://' || a.domain || '/users/' || lower(a.username)) AS id FROM account_follows f JOIN accounts a ON a.id = f.target_id WHERE f.account_id = ${id}`,
+    ).map((r) => r.id),
+    followers: query(`SELECT actor_id AS id FROM followers WHERE account_id = ${id} AND pending = 0`).map((r) => r.id),
+    communities: query(
+      `SELECT COALESCE(c.ap_id, 'https://' || c.domain || '/c/' || lower(c.name)) AS id FROM community_subscriptions s JOIN communities c ON c.id = s.community_id WHERE s.account_id = ${id}`,
+    ).map((r) => r.id),
+  };
+  if (!data.account) throw new Error(`No local account @${username}@${domain}.`);
+  const file = typeof values.out === "string" ? values.out : `${username}@${domain}.json`;
+  writeFileSync(file, JSON.stringify(data, null, 2));
+  console.log(`Wrote ${data.posts.length} posts and ${data.following.length} follows to ${file}.`);
+}
+
 async function communityCreate(args: string[]): Promise<void> {
   const { values, positionals } = parseArgs({
     args,
@@ -232,6 +328,10 @@ async function main(argv: string[]): Promise<void> {
   const rest = withDefaults(given);
   if (group === "user" && command === "create") return userCreate(rest);
   if (group === "user" && command === "keys") return userKeys(rest);
+  if (group === "user" && command === "alias") return userAlias(rest);
+  if (group === "user" && command === "move") return userMove(rest);
+  if (group === "user" && command === "delete") return userDelete(rest);
+  if (group === "user" && command === "export") return userExport(rest);
   if (group === "community" && command === "create") return communityCreate(rest);
   if (group === "invite" && command === "create") return inviteCreate(rest);
   if (group === "keys" && command === "stock") return keysStock(rest);

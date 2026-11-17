@@ -134,6 +134,14 @@ Node 22+ and pnpm.
    signing keys for them: `pnpm palm keys stock --count 5`. `--domain` and `--db`
    override the defaults, and without a database the CLI prints the SQL.
 
+7. **Moving and leaving.** `pnpm palm user alias you https://old.example/users/you`
+   lets an account follow you here from another server. `pnpm palm user move
+   you https://new.example/users/you` moves your followers there (the new
+   account has to list this one as an alias first). `pnpm palm user export you`
+   writes your posts and follows to a JSON file, and `pnpm palm user delete you`
+   deletes the account; Lemmy apps can delete one too. Moves and deletions reach
+   other servers on the next cron run.
+
 If the domain already serves a website, palm needs the whole host: put the
 site on `www.` or another domain, and set `browserRedirect` to it.
 

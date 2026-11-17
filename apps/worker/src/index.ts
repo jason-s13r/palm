@@ -2,7 +2,7 @@ import { handleLemmy } from "@palm/adapter-lemmy";
 import { handleMastodon, publishDueStatuses } from "@palm/adapter-mastodon";
 import { activitySink, handleFederation, processQueueMessage, type QueueBody } from "@palm/federation";
 import { contextScope, defineConfig, enterContext, normaliseHost, resolveSurface, type DomainConfig, type PalmBindings, type PalmConfig, type RequestContext } from "@palm/core";
-import { migrate, prune } from "@palm/db";
+import { domainOf, migrate, pendingDeletes, pendingMoves, prune } from "@palm/db";
 import { handleWeb } from "@palm/web";
 import { avatarResponse } from "./assets.ts";
 import { VERSION } from "./version.ts";
@@ -63,6 +63,14 @@ async function scheduled(config: PalmConfig, controller: ScheduledController, en
   };
   const published = await publishDueStatuses(contextFor);
   if (published) console.log(JSON.stringify({ palm: "scheduled_published", posts: published }));
+  // Moves and deletions set from the CLI (or not yet sent) go out here.
+  const [moves, deletes] = await Promise.all([pendingMoves(env.DB), pendingDeletes(env.DB)]);
+  for (const [kind, ids] of [["moved", moves], ["account_deleted", deletes]] as const) {
+    for (const accountId of ids) {
+      const domain = await domainOf(env.DB, accountId);
+      contextFor(domain ?? "")?.activities.enqueue({ kind, accountId });
+    }
+  }
   const at = new Date(controller.scheduledTime);
   if (at.getUTCHours() !== 3 || at.getUTCMinutes() >= 10) return;
   let removed = 0;

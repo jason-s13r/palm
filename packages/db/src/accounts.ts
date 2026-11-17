@@ -32,6 +32,12 @@ export interface Account {
   outboxFetchedAt: number | null;
   /** Followers need approving (Mastodon's locked account). */
   locked: boolean;
+  /** The ActivityPub ID of the account this one moved to. */
+  movedTo: string | null;
+  /** Other accounts' IDs this one says are also it, which a move needs. */
+  alsoKnownAs: string[];
+  /** A deleted account keeps its row (its ID stays taken) and nothing else. */
+  deleted: boolean;
 }
 
 interface AccountRow {
@@ -58,10 +64,13 @@ interface AccountRow {
   statuses_count?: number | null;
   outbox_fetched_at?: number | null;
   locked?: number | null;
+  moved_to?: string | null;
+  also_known_as?: string | null;
+  deleted_at?: number | null;
 }
 
 const COLUMNS =
-  "id, domain, username, display_name, bio, password_hash, role, created_at, ap_id, inbox, shared_inbox, profile_url, avatar_url, header_url, actor_type, fetched_at, banned_at, outbox_url, followers_count, following_count, statuses_count, outbox_fetched_at, locked";
+  "id, domain, username, display_name, bio, password_hash, role, created_at, ap_id, inbox, shared_inbox, profile_url, avatar_url, header_url, actor_type, fetched_at, banned_at, outbox_url, followers_count, following_count, statuses_count, outbox_fetched_at, locked, moved_to, also_known_as, deleted_at";
 
 export function toAccount(row: AccountRow): Account {
   return {
@@ -85,6 +94,9 @@ export function toAccount(row: AccountRow): Account {
     remoteCounts: { followers: row.followers_count ?? null, following: row.following_count ?? null, statuses: row.statuses_count ?? null },
     outboxFetchedAt: row.outbox_fetched_at ?? null,
     locked: row.locked === 1,
+    movedTo: row.moved_to ?? null,
+    alsoKnownAs: row.also_known_as ? (JSON.parse(row.also_known_as) as string[]) : [],
+    deleted: row.deleted_at != null,
   };
 }
 
@@ -137,6 +149,9 @@ export interface RemoteAccount {
   followersCount: number | null;
   followingCount: number | null;
   statusesCount: number | null;
+  /** The account it moved to (Mastodon's movedTo). */
+  movedTo?: string | null;
+  alsoKnownAs?: string[];
 }
 
 /** Records a remote person, or refreshes what palm knows of them. */
@@ -144,13 +159,13 @@ export async function upsertRemoteAccount(db: D1Database, remote: RemoteAccount)
   const row = await db
     .prepare(
       `INSERT INTO accounts (domain, username, display_name, bio, role, created_at, ap_id, inbox, shared_inbox, profile_url, avatar_url, header_url, actor_type, fetched_at,
-                             outbox_url, followers_count, following_count, statuses_count)
-       VALUES (?, ?, ?, ?, 'user', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                             outbox_url, followers_count, following_count, statuses_count, moved_to, also_known_as)
+       VALUES (?, ?, ?, ?, 'user', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (ap_id) WHERE ap_id IS NOT NULL DO UPDATE SET
          display_name = excluded.display_name, bio = excluded.bio, inbox = excluded.inbox,
          shared_inbox = excluded.shared_inbox, profile_url = excluded.profile_url, avatar_url = excluded.avatar_url,
          header_url = excluded.header_url, actor_type = excluded.actor_type, fetched_at = excluded.fetched_at,
-         outbox_url = excluded.outbox_url,
+         outbox_url = excluded.outbox_url, moved_to = excluded.moved_to, also_known_as = excluded.also_known_as,
          followers_count = COALESCE(excluded.followers_count, followers_count),
          following_count = COALESCE(excluded.following_count, following_count),
          statuses_count = COALESCE(excluded.statuses_count, statuses_count)
@@ -174,6 +189,8 @@ export async function upsertRemoteAccount(db: D1Database, remote: RemoteAccount)
       remote.followersCount,
       remote.followingCount,
       remote.statusesCount,
+      remote.movedTo ?? null,
+      remote.alsoKnownAs?.length ? JSON.stringify(remote.alsoKnownAs) : null,
     )
     .first<AccountRow>();
   return toAccount(row!);

@@ -241,3 +241,5 @@ export {
 export type { Poll, PostVersion, ScheduledStatus } from "./extras.ts";
 export { deletePushSubscription, metaValue, pushSubscription, pushSubscriptionsFor, savePushSubscription } from "./push.ts";
 export type { PushSubscription } from "./push.ts";
+export { clearFollowers, deleteLocalAccount, domainOf, exportAccount, pendingDeletes, forgetRemoteAccount, localFollowersOf, markMoveSent, pendingMoves, setAlsoKnownAs, setMovedTo } from "./lifecycle.ts";
+export type { AccountExport } from "./lifecycle.ts";

@@ -1,5 +1,5 @@
 import { importJwk, type Context } from "@fedify/fedify";
-import { Endpoints, Hashtag, Image, Object as APObject, Person } from "@fedify/fedify/vocab";
+import { Endpoints, Hashtag, Image, Object as APObject, Person, Tombstone } from "@fedify/fedify/vocab";
 import { nodeinfoVersion, urls, type RequestContext } from "@palm/core";
 import {
   featuredTags,
@@ -54,6 +54,8 @@ export async function personFor(ctx: Context<RequestContext>, account: Account):
     // Lemmy refuses actors without an outbox.
     outbox: ctx.getOutboxUri(identifier),
     manuallyApprovesFollowers: account.locked,
+    aliases: account.alsoKnownAs.map((id) => new URL(id)),
+    successor: account.movedTo ? new URL(account.movedTo) : null,
     featured: ctx.getFeaturedUri(identifier),
     featuredTags: ctx.getFeaturedTagsUri(identifier),
     discoverable: true,
@@ -71,6 +73,7 @@ export async function personFor(ctx: Context<RequestContext>, account: Account):
 builder
   .setActorDispatcher("/users/{identifier}", async (ctx, identifier) => {
     const account = await accountFor(ctx.data, identifier);
+    if (account?.deleted) return new Tombstone({ id: ctx.getActorUri(identifier) });
     return account ? personFor(ctx, account) : null;
   })
   .setKeyPairsDispatcher(async (ctx, identifier) => {
