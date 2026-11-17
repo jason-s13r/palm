@@ -52,6 +52,7 @@ export {
   searchTags,
   tagsFor,
   countLocalPosts,
+  accountCounts,
   countPosts,
   createPost,
   deletePost,

@@ -51,6 +51,7 @@ import {
   lastPostAt,
   mediaById,
   mediaForPosts,
+  accountCounts,
   followState,
   authorizeQuote,
   effectiveQuotePolicy,
@@ -126,22 +127,41 @@ async function canSee(db: D1Database, post: Post, viewer: Account | null): Promi
 
 /** Profile counts for an account: palm's own for local ones, the remote server's (as last fetched) for remote ones. */
 export async function accountStats(ctx: RequestContext, a: Account): Promise<AccountStats> {
+  return (await accountStatsMany(ctx, [a])).get(a.id)!;
+}
+
+/**
+ * Counts for the accounts on a page of statuses, in one query. Other
+ * servers' people are kept for a few minutes, so a busy timeline doesn't
+ * count them on every page; people here are counted fresh, so your own
+ * counts change as soon as you post or follow.
+ */
+const STATS_TTL_MS = 3 * 60 * 1000;
+const statsCache = new WeakMap<D1Database, Map<number, { stats: AccountStats; at: number }>>();
+
+export async function accountStatsMany(ctx: RequestContext, accounts: Account[]): Promise<Map<number, AccountStats>> {
   const db = ctx.bindings.DB;
-  if (a.apId) {
-    return {
-      statuses: a.remoteCounts.statuses ?? (await countPosts(db, a.id)),
-      followers: a.remoteCounts.followers ?? 0,
-      following: a.remoteCounts.following ?? 0,
-      lastStatusAt: await lastPostAt(db, a.id),
-    };
+  let cache = statsCache.get(db);
+  if (!cache) statsCache.set(db, (cache = new Map()));
+  const now = Date.now();
+  const out = new Map<number, AccountStats>();
+  const missing: Account[] = [];
+  for (const a of accounts) {
+    const hit = cache.get(a.id);
+    if (hit && now - hit.at < STATS_TTL_MS) out.set(a.id, hit.stats);
+    else missing.push(a);
   }
-  const [statuses, followers, following, lastStatusAt] = await Promise.all([
-    countPosts(db, a.id),
-    countFollowers(db, a.id),
-    countFollowing(db, a.id),
-    lastPostAt(db, a.id),
-  ]);
-  return { statuses, followers, following, lastStatusAt };
+  const counts = await accountCounts(db, [...new Set(missing.map((a) => a.id))]);
+  for (const a of missing) {
+    const c = counts.get(a.id) ?? { statuses: 0, followers: 0, following: 0, lastStatusAt: null };
+    // A remote person's own counts are better than what palm has seen of them.
+    const stats = a.apId
+      ? { statuses: a.remoteCounts.statuses ?? c.statuses, followers: a.remoteCounts.followers ?? 0, following: a.remoteCounts.following ?? 0, lastStatusAt: c.lastStatusAt }
+      : c;
+    if (a.apId) cache.set(a.id, { stats, at: now });
+    out.set(a.id, stats);
+  }
+  return out;
 }
 
 /** A Mastodon MediaAttachment for an uploaded image. */
@@ -298,11 +318,10 @@ async function renderStatuses(ctx: RequestContext, posts: Post[], viewer: Accoun
   const links = new Map(posts.map((p) => [p.id, previewLink(p)]));
   const cards = await cardsFor(db, [...links.values()].filter((l): l is string => l !== null));
   const followed = await followedAmong(db, viewer, [...new Set(posts.map((p) => p.accountId))]);
-  const statsFor = new Map<number, AccountStats>();
-  for (const id of new Set(posts.map((p) => p.accountId))) {
-    const a = people.get(id);
-    if (a) statsFor.set(id, await accountStats(ctx, a));
-  }
+  const statsFor = await accountStatsMany(
+    ctx,
+    [...new Set(posts.map((p) => p.accountId))].flatMap((id) => people.get(id) ?? []),
+  );
 
   return posts.flatMap((post) => {
     const author = people.get(post.accountId);

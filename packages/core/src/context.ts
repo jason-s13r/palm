@@ -88,6 +88,8 @@ export type FederationTask =
   | { kind: "follow_answered"; accountId: number; followerId: number; followId: string; accept: boolean }
   | { kind: "subscribed"; accountId: number; communityId: number; followApId: string; undo: boolean }
   | { kind: "profile_updated"; accountId: number }
+  /** A link preview to fetch for a post, apart from the request that stored it. */
+  | { kind: "card"; postId: number }
   /** A local account moved elsewhere: its followers are sent a Move. */
   | { kind: "moved"; accountId: number }
   /** A local account was deleted: its followers are sent a Delete of it. */

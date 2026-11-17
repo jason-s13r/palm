@@ -24,6 +24,7 @@ import {
 import type { ActivitySink, FederationTask, RequestContext, Resolved } from "@palm/core";
 import {
   pollChoices,
+  postById,
   postByUri,
   setQuoteState,
   clearFollowers,
@@ -302,6 +303,11 @@ export async function runTask(ctx: RequestContext, task: FederationTask): Promis
           { preferSharedInbox: true },
         );
       }
+      return;
+    }
+    case "card": {
+      const post = await postById(db, task.postId);
+      if (post) await cardForPost(db, post);
       return;
     }
     case "moved": {

@@ -484,3 +484,25 @@ export async function claimThreadRefresh(db: D1Database, postId: number, ttlSeco
     .run();
   return (result.meta.changes ?? 0) > 0;
 }
+
+/** Several accounts' counts in one query: posts, followers here, following, and their last post. */
+export async function accountCounts(
+  db: D1Database,
+  ids: number[],
+): Promise<Map<number, { statuses: number; followers: number; following: number; lastStatusAt: number | null }>> {
+  const out = new Map<number, { statuses: number; followers: number; following: number; lastStatusAt: number | null }>();
+  if (!ids.length) return out;
+  const { results } = await db
+    .prepare(
+      `SELECT a.id,
+         (SELECT COUNT(*) FROM posts p WHERE p.account_id = a.id AND p.deleted_at IS NULL AND p.visibility IN ('public', 'unlisted')) AS statuses,
+         (SELECT MAX(created_at) FROM posts p WHERE p.account_id = a.id AND p.deleted_at IS NULL) AS last_at,
+         (SELECT COUNT(*) FROM followers f WHERE f.account_id = a.id AND f.pending = 0) AS followers,
+         (SELECT COUNT(*) FROM account_follows f WHERE f.account_id = a.id AND f.state = 'accepted' AND f.mastodon = 1) AS following
+       FROM accounts a WHERE a.id IN (${ids.map(() => "?").join(", ")})`,
+    )
+    .bind(...ids)
+    .all<{ id: number; statuses: number; last_at: number | null; followers: number; following: number }>();
+  for (const r of results) out.set(r.id, { statuses: r.statuses, followers: r.followers, following: r.following, lastStatusAt: r.last_at });
+  return out;
+}

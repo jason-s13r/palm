@@ -75,10 +75,19 @@ export async function fetchCard(url: string): Promise<LinkCard> {
 
 /** Fetches and keeps the preview for a post's link, once per link. */
 export async function cardForPost(db: D1Database, post: Pick<Post, "linkUrl" | "contentHtml">): Promise<void> {
-  const link = previewLink(post);
-  if (!link || (await hasCard(db, link))) return;
-  if (await isBlockedHost(db, new URL(link).host)) return;
-  // Images and video are their own preview.
-  if (/\.(jpe?g|png|gif|webp|avif|mp4|webm|mov)(\?|$)/i.test(link)) return;
+  const link = await cardWanted(db, post);
+  if (!link) return;
   await saveCard(db, await fetchCard(link).catch(() => ({ url: link, title: null, description: null, image: null, provider: null })));
+}
+
+/**
+ * The link a post needs a preview fetched for, if any: none for a link palm
+ * already has (each link is fetched once and kept 30 days), a blocked server,
+ * or an image or video, which is its own preview.
+ */
+export async function cardWanted(db: D1Database, post: Pick<Post, "linkUrl" | "contentHtml">): Promise<string | null> {
+  const link = previewLink(post);
+  if (!link || /\.(jpe?g|png|gif|webp|avif|mp4|webm|mov)(\?|$)/i.test(link)) return null;
+  if ((await hasCard(db, link)) || (await isBlockedHost(db, new URL(link).host))) return null;
+  return link;
 }

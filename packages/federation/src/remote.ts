@@ -54,7 +54,7 @@ import {
   type RemoteAttachment,
   type Visibility,
 } from "@palm/db";
-import { cardForPost } from "./cards.ts";
+import { cardWanted } from "./cards.ts";
 import { localDomains, logProblem } from "./shared.ts";
 
 /** How long palm trusts what it fetched about a remote actor. */
@@ -367,7 +367,9 @@ export async function storeRemotePost(
     }
   }
   // Link previews for posts, not every comment under them; after the response.
-  if (!post.rootId) fctx.data.waitUntil(cardForPost(db, post).catch(() => undefined));
+  // The preview is fetched in a queue job of its own: fetching and parsing the
+  // page was a large part of a delivery's CPU time.
+  if (!post.rootId && (await cardWanted(db, post))) fctx.data.activities.enqueue({ kind: "card", postId: post.id });
   return post;
 }
 
