@@ -399,15 +399,34 @@ export function activitySink(ctx: RequestContext): ActivitySink {
     },
     async backfillThread(postId) {
       const { people } = await contextsFor(ctx);
-      await backfillThread(people, postId).catch((error: unknown) => logProblem("thread_backfill_failed", { postId, error: String(error) }));
+      await waitAWhile(
+        ctx,
+        backfillThread(people, postId).catch((error: unknown) => logProblem("thread_backfill_failed", { postId, error: String(error) })),
+      );
     },
     async backfillProfile(accountId) {
       const { people } = await contextsFor(ctx);
-      await backfillProfile(people, accountId).catch((error: unknown) =>
-        logProblem("profile_backfill_failed", { accountId, error: String(error) }),
+      await waitAWhile(
+        ctx,
+        backfillProfile(people, accountId).catch((error: unknown) => logProblem("profile_backfill_failed", { accountId, error: String(error) })),
       );
     },
   };
+}
+
+/** How long an app waits on a fetch from another server before getting what palm has. */
+const BACKFILL_WAIT_MS = 2500;
+
+/**
+ * Waits for `work` up to BACKFILL_WAIT_MS, and lets it finish after the
+ * response if it takes longer: a slow server (one profile took 26 seconds)
+ * then delays the app by seconds, and the posts show on the next refresh.
+ */
+async function waitAWhile(ctx: RequestContext, work: Promise<void>): Promise<void> {
+  ctx.waitUntil(work);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([work, new Promise<void>((resolve) => (timer = setTimeout(resolve, BACKFILL_WAIT_MS)))]);
+  if (timer !== undefined) clearTimeout(timer);
 }
 
 /**
