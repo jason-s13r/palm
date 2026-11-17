@@ -223,11 +223,11 @@ export interface Notification {
 }
 
 type NotificationHook = (db: D1Database, n: Notification) => Promise<void>;
-let notificationHook: NotificationHook | null = null;
+const notificationHooks: NotificationHook[] = [];
 
-/** Runs after each new notification (push notifications use it). */
+/** Runs after each new notification (push notifications and streaming use it). */
 export function onNotification(hook: NotificationHook): void {
-  notificationHook = hook;
+  notificationHooks.push(hook);
 }
 
 /** Notifies a local account, unless it's about its own doing. */
@@ -237,7 +237,8 @@ export async function notify(
 ): Promise<void> {
   if (n.accountId === n.fromAccountId) return;
   const created = await insertNotification(db, n);
-  if (created && notificationHook) await notificationHook(db, created).catch((error: unknown) => console.warn(JSON.stringify({ palm: "push_failed", error: String(error) })));
+  if (!created) return;
+  for (const hook of notificationHooks) await hook(db, created).catch((error: unknown) => console.warn(JSON.stringify({ palm: "notification_hook_failed", error: String(error) })));
 }
 
 async function insertNotification(

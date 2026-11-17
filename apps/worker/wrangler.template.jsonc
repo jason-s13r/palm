@@ -22,6 +22,10 @@
   // A queue for outgoing deliveries (optional, but it keeps sending to many
   // followers out of the request). The Worker consumes its own queue;
   // wrangler deploy creates it.
+  // Mastodon's streaming: one Durable Object per domain holds the open
+  // connections. The entry point exports PalmStreaming for it.
+  "durable_objects": { "bindings": [{ "name": "STREAMING", "class_name": "PalmStreaming" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PalmStreaming"] }],
   "queues": {
     "producers": [{ "binding": "QUEUE", "queue": "<queue-name>" }],
     "consumers": [{ "queue": "<queue-name>", "max_batch_size": 5, "max_retries": 5 }]

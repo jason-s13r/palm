@@ -12,6 +12,11 @@ export interface PalmBindings {
    * the free plan's CPU budget once there are followers).
    */
   QUEUE?: Queue;
+  /**
+   * The PalmStreaming Durable Object, for Mastodon's live streaming. Without
+   * it, apps refresh on their own instead.
+   */
+  STREAMING?: DurableObjectNamespace;
 }
 
 /** What every adapter gets for one request. */

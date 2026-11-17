@@ -28,4 +28,5 @@ export const stagingConfig = (env: StagingEnv) => ({
   ...(env.STAGING_BROWSER_REDIRECT ? { browserRedirect: env.STAGING_BROWSER_REDIRECT } : {}),
 });
 
+export { PalmStreaming } from "../src/index.ts";
 export default createPalm<StagingEnv>(stagingConfig);

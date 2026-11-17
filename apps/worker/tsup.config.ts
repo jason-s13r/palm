@@ -19,6 +19,8 @@ export default defineConfig([
       },
     },
     noExternal: [/^@palm\//, "hono", /^hono\//],
+    // The Workers runtime's own module, imported by the streaming Durable Object.
+    external: ["cloudflare:workers"],
     clean: true,
     sourcemap: true,
   },

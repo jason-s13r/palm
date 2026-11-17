@@ -1,7 +1,7 @@
 import { handleLemmy } from "@palm/adapter-lemmy";
 import { handleMastodon, publishDueStatuses } from "@palm/adapter-mastodon";
 import { activitySink, handleFederation, processQueueMessage, type QueueBody } from "@palm/federation";
-import { defineConfig, normaliseHost, resolveSurface, type DomainConfig, type PalmBindings, type PalmConfig, type RequestContext } from "@palm/core";
+import { contextScope, defineConfig, enterContext, normaliseHost, resolveSurface, type DomainConfig, type PalmBindings, type PalmConfig, type RequestContext } from "@palm/core";
 import { migrate, prune } from "@palm/db";
 import { handleWeb } from "@palm/web";
 import { avatarResponse } from "./assets.ts";
@@ -10,6 +10,8 @@ import { VERSION } from "./version.ts";
 export { ConfigError, defineConfig } from "@palm/core";
 export type { ApiKind, DomainConfig, InstanceConfig, PalmBindings, PalmConfig, Surface } from "@palm/core";
 export { VERSION };
+/** The Durable Object for Mastodon streaming: a deployment exports it from its entry point. */
+export { PalmStreaming } from "@palm/adapter-mastodon";
 
 /**
  * The bindings a deployment gives the Worker: a D1 database bound as `DB`,
@@ -38,35 +40,39 @@ export function createPalm<Env extends PalmEnv = PalmEnv>(source: ConfigSource<E
 
   return {
     fetch(request, env, ctx) {
-      return handle(configFor(env), request, env, ctx);
+      return contextScope(() => handle(configFor(env), request, env, ctx));
     },
     // The same Worker consumes its queue: deliveries and received activities.
     async queue(batch, env, ctx) {
-      await consume(configFor(env), batch as MessageBatch<QueueBody>, env, ctx);
+      await contextScope(() => consume(configFor(env), batch as MessageBatch<QueueBody>, env, ctx));
     },
     // The cron runs every 10 minutes: scheduled posts go out when due, and
     // once a day (in the 03:00 UTC run) old remote posts are pruned.
-    async scheduled(controller, env, ctx) {
-      await migrate(env.DB);
-      const config = configFor(env);
-      const contextFor = (domain: string) => {
-        const found = config.domains.find((d) => d.domain === domain) ?? (domain === "" ? config.domains[0] : undefined);
-        return found ? requestContext(config, found, found.domain, env, ctx) : null;
-      };
-      const published = await publishDueStatuses(contextFor);
-      if (published) console.log(JSON.stringify({ palm: "scheduled_published", posts: published }));
-      const at = new Date(controller.scheduledTime);
-      if (at.getUTCHours() !== 3 || at.getUTCMinutes() >= 10) return;
-      let removed = 0;
-      // A few batches per run keeps each run short; the next day picks up the rest.
-      for (let i = 0; i < 5; i++) {
-        const n = await prune(env.DB);
-        removed += n;
-        if (n === 0) break;
-      }
-      console.log(JSON.stringify({ palm: "pruned", posts: removed }));
+    scheduled(controller, env, ctx) {
+      return contextScope(() => scheduled(configFor(env), controller, env, ctx));
     },
   };
+}
+
+/** The cron run: due scheduled posts, and the daily prune. */
+async function scheduled(config: PalmConfig, controller: ScheduledController, env: PalmEnv, ctx: Pick<ExecutionContext, "waitUntil">): Promise<void> {
+  await migrate(env.DB);
+  const contextFor = (domain: string) => {
+    const found = config.domains.find((d) => d.domain === domain) ?? (domain === "" ? config.domains[0] : undefined);
+    return found ? requestContext(config, found, found.domain, env, ctx) : null;
+  };
+  const published = await publishDueStatuses(contextFor);
+  if (published) console.log(JSON.stringify({ palm: "scheduled_published", posts: published }));
+  const at = new Date(controller.scheduledTime);
+  if (at.getUTCHours() !== 3 || at.getUTCMinutes() >= 10) return;
+  let removed = 0;
+  // A few batches per run keeps each run short; the next day picks up the rest.
+  for (let i = 0; i < 5; i++) {
+    const n = await prune(env.DB);
+    removed += n;
+    if (n === 0) break;
+  }
+  console.log(JSON.stringify({ palm: "pruned", posts: removed }));
 }
 
 /** Builds the context palm's code runs with, for a request or a queued job. */
@@ -87,6 +93,8 @@ function requestContext(
   } as RequestContext;
   // The sink delivers with the finished context, so it's attached after.
   ctx.activities = activitySink(ctx);
+  // Push and streaming hooks find it from here.
+  enterContext(ctx);
   return ctx;
 }
 

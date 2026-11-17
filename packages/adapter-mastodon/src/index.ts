@@ -25,12 +25,14 @@ import { cors } from "hono/cors";
 import { authorizePage, codePage } from "./oauth-page.ts";
 import { curationRoutes } from "./curation.ts";
 import { pushRoutes } from "./push.ts";
+import { streamingRoutes } from "./streaming.ts";
 import { vapidKeys } from "./webpush.ts";
 import { peopleRoutes } from "./people.ts";
 import { accountStats, statusRoutes } from "./statuses.ts";
 import { account, credentialAccount, instanceV1, instanceV2, MASTODON_VERSION } from "./views.ts";
 
 export { MASTODON_VERSION };
+export { PalmStreaming } from "./streaming.ts";
 
 type Env = { Bindings: RequestContext; Variables: { account: Account | null; app: OAuthApp | null } };
 type C = Context<Env>;
@@ -335,6 +337,7 @@ app.get("/api/v1/preferences", (c) =>
 
 // --- statuses and timelines ------------------------------------------------
 
+app.route("/", streamingRoutes);
 app.route("/", pushRoutes);
 app.route("/", curationRoutes);
 app.route("/", statusRoutes);
@@ -370,10 +373,7 @@ app.get("/api/v1/instance/extended_description", (c) =>
 app.get("/api/v1/instance/peers", async (c) => c.json(await knownDomains(c.env.bindings.DB)));
 // Weekly activity isn't kept; an empty list is what a new server answers.
 app.get("/api/v1/instance/activity", (c) => c.json([]));
-// No streaming (a Worker can't hold the connections on the free plan): apps
-// fall back to polling when this isn't there, so it's not logged as unknown.
-app.all("/api/v1/streaming/*", (c) => fail(c, "Streaming isn't available on this server", 404));
-app.all("/api/v1/streaming", (c) => fail(c, "Streaming isn't available on this server", 404));
+
 app.get("/api/v2/notifications/policy", (c) =>
   c.json({
     for_not_following: "accept",

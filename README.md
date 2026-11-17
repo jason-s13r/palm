@@ -79,6 +79,8 @@ Node 22+ and pnpm.
    import config from "../palm.config.ts";
 
    export default createPalm(config);
+   // Mastodon streaming runs in this Durable Object.
+   export { PalmStreaming } from "@jason-s13r/palm-worker";
    ```
 
    And `wrangler.jsonc`, copied from
@@ -98,8 +100,8 @@ Node 22+ and pnpm.
    then in the instance repo, `"@jason-s13r/palm-worker": "file:./vendor/palm-worker.tgz"`.
 
 4. **Deploy**, with `npx wrangler deploy` or by connecting the repo to
-   Workers Builds. The first deploy creates the D1 database, R2 bucket and
-   queue named in `wrangler.jsonc`. Then visit
+   Workers Builds. The first deploy creates the D1 database, R2 bucket,
+   queue and streaming Durable Object named in `wrangler.jsonc`. Then visit
    `https://your.domain/.well-known/nodeinfo` once so the tables exist.
 
 5. **Make the first account.** The package carries palm's admin CLI as its

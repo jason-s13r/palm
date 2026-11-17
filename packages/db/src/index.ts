@@ -70,6 +70,7 @@ export {
   repliesTo,
   restorePost,
   updateRemotePost,
+  onNewPost,
 } from "./posts.ts";
 export type { NewPost, Page, Post, RemoteAttachment, Visibility } from "./posts.ts";
 export {

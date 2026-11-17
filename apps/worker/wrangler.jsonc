@@ -18,6 +18,10 @@
   // Every 10 minutes: scheduled posts go out, and in the 03:00 UTC run old
   // remote posts nobody here touched are pruned, so D1 stays small.
   "triggers": { "crons": ["*/10 * * * *"] },
+  // Mastodon's streaming: one Durable Object per domain holds the open
+  // connections. The entry point exports PalmStreaming for it.
+  "durable_objects": { "bindings": [{ "name": "STREAMING", "class_name": "PalmStreaming" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PalmStreaming"] }],
   "queues": {
     "producers": [{ "binding": "QUEUE", "queue": "palm-staging" }],
     "consumers": [{ "queue": "palm-staging", "max_batch_size": 5, "max_retries": 5 }]

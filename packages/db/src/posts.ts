@@ -119,6 +119,19 @@ export type NewPost = Omit<
 > &
   Partial<Pick<Post, "communityId" | "title" | "linkUrl" | "rootId" | "parentId" | "apId" | "url" | "createdAt" | "updatedAt" | "attachments">>;
 
+type PostHook = (db: D1Database, post: Post) => Promise<void>;
+const postHooks: PostHook[] = [];
+
+/** Runs after each new post, local or remote (streaming uses it). */
+export function onNewPost(hook: PostHook): void {
+  postHooks.push(hook);
+}
+
+async function runPostHooks(db: D1Database, post: Post): Promise<Post> {
+  for (const hook of postHooks) await hook(db, post).catch((error: unknown) => console.warn(JSON.stringify({ palm: "post_hook_failed", error: String(error) })));
+  return post;
+}
+
 export async function createPost(db: D1Database, post: NewPost): Promise<Post> {
   const row = await db
     .prepare(
@@ -148,12 +161,12 @@ export async function createPost(db: D1Database, post: NewPost): Promise<Post> {
     )
     .first<PostRow>();
   if (!row) throw new Error("Post was not created.");
-  if (row.root_id === null) return toPost(row);
+  if (row.root_id === null) return runPostHooks(db, toPost(row));
   // A comment's path is its parent's path (or "0" under the post) plus its own ID.
   const parent = row.parent_id !== null && row.parent_id !== row.root_id ? await postById(db, row.parent_id) : null;
   const path = `${parent?.path ?? "0"}.${row.id}`;
   await db.prepare("UPDATE posts SET path = ? WHERE id = ?").bind(path, row.id).run();
-  return toPost({ ...row, path });
+  return runPostHooks(db, toPost({ ...row, path }));
 }
 
 /** Changes a post's text (and a Lemmy post's title and link). */
