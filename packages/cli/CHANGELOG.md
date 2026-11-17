@@ -1,5 +1,12 @@
 # Changelog
 
+## cli@0.3.1 (2026-11-17)
+
+### Fixes
+
+- other servers' fetches of profiles, WebFinger and nodeinfo served from cache
+
+
 ## cli@0.3.0 (2026-11-17)
 
 ### Features

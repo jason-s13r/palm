@@ -1,5 +1,17 @@
 # Changelog
 
+## federation@0.4.3 (2026-11-17)
+
+### Fixes
+
+- community backfill one post per queue job; cut-off thread fetches retried sooner
+
+### Dependencies
+
+- core: 1.1.0 -> 1.1.1
+- db: 0.4.1 -> 0.4.2
+
+
 ## federation@0.4.2 (2026-11-17)
 
 ### Fixes

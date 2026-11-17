@@ -1,5 +1,17 @@
 # Changelog
 
+## adapter-lemmy@0.4.1 (2026-11-17)
+
+### Fixes
+
+- uploaded images served from cache
+
+### Dependencies
+
+- core: 1.1.0 -> 1.1.1
+- db: 0.4.1 -> 0.4.2
+
+
 ## adapter-lemmy@0.4.0 (2026-11-17)
 
 ### Features

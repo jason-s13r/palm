@@ -1,5 +1,14 @@
 # Changelog
 
+## core@1.1.1 (2026-11-17)
+
+### Fixes
+
+- uploaded images served from cache
+
+- community backfill one post per queue job; cut-off thread fetches retried sooner
+
+
 ## core@1.1.0 (2026-11-17)
 
 ### Features

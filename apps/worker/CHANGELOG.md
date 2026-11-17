@@ -1,5 +1,31 @@
 # Changelog
 
+## worker@0.7.0 (2026-11-17)
+
+### Features
+
+- moved accounts show where they went in Mastodon apps
+
+### Fixes
+
+- Mastodon timelines load in fewer database rounds
+
+- uploaded images served from cache
+
+- community backfill one post per queue job; cut-off thread fetches retried sooner
+
+- other servers' fetches of profiles, WebFinger and nodeinfo served from cache
+
+### Dependencies
+
+- core: 1.1.0 -> 1.1.1
+- db: 0.4.1 -> 0.4.2
+- adapter-lemmy: 0.4.0 -> 0.4.1
+- adapter-mastodon: 0.4.2 -> 0.5.0
+- federation: 0.4.2 -> 0.4.3
+- cli: 0.3.0 -> 0.3.1
+
+
 ## worker@0.6.2 (2026-11-17)
 
 ### Fixes

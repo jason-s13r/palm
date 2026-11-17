@@ -1,5 +1,21 @@
 # Changelog
 
+## adapter-mastodon@0.5.0 (2026-11-17)
+
+### Features
+
+- moved accounts show where they went in Mastodon apps
+
+### Fixes
+
+- Mastodon timelines load in fewer database rounds
+
+### Dependencies
+
+- core: 1.1.0 -> 1.1.1
+- db: 0.4.1 -> 0.4.2
+
+
 ## adapter-mastodon@0.4.2 (2026-11-17)
 
 ### Fixes

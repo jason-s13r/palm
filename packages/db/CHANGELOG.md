@@ -1,5 +1,14 @@
 # Changelog
 
+## db@0.4.2 (2026-11-17)
+
+### Fixes
+
+- community backfill one post per queue job; cut-off thread fetches retried sooner
+
+- other servers' fetches of profiles, WebFinger and nodeinfo served from cache
+
+
 ## db@0.4.1 (2026-11-17)
 
 ### Fixes
