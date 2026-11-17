@@ -1,5 +1,27 @@
 # Changelog
 
+## adapter-lemmy@0.2.0 (2026-11-17)
+
+### Features
+
+- account moves, deletion and export
+
+- lists, followed hashtags, filters, read and hidden posts, cross-posts
+
+- reports, community moderation and the mod log
+
+- private messages shared by Lemmy and Mastodon apps
+
+- link previews and a cached media proxy
+
+- blocks and mutes for people, communities and servers
+
+### Dependencies
+
+- core: 1.0.0 -> 1.1.0
+- db: 0.1.0 -> 0.2.0
+
+
 ## adapter-lemmy@0.1.0 (2026-11-16)
 
 ### Features

@@ -1,5 +1,46 @@
 # Changelog
 
+## worker@0.4.0 (2026-11-17)
+
+### Features
+
+- account moves, deletion and export
+
+- sign a retry when a server refuses an unsigned fetch
+
+- streaming over a Durable Object
+  Deployments export PalmStreaming and bind it as STREAMING.
+
+- push notifications over Web Push
+
+- polls, edit history, scheduled posts and quotes
+
+- lists, followed hashtags, filters, read and hidden posts, cross-posts
+
+- reports, community moderation and the mod log
+
+- locked accounts, pinned posts and featured hashtags
+
+- private messages shared by Lemmy and Mastodon apps
+
+- link previews and a cached media proxy
+
+- blocks and mutes for people, communities and servers
+
+### Fixes
+
+- resolve local lookups from the database; add favicon, robots.txt and interaction_policy
+
+### Dependencies
+
+- core: 1.0.0 -> 1.1.0
+- db: 0.1.0 -> 0.2.0
+- adapter-lemmy: 0.1.0 -> 0.2.0
+- adapter-mastodon: 0.1.0 -> 0.2.0
+- federation: 0.1.1 -> 0.2.0
+- cli: 0.2.0 -> 0.3.0
+
+
 ## worker@0.3.1 (2026-11-16)
 
 ### Fixes

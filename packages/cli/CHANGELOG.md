@@ -1,5 +1,14 @@
 # Changelog
 
+## cli@0.3.0 (2026-11-17)
+
+### Features
+
+- account moves, deletion and export
+
+- reports, community moderation and the mod log
+
+
 ## cli@0.2.0 (2026-11-16)
 
 ### Features

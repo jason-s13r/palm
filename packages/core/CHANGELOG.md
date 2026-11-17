@@ -1,5 +1,23 @@
 # Changelog
 
+## core@1.1.0 (2026-11-17)
+
+### Features
+
+- streaming over a Durable Object
+  Deployments export PalmStreaming and bind it as STREAMING.
+
+- polls, edit history, scheduled posts and quotes
+
+- reports, community moderation and the mod log
+
+- locked accounts, pinned posts and featured hashtags
+
+- link previews and a cached media proxy
+
+- blocks and mutes for people, communities and servers
+
+
 ## core@1.0.0 (2026-11-16)
 
 ### Breaking Changes
