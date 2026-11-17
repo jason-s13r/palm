@@ -7,7 +7,8 @@ import { MIGRATIONS, SCHEMA_VERSION, statementsOf } from "./migrations.ts";
  *
  * Each migration runs as one D1 batch, which D1 applies as a transaction, and
  * records its version in the same batch. Statements are idempotent
- * (IF NOT EXISTS), so two isolates racing on a fresh database both succeed.
+ * (IF NOT EXISTS) where SQLite allows; a racing isolate that loses on a
+ * column added by the other finds the version recorded and carries on.
  *
  * Only the outcome is kept between requests, not a pending promise: a
  * promise is tied to the request that started it, and fails in another
@@ -36,12 +37,18 @@ async function run(db: D1Database): Promise<void> {
   if (version >= SCHEMA_VERSION) return;
   for (const migration of MIGRATIONS) {
     if (migration.version <= version) continue;
-    await db.batch([
-      ...statementsOf(migration).map((sql) => db.prepare(sql)),
-      db
-        .prepare("INSERT INTO palm_meta (key, value) VALUES ('schema_version', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value")
-        .bind(String(migration.version)),
-    ]);
+    try {
+      await db.batch([
+        ...statementsOf(migration).map((sql) => db.prepare(sql)),
+        db
+          .prepare("INSERT INTO palm_meta (key, value) VALUES ('schema_version', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value")
+          .bind(String(migration.version)),
+      ]);
+    } catch (error) {
+      // ALTER TABLE ADD COLUMN can't say IF NOT EXISTS: when two isolates
+      // race, the second fails. That's fine if the first got there.
+      if ((await currentVersion(db)) < migration.version) throw error;
+    }
   }
 }
 
