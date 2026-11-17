@@ -87,6 +87,8 @@ export function credentialAccount(ctx: RequestContext, a: Account, stats?: Accou
       hide_collections: false,
       discoverable: true,
       indexable: false,
+      // Who may quote new posts unless a post says otherwise (Mastodon 4.5).
+      quote_policy: a.quotePolicy,
     },
     role:
       a.role === "admin"

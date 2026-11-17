@@ -1,5 +1,7 @@
 import { type RequestContext, urls } from "@palm/core";
 import {
+  isQuotePolicy,
+  setAccountQuotePolicy,
   createReport,
   postByIdAny,
   accountByHandle,
@@ -315,6 +317,9 @@ peopleRoutes.patch("/api/v1/accounts/update_credentials", async (c) => {
   const note = textOf("note");
   const lockedValue = get("locked");
   const locked = lockedValue === undefined ? undefined : lockedValue === true || lockedValue === "true" || lockedValue === "1";
+  // Mastodon 4.5's default for who may quote new posts, sent as source[quote_policy].
+  const quotePolicy = textOf("source[quote_policy]") ?? (get("source") as { quote_policy?: unknown } | undefined)?.quote_policy;
+  if (isQuotePolicy(quotePolicy)) await setAccountQuotePolicy(db, me.id, quotePolicy);
   await updateProfile(db, me.id, {
     ...(locked !== undefined ? { locked } : {}),
     ...(displayName !== undefined ? { displayName: displayName || null } : {}),

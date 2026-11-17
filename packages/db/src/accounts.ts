@@ -1,3 +1,5 @@
+import type { QuotePolicy } from "./quotes.ts";
+
 /**
  * A person. Local accounts sign in here; remote ones are other servers'
  * people that palm has met, kept so posts, votes and follows can point at
@@ -32,6 +34,8 @@ export interface Account {
   outboxFetchedAt: number | null;
   /** Followers need approving (Mastodon's locked account). */
   locked: boolean;
+  /** Who may quote this account's posts unless a post says otherwise. */
+  quotePolicy: QuotePolicy;
   /** The ActivityPub ID of the account this one moved to. */
   movedTo: string | null;
   /** Other accounts' IDs this one says are also it, which a move needs. */
@@ -64,13 +68,14 @@ interface AccountRow {
   statuses_count?: number | null;
   outbox_fetched_at?: number | null;
   locked?: number | null;
+  quote_policy?: string | null;
   moved_to?: string | null;
   also_known_as?: string | null;
   deleted_at?: number | null;
 }
 
 const COLUMNS =
-  "id, domain, username, display_name, bio, password_hash, role, created_at, ap_id, inbox, shared_inbox, profile_url, avatar_url, header_url, actor_type, fetched_at, banned_at, outbox_url, followers_count, following_count, statuses_count, outbox_fetched_at, locked, moved_to, also_known_as, deleted_at";
+  "id, domain, username, display_name, bio, password_hash, role, created_at, ap_id, inbox, shared_inbox, profile_url, avatar_url, header_url, actor_type, fetched_at, banned_at, outbox_url, followers_count, following_count, statuses_count, outbox_fetched_at, locked, quote_policy, moved_to, also_known_as, deleted_at";
 
 export function toAccount(row: AccountRow): Account {
   return {
@@ -94,6 +99,7 @@ export function toAccount(row: AccountRow): Account {
     remoteCounts: { followers: row.followers_count ?? null, following: row.following_count ?? null, statuses: row.statuses_count ?? null },
     outboxFetchedAt: row.outbox_fetched_at ?? null,
     locked: row.locked === 1,
+    quotePolicy: (row.quote_policy as QuotePolicy | null | undefined) ?? "public",
     movedTo: row.moved_to ?? null,
     alsoKnownAs: row.also_known_as ? (JSON.parse(row.also_known_as) as string[]) : [],
     deleted: row.deleted_at != null,

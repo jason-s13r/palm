@@ -51,6 +51,12 @@ import {
   lastPostAt,
   mediaById,
   mediaForPosts,
+  followState,
+  authorizeQuote,
+  effectiveQuotePolicy,
+  isQuotePolicy,
+  setPostQuotePolicy,
+  setQuoteState,
   mentionedIds,
   postById,
   postsByAccount,
@@ -291,6 +297,7 @@ async function renderStatuses(ctx: RequestContext, posts: Post[], viewer: Accoun
   const quotedById = new Map<string, unknown>(quotedStatuses.map((s) => [s.id, s]));
   const links = new Map(posts.map((p) => [p.id, previewLink(p)]));
   const cards = await cardsFor(db, [...links.values()].filter((l): l is string => l !== null));
+  const followed = await followedAmong(db, viewer, [...new Set(posts.map((p) => p.accountId))]);
   const statsFor = new Map<number, AccountStats>();
   for (const id of new Set(posts.map((p) => p.accountId))) {
     const a = people.get(id);
@@ -351,11 +358,37 @@ async function renderStatuses(ctx: RequestContext, posts: Post[], viewer: Accoun
         card: cardView(ctx, cards.get(links.get(post.id) ?? "")),
         poll: polls.has(post.id) ? pollView(polls.get(post.id)!, choices.get(post.id), viewer) : null,
         quote: post.quoteOf
-          ? { state: "accepted", quoted_status: quotedById.get(String(quotedPosts.get(post.quoteOf)?.id ?? "")) ?? null }
+          ? { state: post.quoteState ?? "accepted", quoted_status: quotedById.get(String(quotedPosts.get(post.quoteOf)?.id ?? "")) ?? null }
           : null,
+        quote_approval: quoteApproval(post, author, viewer, followed.has(author.id)),
       },
     ];
   });
+}
+
+/** Which of `authorIds` the viewer follows. */
+async function followedAmong(db: D1Database, viewer: Account | null, authorIds: number[]): Promise<Set<number>> {
+  if (!viewer || !authorIds.length) return new Set();
+  const { results } = await db
+    .prepare(`SELECT target_id FROM account_follows WHERE account_id = ? AND state = 'accepted' AND target_id IN (${authorIds.map(() => "?").join(", ")})`)
+    .bind(viewer.id, ...authorIds)
+    .all<{ target_id: number }>();
+  return new Set(results.map((r) => r.target_id));
+}
+
+/**
+ * Mastodon 4.5's quote_approval: who may quote a status, and whether the
+ * viewer may. A remote post that says nothing about quotes is "unknown".
+ */
+function quoteApproval(post: Post, author: Account, viewer: Account | null, follows: boolean) {
+  if (post.apId && post.quotePolicy === null) return { automatic: [], manual: [], current_user: "unknown" };
+  const policy = effectiveQuotePolicy(post, author.quotePolicy);
+  const allowed = viewer !== null && (viewer.id === author.id || policy === "public" || (policy === "followers" && follows));
+  return {
+    automatic: policy === "nobody" ? [] : [policy],
+    manual: [],
+    current_user: viewer === null ? "unknown" : allowed ? "automatic" : "denied",
+  };
 }
 
 /** Mastodon's PreviewCard for a link palm has a preview of. */
@@ -545,13 +578,32 @@ statusRoutes.post("/api/v1/statuses", async (c) => {
       votersCount: 0,
     });
   }
+  // Who may quote this one (Mastodon 4.5), when it isn't the account's default.
+  const policy = text(params.quote_approval_policy);
+  if (isQuotePolicy(policy)) await setPostQuotePolicy(db, post.id, policy);
   // A quote: the quoted post's ActivityPub ID, which other servers resolve.
+  // A post here is approved (or not) at once; another server's is asked when
+  // the post goes out (post_created).
   const quotedId = text(params.quoted_status_id);
   if (quotedId && /^\d+$/.test(quotedId)) {
     const quoted = await postById(db, Number(quotedId));
     if (quoted && (quoted.visibility === "public" || quoted.visibility === "unlisted") && (await canSee(db, quoted, me))) {
       const quotedAuthor = await accountById(db, quoted.accountId);
-      await setQuote(db, post.id, postUriOf(quoted, quotedAuthor, c.env));
+      const quotedUri = postUriOf(quoted, quotedAuthor, c.env);
+      await setQuote(db, post.id, quotedUri);
+      if (quotedAuthor && !quoted.apId) {
+        const rule = effectiveQuotePolicy(quoted, quotedAuthor.quotePolicy);
+        const allowed =
+          me.id === quotedAuthor.id || rule === "public" || (rule === "followers" && (await followState(db, me.id, quotedAuthor.id))?.state === "accepted");
+        if (allowed) {
+          const approval = await authorizeQuote(db, quoted.id, postUriOf(post, me, c.env), urls.user(me.domain, me.username));
+          await setQuoteState(db, post.id, "accepted", `${urls.user(quotedAuthor.domain, quotedAuthor.username)}/quotes/${approval}`);
+        } else {
+          await setQuoteState(db, post.id, "rejected");
+        }
+      } else {
+        await setQuoteState(db, post.id, "pending");
+      }
     }
   }
   c.env.activities.enqueue({ kind: "post_created", postId: post.id });
@@ -726,13 +778,17 @@ statusRoutes.get("/api/v1/statuses/:id/history", async (c) => {
   ]);
 });
 
-// Who may quote a status (Mastodon 4.5). palm has no quotes yet, so the
-// policy isn't kept; the author gets their status back unchanged.
+// Who may quote a status (Mastodon 4.5). Other servers hear of the change
+// through an Update; approvals already given stand.
 statusRoutes.put("/api/v1/statuses/:id/interaction_policy", async (c) => {
   const me = c.get("account");
   if (!me) return fail(c, "The access token is invalid", 401);
   const post = await visiblePost(c);
   if (!post || post.accountId !== me.id) return fail(c, "Record not found", 404);
+  const policy = text((await body(c)).quote_approval_policy);
+  if (!isQuotePolicy(policy)) return fail(c, "Validation failed: Quote approval policy is not included in the list", 422);
+  await setPostQuotePolicy(c.env.bindings.DB, post.id, policy);
+  c.env.activities.enqueue({ kind: "post_updated", postId: post.id });
   return statusResponse(c, post.id);
 });
 

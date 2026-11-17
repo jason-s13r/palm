@@ -1,7 +1,8 @@
 import { importJwk, type Context } from "@fedify/fedify";
-import { Endpoints, Hashtag, Image, Object as APObject, Person, Tombstone } from "@fedify/fedify/vocab";
+import { Endpoints, Hashtag, Image, Object as APObject, Person, QuoteAuthorization, Tombstone } from "@fedify/fedify/vocab";
 import { nodeinfoVersion, urls, type RequestContext } from "@palm/core";
 import {
+  quoteAuthorization,
   featuredTags,
   pinnedPosts,
   accountForLogin,
@@ -16,7 +17,7 @@ import {
   type Account,
 } from "@palm/db";
 import { registerInbox } from "./inbox.ts";
-import { createFor, objectFor, postParts } from "./objects.ts";
+import { actorUri, createFor, objectFor, postParts, postUri, quoteAuthorizationUri } from "./objects.ts";
 import { peopleBuilder as builder, identifierOf, recipient } from "./shared.ts";
 
 /**
@@ -130,6 +131,23 @@ builder.setObjectDispatcher(APObject, "/objects/{id}", async (ctx, { id }) => {
   const parts = await postParts(ctx.data.bindings.DB, post.id);
   if (!parts || parts.author.domain !== ctx.data.domain.domain) return null;
   return objectFor(parts);
+});
+
+// An approval for another server's post to quote one here. It stays
+// readable while the approval stands, so the quote can be checked.
+builder.setObjectDispatcher(QuoteAuthorization, "/users/{identifier}/quotes/{id}", async (ctx, { identifier, id }) => {
+  if (!/^\d+$/.test(id)) return null;
+  const db = ctx.data.bindings.DB;
+  const found = await quoteAuthorization(db, Number(id));
+  if (!found) return null;
+  const parts = await postParts(db, found.postId);
+  if (!parts || parts.post.apId || parts.author.username !== identifier || parts.author.domain !== ctx.data.domain.domain) return null;
+  return new QuoteAuthorization({
+    id: quoteAuthorizationUri(parts.author, found.id),
+    attribution: actorUri(parts.author),
+    interactingObject: new URL(found.quotingId),
+    interactionTarget: postUri(parts.post, parts.author),
+  });
 });
 
 const OUTBOX_PAGE = 20;

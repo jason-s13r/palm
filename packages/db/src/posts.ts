@@ -1,3 +1,5 @@
+import type { QuotePolicy, QuoteState } from "./quotes.ts";
+
 const now = () => Math.floor(Date.now() / 1000);
 
 export type Visibility = "public" | "unlisted" | "private" | "direct";
@@ -42,6 +44,12 @@ export interface Post {
   locked: boolean;
   /** The ActivityPub ID of a post this one quotes. */
   quoteOf: string | null;
+  /** Who may quote this post (Mastodon 4.5); null takes the author's default. */
+  quotePolicy: QuotePolicy | null;
+  /** Whether the quoted post's author has approved this post's quote. */
+  quoteState: QuoteState | null;
+  /** The approval (a QuoteAuthorization's ID) for this post's quote. */
+  quoteAuthorization: string | null;
   /** Lemmy: pinned to the top of its community, or of the instance. */
   featuredCommunity: boolean;
   featuredLocal: boolean;
@@ -78,6 +86,9 @@ interface PostRow {
   reblog_of?: number | null;
   locked?: number | null;
   quote_of?: string | null;
+  quote_policy?: string | null;
+  quote_state?: string | null;
+  quote_authorization?: string | null;
   featured_community?: number | null;
   featured_local?: number | null;
 }
@@ -106,6 +117,9 @@ export const toPost = (r: PostRow): Post => ({
   reblogOf: r.reblog_of ?? null,
   locked: r.locked === 1,
   quoteOf: r.quote_of ?? null,
+  quotePolicy: (r.quote_policy as QuotePolicy | null | undefined) ?? null,
+  quoteState: (r.quote_state as QuoteState | null | undefined) ?? null,
+  quoteAuthorization: r.quote_authorization ?? null,
   featuredCommunity: r.featured_community === 1,
   featuredLocal: r.featured_local === 1,
 });
@@ -115,7 +129,7 @@ export type { PostRow };
 /** What a new post needs; the thread fields default to a plain status. */
 export type NewPost = Omit<
   Post,
-  "id" | "createdAt" | "updatedAt" | "communityId" | "title" | "linkUrl" | "rootId" | "parentId" | "path" | "apId" | "url" | "attachments" | "reblogOf" | "locked" | "featuredCommunity" | "featuredLocal" | "quoteOf"
+  "id" | "createdAt" | "updatedAt" | "communityId" | "title" | "linkUrl" | "rootId" | "parentId" | "path" | "apId" | "url" | "attachments" | "reblogOf" | "locked" | "featuredCommunity" | "featuredLocal" | "quoteOf" | "quotePolicy" | "quoteState" | "quoteAuthorization"
 > &
   Partial<Pick<Post, "communityId" | "title" | "linkUrl" | "rootId" | "parentId" | "apId" | "url" | "createdAt" | "updatedAt" | "attachments">>;
 

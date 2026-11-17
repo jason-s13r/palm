@@ -13,6 +13,7 @@ import {
   Group,
   Like,
   Move,
+  QuoteRequest,
   Reject,
   Undo,
   Update,
@@ -20,6 +21,11 @@ import {
 import { urls, type RequestContext } from "@palm/core";
 import {
   addRemotePollVote,
+  authorizeQuote,
+  effectiveQuotePolicy,
+  mayQuote,
+  postById,
+  setQuoteState,
   accountById,
   follow as followAccount,
   followState,
@@ -54,6 +60,7 @@ import {
 } from "@palm/db";
 import { htmlToText, sanitizeHtml } from "@palm/core";
 import { announceToCommunity } from "./delivery.ts";
+import { quoteAuthorizationUri } from "./objects.ts";
 import { ensureAccount, ensureActor, ensureCommunity, savePollFrom, storeRemotePost } from "./remote.ts";
 import { communitySenderKeys, contextsFor, localDomains, logProblem, personKeys, send } from "./shared.ts";
 
@@ -121,6 +128,7 @@ async function onAccept(ctx: Ctx, accept: Accept): Promise<void> {
   const db = ctx.data.bindings.DB;
   const followId = accept.objectId;
   if (!followId) return;
+  if (await answerQuote(ctx, followId, accept.actorId, accept.resultId)) return;
   const follow = await followByApId(db, followId.href);
   if (follow) return acceptFollow(db, follow.accountId, follow.targetId);
   const sub = await subscriptionByFollow(db, followId.href);
@@ -131,10 +139,62 @@ async function onReject(ctx: Ctx, reject: Reject): Promise<void> {
   const db = ctx.data.bindings.DB;
   const followId = reject.objectId;
   if (!followId) return;
+  if (await answerQuote(ctx, followId, reject.actorId, null)) return;
   const follow = await followByApId(db, followId.href);
   if (follow) return unfollow(db, follow.accountId, follow.targetId);
   const sub = await subscriptionByFollow(db, followId.href);
   if (sub) await unsubscribe(db, sub.communityId, sub.accountId);
+}
+
+/**
+ * An answer to palm's request to quote another server's post: an Accept
+ * carries the approval (`result`), which the quoting post then points to.
+ * Returns whether `requestId` was one of palm's quote requests.
+ */
+async function answerQuote(ctx: Ctx, requestId: URL, actorId: URL | null, approval: URL | null): Promise<boolean> {
+  if (requestId.hash !== "#quote-request" || !localDomains(ctx.data).includes(requestId.host.toLowerCase())) return false;
+  const match = /^\/objects\/(\d+)$/.exec(requestId.pathname);
+  const db = ctx.data.bindings.DB;
+  const post = match ? await postById(db, Number(match[1])) : null;
+  if (!post?.quoteOf || !actorId) return true;
+  // Only the quoted post's server answers for it.
+  if (new URL(post.quoteOf).host !== actorId.host) return true;
+  if (approval) await setQuoteState(db, post.id, "accepted", approval.href);
+  else await setQuoteState(db, post.id, "rejected");
+  // Followers' copies pick up the approval.
+  ctx.data.activities.enqueue({ kind: "post_updated", postId: post.id });
+  return true;
+}
+
+/**
+ * Another server asks to quote a post here (Mastodon 4.5). The post's policy
+ * decides: an Accept with an approval, which stays readable at its ID, or a
+ * Reject.
+ */
+async function onQuoteRequest(ctx: Ctx, request: QuoteRequest): Promise<void> {
+  const db = ctx.data.bindings.DB;
+  if (!request.id || !request.actorId || !request.objectId) return;
+  const quoted = await postByUri(db, request.objectId.href, localDomains(ctx.data));
+  if (!quoted || quoted.apId !== null) return;
+  const author = await accountById(db, quoted.accountId);
+  const requester = await request.getActor(ctx).catch(() => null);
+  if (!author || !requester?.id || !requester.inboxId) return;
+  const quoting = request.instrumentId;
+  const policy = effectiveQuotePolicy(quoted, author.quotePolicy);
+  const allowed = quoting !== null && quoting.host === requester.id.host && (await mayQuote(db, author.id, requester.id.href, policy));
+  const { people } = await contextsFor(ctx.data);
+  const actor = new URL(urls.user(author.domain, author.username));
+  if (!allowed) {
+    await send(people, await personKeys(people, author), requester, new Reject({ id: new URL(`#rejects/${crypto.randomUUID()}`, actor), actor, object: request }));
+    return;
+  }
+  const approval = quoteAuthorizationUri(author, await authorizeQuote(db, quoted.id, quoting.href, requester.id.href));
+  await send(
+    people,
+    await personKeys(people, author),
+    requester,
+    new Accept({ id: new URL(`#accepts/${crypto.randomUUID()}`, actor), actor, object: request, result: approval }),
+  );
 }
 
 async function onCreate(ctx: Ctx, create: Create, via: Via): Promise<void> {
@@ -353,7 +413,8 @@ export function registerInbox(
     .on(Undo, gated<Undo>((ctx, undo) => dispatch(ctx, undo, direct)))
     .on(Announce, gated<Announce>((ctx, announce) => onAnnounce(ctx, announce)))
     .on(Flag, gated<Flag>((ctx, flag) => onFlag(ctx, flag)))
-    .on(Move, gated<Move>((ctx, move) => onMove(ctx, move)));
+    .on(Move, gated<Move>((ctx, move) => onMove(ctx, move)))
+    .on(QuoteRequest, gated<QuoteRequest>((ctx, request) => onQuoteRequest(ctx, request)));
 }
 
 /**

@@ -1,3 +1,4 @@
+import type { Context } from "@fedify/fedify";
 import {
   Accept,
   Activity,
@@ -11,7 +12,9 @@ import {
   Like,
   Move,
   Note,
+  QuoteRequest,
   Reject,
+  type Object as APObject,
   PUBLIC_COLLECTION,
   traverseCollection,
   Undo,
@@ -21,6 +24,8 @@ import {
 import type { ActivitySink, FederationTask, RequestContext, Resolved } from "@palm/core";
 import {
   pollChoices,
+  postByUri,
+  setQuoteState,
   clearFollowers,
   markMoveSent,
   reportById,
@@ -34,11 +39,11 @@ import {
   type Account,
   type Community,
 } from "@palm/db";
-import { actorUri, communityUri, createFor, followersUri, objectFor, postParts, postUri, tombstoneFor, type PostParts } from "./objects.ts";
+import { actorUri, communityUri, createFor, followersUri, objectFor, postParts, postUri, quoteRequestId, tombstoneFor, type PostParts } from "./objects.ts";
 import type { QueueBody } from "./queue.ts";
 import { backfillProfile, backfillThread, resolve as resolveRemote, storeRemotePost } from "./remote.ts";
 import { cardForPost } from "./cards.ts";
-import { communitySenderKeys, contextsFor, federationsFor, logProblem, personKeys, recipient, recipientOf, send } from "./shared.ts";
+import { communitySenderKeys, contextsFor, federationsFor, localDomains, logProblem, personKeys, recipient, recipientOf, send } from "./shared.ts";
 import { personFor } from "./people.ts";
 
 const isLocal = (a: { apId: string | null }) => a.apId === null;
@@ -152,7 +157,9 @@ export async function runTask(ctx: RequestContext, task: FederationTask): Promis
           : task.kind === "post_updated"
             ? new Update({ id: new URL(`${id.href}#updates/${Date.now()}`), actor: actorUri(parts.author), tos, ccs, object })
             : new Delete({ id: new URL(`${id.href}#delete`), actor: actorUri(parts.author), tos, ccs, object: tombstoneFor(parts) });
-      return sendAboutPost(ctx, parts, activity);
+      await sendAboutPost(ctx, parts, activity);
+      if (task.kind === "post_created") await requestQuote(ctx, people, parts, object);
+      return;
     }
     case "voted": {
       const [parts, voter] = await Promise.all([postParts(db, task.postId), accountById(db, task.accountId)]);
@@ -401,4 +408,29 @@ export function activitySink(ctx: RequestContext): ActivitySink {
       );
     },
   };
+}
+
+/**
+ * A new post quoting another server's post asks that post's author for
+ * approval (Mastodon 4.5); the answer arrives as an Accept or a Reject
+ * (answerQuote in inbox.ts). Until then the quote shows as pending.
+ */
+async function requestQuote(ctx: RequestContext, people: Context<RequestContext>, parts: PostParts, object: APObject): Promise<void> {
+  const { post, author } = parts;
+  if (!post.quoteOf || (post.quoteState !== null && post.quoteState !== "pending")) return;
+  const quotedId = new URL(post.quoteOf);
+  if (localDomains(ctx).includes(quotedId.host.toLowerCase())) return;
+  const db = ctx.bindings.DB;
+  const quoted = await postByUri(db, quotedId.href, localDomains(ctx));
+  const quotedAuthor = quoted ? await accountById(db, quoted.accountId) : null;
+  const to = quotedAuthor ? recipientOf(quotedAuthor) : null;
+  if (!to) return;
+  await setQuoteState(db, post.id, "pending");
+  const id = postUri(post, author);
+  await send(
+    people,
+    await personKeys(people, author),
+    to,
+    new QuoteRequest({ id: quoteRequestId(id), actor: actorUri(author), object: quotedId, instrument: object }),
+  );
 }

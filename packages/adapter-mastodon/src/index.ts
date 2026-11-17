@@ -330,6 +330,7 @@ app.get("/api/v1/preferences", (c) =>
     "posting:default:visibility": "public",
     "posting:default:sensitive": false,
     "posting:default:language": null,
+    "posting:default:quote_policy": c.get("account")?.quotePolicy ?? "public",
     "reading:expand:media": "default",
     "reading:expand:spoilers": false,
   }),

@@ -686,6 +686,29 @@ CREATE TABLE IF NOT EXISTS home_feeds (
 )
 `,
   },
+  {
+    version: 23,
+    name: "quote permissions",
+    sql: `
+ALTER TABLE posts ADD COLUMN quote_policy TEXT
+;
+ALTER TABLE posts ADD COLUMN quote_state TEXT
+;
+ALTER TABLE posts ADD COLUMN quote_authorization TEXT
+;
+ALTER TABLE accounts ADD COLUMN quote_policy TEXT
+;
+CREATE TABLE IF NOT EXISTS quote_authorizations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  quoting_id TEXT NOT NULL,
+  actor_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  revoked_at INTEGER,
+  UNIQUE (post_id, quoting_id)
+)
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

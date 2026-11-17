@@ -246,3 +246,16 @@ export { deletePushSubscription, metaValue, pushSubscription, pushSubscriptionsF
 export type { PushSubscription } from "./push.ts";
 export { clearFollowers, deleteLocalAccount, domainOf, exportAccount, pendingDeletes, forgetRemoteAccount, localFollowersOf, markMoveSent, pendingMoves, setAlsoKnownAs, setMovedTo } from "./lifecycle.ts";
 export type { AccountExport } from "./lifecycle.ts";
+export {
+  authorizeQuote,
+  effectiveQuotePolicy,
+  isQuotePolicy,
+  mayQuote,
+  pendingQuoteOf,
+  QUOTE_POLICIES,
+  quoteAuthorization,
+  setAccountQuotePolicy,
+  setPostQuotePolicy,
+  setQuoteState,
+} from "./quotes.ts";
+export type { QuoteAuthorizationRow, QuotePolicy, QuoteState } from "./quotes.ts";

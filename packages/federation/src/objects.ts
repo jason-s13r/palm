@@ -1,4 +1,4 @@
-import { ChatMessage, Collection, Create, Document, Question, Hashtag, Link, Mention, Note, Page, PUBLIC_COLLECTION, Source, Tombstone, type Object as APObject } from "@fedify/fedify/vocab";
+import { ChatMessage, Collection, Create, Document, Question, Hashtag, InteractionPolicy, InteractionRule, Link, Mention, Note, Page, PUBLIC_COLLECTION, Source, Tombstone, type Object as APObject } from "@fedify/fedify/vocab";
 import { urls } from "@palm/core";
 import {
   pollsFor,
@@ -6,6 +6,7 @@ import {
   accountById,
   accountsByIds,
   communityById,
+  effectiveQuotePolicy,
   mediaForPosts,
   mentionedIds,
   postById,
@@ -28,6 +29,23 @@ export const communityUri = (community: Pick<Community, "apId" | "domain" | "nam
   new URL(community.apId ?? urls.community(community.domain, community.name));
 
 /** A post's ActivityPub ID: its own if remote, else /objects/{id} on its author's domain. */
+/** An approval for another post to quote one of this account's. */
+export const quoteAuthorizationUri = (account: Pick<Account, "apId" | "domain" | "username">, id: number) => new URL(`${actorUri(account).href}/quotes/${id}`);
+
+/**
+ * Who may quote a status, for other servers (Mastodon 4.5's canQuote):
+ * anyone, the followers, or the author alone. Approval is automatic for
+ * whoever it names; anyone else is turned down.
+ */
+export function quotePolicyFor(post: Post, author: Account): InteractionPolicy {
+  const policy = effectiveQuotePolicy(post, author.quotePolicy);
+  const approved = policy === "public" ? PUBLIC_COLLECTION : policy === "followers" ? followersUri(author) : actorUri(author);
+  return new InteractionPolicy({ canQuote: new InteractionRule({ automaticApprovals: [approved] }) });
+}
+
+/** The ID palm gives the QuoteRequest it sends for a post that quotes another server's. */
+export const quoteRequestId = (postId: URL) => new URL("#quote-request", postId);
+
 export const postUri = (post: Pick<Post, "apId" | "id">, author: Pick<Account, "domain">) =>
   new URL(post.apId ?? urls.object(author.domain, String(post.id)));
 
@@ -115,8 +133,11 @@ export function objectFor(parts: PostParts): Note | Page | ChatMessage | Questio
   const values = {
     id,
     url: id,
-    // A quoted post, as Misskey and newer Mastodon read it.
-    ...(post.quoteOf ? { quoteUrl: new URL(post.quoteOf) } : {}),
+    // A quoted post, as Misskey (quoteUrl) and Mastodon (quote) read it, with
+    // its author's approval once there is one.
+    ...(post.quoteOf ? { quoteUrl: new URL(post.quoteOf), quote: new URL(post.quoteOf) } : {}),
+    ...(post.quoteAuthorization ? { quoteAuthorization: new URL(post.quoteAuthorization) } : {}),
+    ...(community ? {} : { interactionPolicy: quotePolicyFor(post, author) }),
     attribution: actorUri(author),
     ...addressing(parts),
     ...(community ? { audience: communityUri(community) } : {}),

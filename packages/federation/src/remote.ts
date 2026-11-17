@@ -28,6 +28,8 @@ import {
   accountById,
   savePoll,
   setQuote,
+  setQuoteState,
+  setPostQuotePolicy,
   accountForLogin,
   claimThreadRefresh,
   markOutboxFetched,
@@ -343,8 +345,18 @@ export async function storeRemotePost(
   // Lemmy counts an author's own post or comment as upvoted, without sending a vote for it.
   if (post.communityId) await vote(db, post.id, author.id, 1);
   if (object instanceof Question) await savePollFrom(db, post.id, object).catch(() => undefined);
-  const quote = (object as { quoteUrl?: URL | null }).quoteUrl;
+  // Mastodon names a quoted post in `quote` (with its approval), Misskey in quoteUrl.
+  const quoting = object as { quoteId?: URL | null; quoteUrl?: URL | null; quoteAuthorizationId?: URL | null };
+  const quote = quoting.quoteId ?? quoting.quoteUrl;
   if (quote) await setQuote(db, post.id, quote.href);
+  if (quote && quoting.quoteAuthorizationId) await setQuoteState(db, post.id, "accepted", quoting.quoteAuthorizationId.href);
+  // Who may quote it, as its server says (Mastodon 4.5's canQuote).
+  const canQuote = (object as { interactionPolicy?: { canQuote: { automaticApprovals: URL[] } | null } | null }).interactionPolicy?.canQuote;
+  if (canQuote) {
+    const approved = canQuote.automaticApprovals.map((u) => u.href);
+    const policy = approved.includes(PUBLIC_COLLECTION.href) ? "public" : approved.some((u) => u.endsWith("/followers")) ? "followers" : "nobody";
+    await setPostQuotePolicy(db, post.id, policy);
+  }
   if (localMentions.length) await addMentions(db, post.id, localMentions.map((m) => m.id));
   if (hashtags.length) await addTags(db, post.id, hashtags);
   for (const m of localMentions) await notify(db, { accountId: m.id, kind: "mention", fromAccountId: author.id, postId: post.id });
