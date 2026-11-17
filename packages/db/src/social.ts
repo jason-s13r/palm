@@ -222,14 +222,31 @@ export interface Notification {
   createdAt: number;
 }
 
+type NotificationHook = (db: D1Database, n: Notification) => Promise<void>;
+let notificationHook: NotificationHook | null = null;
+
+/** Runs after each new notification (push notifications use it). */
+export function onNotification(hook: NotificationHook): void {
+  notificationHook = hook;
+}
+
 /** Notifies a local account, unless it's about its own doing. */
 export async function notify(
   db: D1Database,
   n: { accountId: number; kind: NotificationKind; fromAccountId: number; postId?: number | null },
 ): Promise<void> {
   if (n.accountId === n.fromAccountId) return;
+  const created = await insertNotification(db, n);
+  if (created && notificationHook) await notificationHook(db, created).catch((error: unknown) => console.warn(JSON.stringify({ palm: "push_failed", error: String(error) })));
+}
+
+async function insertNotification(
+  db: D1Database,
+  n: { accountId: number; kind: NotificationKind; fromAccountId: number; postId?: number | null },
+): Promise<Notification | null> {
+  const at = now();
   // Nothing from someone the recipient blocked, or muted with notifications.
-  await db
+  const result = await db
     .prepare(
       `INSERT INTO notifications (account_id, kind, from_account_id, post_id, created_at)
        SELECT ?1, ?2, ?3, ?4, ?5 WHERE NOT EXISTS (
@@ -238,8 +255,11 @@ export async function notify(
        AND NOT EXISTS (
          SELECT 1 FROM user_domain_blocks d JOIN accounts a ON a.id = ?3 WHERE d.account_id = ?1 AND d.domain = a.domain)`,
     )
-    .bind(n.accountId, n.kind, n.fromAccountId, n.postId ?? null, now())
+    .bind(n.accountId, n.kind, n.fromAccountId, n.postId ?? null, at)
     .run();
+  const id = result.meta.last_row_id;
+  if (!result.meta.changes || !id) return null;
+  return { id, accountId: n.accountId, kind: n.kind, fromAccountId: n.fromAccountId, postId: n.postId ?? null, read: false, createdAt: at };
 }
 
 export async function listNotifications(

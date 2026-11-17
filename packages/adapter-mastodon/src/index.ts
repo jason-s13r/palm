@@ -24,6 +24,8 @@ import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 import { authorizePage, codePage } from "./oauth-page.ts";
 import { curationRoutes } from "./curation.ts";
+import { pushRoutes } from "./push.ts";
+import { vapidKeys } from "./webpush.ts";
 import { peopleRoutes } from "./people.ts";
 import { accountStats, statusRoutes } from "./statuses.ts";
 import { account, credentialAccount, instanceV1, instanceV2, MASTODON_VERSION } from "./views.ts";
@@ -136,9 +138,12 @@ app.get("/.well-known/oauth-authorization-server", (c) => {
 app.get("/api/v1/instance", async (c) =>
   c.json(instanceV1(c.env, c.env.version, await countAccounts(c.env.bindings.DB, c.env.domain.domain))),
 );
-app.get("/api/v2/instance", async (c) =>
-  c.json(instanceV2(c.env, c.env.version, await countAccounts(c.env.bindings.DB, c.env.domain.domain))),
-);
+app.get("/api/v2/instance", async (c) => {
+  const instance = instanceV2(c.env, c.env.version, await countAccounts(c.env.bindings.DB, c.env.domain.domain));
+  // Apps subscribe to push with this key.
+  instance.configuration.vapid.public_key = (await vapidKeys(c.env.bindings.DB)).publicKey;
+  return c.json(instance);
+});
 
 // --- apps and OAuth --------------------------------------------------------
 
@@ -330,6 +335,7 @@ app.get("/api/v1/preferences", (c) =>
 
 // --- statuses and timelines ------------------------------------------------
 
+app.route("/", pushRoutes);
 app.route("/", curationRoutes);
 app.route("/", statusRoutes);
 
@@ -378,11 +384,6 @@ app.get("/api/v2/notifications/policy", (c) =>
     summary: { pending_requests_count: 0, pending_notifications_count: 0 },
   }),
 );
-// Push needs a relay per app (Ivory, Ice Cubes...) and VAPID keys; until then,
-// answer as a Mastodon server with no subscription would, without logging it.
-app.get("/api/v1/push/subscription", (c) => fail(c, "Record not found", 404));
-app.post("/api/v1/push/subscription", (c) => fail(c, "Push notifications aren't available on this server yet", 422));
-app.delete("/api/v1/push/subscription", (c) => c.json({}));
 
 app.all("/api/*", (c) => {
   console.warn(JSON.stringify({ palm: "unknown_endpoint", api: "mastodon", method: c.req.method, path: c.req.path }));

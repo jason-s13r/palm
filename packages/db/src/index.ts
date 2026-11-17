@@ -139,6 +139,7 @@ export {
   markNotificationsRead,
   mentionedIds,
   notify,
+  onNotification,
   relationships,
   unbookmark,
   unboost,
@@ -237,3 +238,5 @@ export {
   votePoll,
 } from "./extras.ts";
 export type { Poll, PostVersion, ScheduledStatus } from "./extras.ts";
+export { deletePushSubscription, metaValue, pushSubscription, pushSubscriptionsFor, savePushSubscription } from "./push.ts";
+export type { PushSubscription } from "./push.ts";

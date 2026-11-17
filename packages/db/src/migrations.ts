@@ -641,6 +641,26 @@ CREATE TABLE IF NOT EXISTS poll_votes (
 ALTER TABLE posts ADD COLUMN quote_of TEXT
 `,
   },
+  {
+    version: 20,
+    name: "push subscriptions",
+    sql: `
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  token_hash TEXT PRIMARY KEY,
+  account_id INTEGER NOT NULL REFERENCES accounts (id),
+  endpoint TEXT NOT NULL,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  alerts TEXT NOT NULL,
+  policy TEXT NOT NULL DEFAULT 'all',
+  standard INTEGER NOT NULL DEFAULT 0,
+  access_token TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+)
+;
+CREATE INDEX IF NOT EXISTS push_subscriptions_account ON push_subscriptions (account_id)
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;
