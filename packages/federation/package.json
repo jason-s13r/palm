@@ -1,6 +1,6 @@
 {
   "name": "@palm/federation",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "private": true,
   "type": "module",
   "description": "ActivityPub federation for palm, on Fedify: WebFinger, actors, nodeinfo and inboxes.",

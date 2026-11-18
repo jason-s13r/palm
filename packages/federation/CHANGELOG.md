@@ -1,5 +1,16 @@
 # Changelog
 
+## federation@0.4.4 (2026-11-18)
+
+### Fixes
+
+- communities nobody here subscribes to no longer fill the database
+
+### Dependencies
+
+- db: 0.4.2 -> 0.4.3
+
+
 ## federation@0.4.3 (2026-11-17)
 
 ### Fixes

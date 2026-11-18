@@ -1,5 +1,12 @@
 # Changelog
 
+## db@0.4.3 (2026-11-18)
+
+### Fixes
+
+- a request could fail while two servers applied the same database update
+
+
 ## db@0.4.2 (2026-11-17)
 
 ### Fixes

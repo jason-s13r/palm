@@ -1,5 +1,19 @@
 # Changelog
 
+## worker@0.7.1 (2026-11-18)
+
+### Fixes
+
+- communities nobody here subscribes to no longer fill the database
+
+- a request could fail while two servers applied the same database update
+
+### Dependencies
+
+- db: 0.4.2 -> 0.4.3
+- federation: 0.4.3 -> 0.4.4
+
+
 ## worker@0.7.0 (2026-11-17)
 
 ### Features
