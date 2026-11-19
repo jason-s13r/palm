@@ -1,5 +1,17 @@
 # Changelog
 
+## web@0.1.1 (2026-11-19)
+
+### Fixes
+
+- another server's "interact from your server" link no longer goes to the configured site
+
+### Dependencies
+
+- core: 1.1.1 -> 1.2.0
+- db: 0.4.3 -> 0.5.0
+
+
 ## web@0.1.0 (2026-11-16)
 
 ### Features

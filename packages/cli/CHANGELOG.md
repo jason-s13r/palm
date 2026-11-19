@@ -1,5 +1,18 @@
 # Changelog
 
+## cli@0.4.0 (2026-11-19)
+
+### Features
+
+- import follows from another server
+  `palm user import <username> <file>` reads Mastodon's following_accounts.csv,
+  Lemmy's settings export or palm's own export into a new follow_imports table.
+  The cron claims 5 every run and sends each as its own queue job, which looks
+  the target up and follows it from the app the import names. Lemmy apps'
+  settings import now leaves follows past its 40 lookups to the same queue
+  instead of dropping them.
+
+
 ## cli@0.3.1 (2026-11-17)
 
 ### Fixes

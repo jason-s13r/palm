@@ -1,5 +1,37 @@
 # Changelog
 
+## adapter-mastodon@0.6.0 (2026-11-19)
+
+### Features
+
+- the Pixelfed app
+  Pixelfed's API is Mastodon's with extras, so the Mastodon adapter serves it:
+  - /api/nodeinfo/2.0.json (Pixelfed's own path, which the app checks before
+    signing in) answers as Pixelfed; standard nodeinfo stays Lemmy.
+  - Pixelfed apps get Pixelfed's fields on accounts and statuses (pf_type,
+    reply_count, liked_by, local, note_text...), added by a middleware only for
+    them, so Mastodon apps' responses are unchanged.
+  - Its endpoints under /api/v1.1, /api/v1.2 and /api/pixelfed: username lookup,
+    mutuals, avatar removal, reports, compose settings and config, discover
+    (trending photos, hashtags, popular people), and chats over direct posts.
+    Stories and collections answer empty; Pixelfed's push answers unsupported,
+    as Pixelfed servers without its gateway do.
+  - update_credentials takes its fields from the query string, and POST.
+
+- a moved account can't post
+  New statuses (scheduled ones included), posts and comments are refused once
+  an account has moved, as Mastodon does.
+
+### Fixes
+
+- retries no longer repeat notifications, posts or stale subscription changes
+
+### Dependencies
+
+- core: 1.1.1 -> 1.2.0
+- db: 0.4.3 -> 0.5.0
+
+
 ## adapter-mastodon@0.5.0 (2026-11-17)
 
 ### Features

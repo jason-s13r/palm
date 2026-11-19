@@ -1,5 +1,36 @@
 # Changelog
 
+## db@0.5.0 (2026-11-19)
+
+### Features
+
+- the Pixelfed app
+  Pixelfed's API is Mastodon's with extras, so the Mastodon adapter serves it:
+  - /api/nodeinfo/2.0.json (Pixelfed's own path, which the app checks before
+    signing in) answers as Pixelfed; standard nodeinfo stays Lemmy.
+  - Pixelfed apps get Pixelfed's fields on accounts and statuses (pf_type,
+    reply_count, liked_by, local, note_text...), added by a middleware only for
+    them, so Mastodon apps' responses are unchanged.
+  - Its endpoints under /api/v1.1, /api/v1.2 and /api/pixelfed: username lookup,
+    mutuals, avatar removal, reports, compose settings and config, discover
+    (trending photos, hashtags, popular people), and chats over direct posts.
+    Stories and collections answer empty; Pixelfed's push answers unsupported,
+    as Pixelfed servers without its gateway do.
+  - update_credentials takes its fields from the query string, and POST.
+
+- import follows from another server
+  `palm user import <username> <file>` reads Mastodon's following_accounts.csv,
+  Lemmy's settings export or palm's own export into a new follow_imports table.
+  The cron claims 5 every run and sends each as its own queue job, which looks
+  the target up and follows it from the app the import names. Lemmy apps'
+  settings import now leaves follows past its 40 lookups to the same queue
+  instead of dropping them.
+
+### Fixes
+
+- retries no longer repeat notifications, posts or stale subscription changes
+
+
 ## db@0.4.3 (2026-11-18)
 
 ### Fixes
