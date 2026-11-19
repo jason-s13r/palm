@@ -333,7 +333,8 @@ peopleRoutes.patch("/api/v1/accounts/update_credentials", async (c) => {
   const form = type.includes("json")
     ? new Map(Object.entries(await c.req.json<Record<string, unknown>>().catch(() => ({}))))
     : await c.req.formData().catch(() => null);
-  const get = (name: string) => form?.get(name) ?? undefined;
+  // Pixelfed's apps send the fields in the query string.
+  const get = (name: string) => form?.get(name) ?? c.req.query(name) ?? undefined;
   const textOf = (name: string) => {
     const value = get(name);
     return typeof value === "string" ? value.trim() : undefined;

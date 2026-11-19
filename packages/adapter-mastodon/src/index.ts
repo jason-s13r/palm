@@ -28,6 +28,7 @@ import { pushRoutes } from "./push.ts";
 import { streamingRoutes } from "./streaming.ts";
 import { vapidKeys } from "./webpush.ts";
 import { peopleRoutes } from "./people.ts";
+import { pixelfedExtras, pixelfedRoutes } from "./pixelfed.ts";
 import { accountStats, statusRoutes } from "./statuses.ts";
 import { account, credentialAccount, instanceV1, instanceV2, MASTODON_VERSION } from "./views.ts";
 
@@ -89,6 +90,9 @@ app.use("/api/*", async (c, next) => {
   }
   await next();
 });
+
+// Pixelfed's apps get Pixelfed's extra fields on accounts and statuses.
+app.use("/api/*", pixelfedExtras);
 
 // A person who opens this host in a browser gets told what it's for.
 app.get("/", (c) =>
@@ -323,6 +327,8 @@ app.get("/api/v1/accounts/verify_credentials", async (c) => {
   return c.json(credentialAccount(c.env, acct, await accountStats(c.env, acct)));
 });
 
+// Pixelfed's own endpoints, and the few Mastodon ones it calls differently.
+app.route("/", pixelfedRoutes);
 app.route("/", peopleRoutes);
 
 app.get("/api/v1/preferences", (c) =>

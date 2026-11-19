@@ -196,7 +196,7 @@ export async function handle(
         // Apps show the handle with the host they signed in to (Voyager and the
         // Mastodon app both do), so signing in with the bare domain gives
         // @name@domain. Their paths don't overlap: Lemmy's API is /api/v3,
-        // Mastodon's /api/v1 and /api/v2. Discovery (WebFinger, nodeinfo) stays
+        // Mastodon's /api/v1 and /api/v2 (and Pixelfed's extras). Discovery (WebFinger, nodeinfo) stays
         // with federation, which answers nodeinfo as Lemmy.
         // Uploaded images live where Lemmy keeps them, for both kinds of app.
         if (url.pathname.startsWith("/api/v3/") || url.pathname.startsWith("/pictrs/")) return handleLemmy(request, ctx);
@@ -212,6 +212,11 @@ function isMastodonPath(path: string): boolean {
   return (
     path.startsWith("/api/v1/") ||
     path.startsWith("/api/v2/") ||
+    // Pixelfed's apps: its extra API versions, and its own nodeinfo path.
+    path.startsWith("/api/v1.1/") ||
+    path.startsWith("/api/v1.2/") ||
+    path.startsWith("/api/pixelfed/") ||
+    path === "/api/nodeinfo/2.0.json" ||
     path.startsWith("/oauth/") ||
     path === "/.well-known/oauth-authorization-server"
   );
