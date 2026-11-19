@@ -43,7 +43,7 @@ cron prunes old remote posts nobody here touched.
   actor's or object's ID land on these; ActivityPub clients asking for these
   URLs are sent to the object. Only public and unlisted posts show.
 - `packages/cli`: admin commands run locally (`pnpm palm user create ...`,
-  `pnpm palm user keys|alias|move|delete|export ...`, `pnpm palm community create ...`,
+  `pnpm palm user keys|alias|move|delete|export|import ...`, `pnpm palm community create ...`,
   `pnpm palm invite create ...`). Signing keys are generated here, not in the
   Worker, because key generation is too slow for the free CPU limit; invites
   carry a key pair for whoever signs up with them. The worker package ships

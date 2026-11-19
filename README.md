@@ -138,7 +138,14 @@ Node 22+ and pnpm.
    override the defaults, and without a database the CLI prints the SQL.
 
 7. **Moving and leaving.** `pnpm palm user alias you https://old.example/users/you`
-   lets an account follow you here from another server. `pnpm palm user move
+   lets your followers on another server follow you here when you move.
+   `pnpm palm user import you following_accounts.csv` brings over who you
+   followed: Mastodon's follows export, Lemmy's settings export, or palm's own
+   export. People come in as Mastodon follows and communities as Lemmy
+   subscriptions (`--via` picks one app for all of them), and the cron sends 5
+   every 10 minutes to stay inside the free plan's queue limit. Lemmy apps'
+   settings import sends its first 40 at once and leaves the rest to the cron.
+   A moved account can't post any more. `pnpm palm user move
    you https://new.example/users/you` moves your followers there (the new
    account has to list this one as an alias first). `pnpm palm user export you`
    writes your posts and follows to a JSON file, and `pnpm palm user delete you`
