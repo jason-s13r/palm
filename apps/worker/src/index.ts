@@ -2,7 +2,7 @@ import { handleLemmy } from "@palm/adapter-lemmy";
 import { handleMastodon, publishDueStatuses } from "@palm/adapter-mastodon";
 import { activitySink, handleFederation, processQueueMessage, type QueueBody } from "@palm/federation";
 import { contextScope, defineConfig, enterContext, normaliseHost, resolveSurface, type DomainConfig, type PalmBindings, type PalmConfig, type RequestContext } from "@palm/core";
-import { domainOf, migrate, pendingDeletes, pendingMoves, prune } from "@palm/db";
+import { claimFollowImports, domainOf, migrate, pendingDeletes, pendingMoves, prune } from "@palm/db";
 import { handleWeb } from "@palm/web";
 import { avatarResponse } from "./assets.ts";
 import { servePublic, serveUpload } from "./public-cache.ts";
@@ -55,7 +55,7 @@ export function createPalm<Env extends PalmEnv = PalmEnv>(source: ConfigSource<E
   };
 }
 
-/** The cron run: due scheduled posts, and the daily prune. */
+/** The cron run: due scheduled posts, moves, deletions, follow imports, and the daily prune. */
 async function scheduled(config: PalmConfig, controller: ScheduledController, env: PalmEnv, ctx: Pick<ExecutionContext, "waitUntil">): Promise<void> {
   await migrate(env.DB);
   const contextFor = (domain: string) => {
@@ -72,6 +72,13 @@ async function scheduled(config: PalmConfig, controller: ScheduledController, en
       contextFor(domain ?? "")?.activities.enqueue({ kind, accountId });
     }
   }
+  // Follows brought from another server go out a few at a time, one queue job
+  // each: every one is a lookup on another server, and a big import would use
+  // up the day's queue operations at once (about 2,000 a day at this rate).
+  for (const claimed of await claimFollowImports(env.DB, IMPORTS_PER_RUN)) {
+    const domain = await domainOf(env.DB, claimed.accountId);
+    contextFor(domain ?? "")?.activities.enqueue({ kind: "import_follow", importId: claimed.id });
+  }
   const at = new Date(controller.scheduledTime);
   if (at.getUTCHours() !== 3 || at.getUTCMinutes() >= 10) return;
   let removed = 0;
@@ -83,6 +90,9 @@ async function scheduled(config: PalmConfig, controller: ScheduledController, en
   }
   console.log(JSON.stringify({ palm: "pruned", posts: removed }));
 }
+
+/** Follow imports sent per cron run: 720 a day. */
+const IMPORTS_PER_RUN = 5;
 
 /** Builds the context palm's code runs with, for a request or a queued job. */
 function requestContext(

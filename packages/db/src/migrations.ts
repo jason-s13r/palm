@@ -738,6 +738,24 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
 )
 `,
   },
+  {
+    version: 27,
+    name: "follow imports",
+    // Follows brought from another server, sent a few at a time by the cron.
+    // target is a handle (name@host) or an ActivityPub ID; via is the app the
+    // follow shows in, as in account_follows.
+    sql: `
+CREATE TABLE IF NOT EXISTS follow_imports (
+  id INTEGER PRIMARY KEY,
+  account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  target TEXT NOT NULL,
+  via TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  queued_at INTEGER,
+  UNIQUE (account_id, target, via)
+)
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

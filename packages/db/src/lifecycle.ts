@@ -129,3 +129,54 @@ export async function exportAccount(db: D1Database, accountId: number): Promise<
   ]);
   return { communities, people, blockedCommunities, blockedPeople, blockedDomains, saved };
 }
+
+/** A follow brought from another server, waiting to be sent. */
+export interface FollowImport {
+  id: number;
+  accountId: number;
+  /** A handle (`name@host`, `!name@host`) or an ActivityPub ID. */
+  target: string;
+  /** The app the follow shows in. */
+  via: "mastodon" | "lemmy";
+}
+
+/** Adds follows to bring over; ones already waiting are kept as they are. */
+export async function queueFollowImports(db: D1Database, accountId: number, items: { target: string; via: "mastodon" | "lemmy" }[]): Promise<void> {
+  if (!items.length) return;
+  const at = now();
+  const insert = db.prepare("INSERT OR IGNORE INTO follow_imports (account_id, target, via, created_at) VALUES (?, ?, ?, ?)");
+  await db.batch(items.map((i) => insert.bind(accountId, i.target, i.via, at)));
+}
+
+/** How long a claimed import waits before it's tried again, in case its job was lost. */
+const IMPORT_RETRY_SECONDS = 60 * 60;
+
+/**
+ * Claims the next follow imports to send, oldest first. A claim that hasn't
+ * finished within the hour is claimed again.
+ */
+export async function claimFollowImports(db: D1Database, limit: number): Promise<{ id: number; accountId: number }[]> {
+  const at = now();
+  const { results } = await db
+    .prepare(
+      `UPDATE follow_imports SET queued_at = ?
+       WHERE id IN (SELECT id FROM follow_imports WHERE queued_at IS NULL OR queued_at < ? ORDER BY id LIMIT ?)
+       RETURNING id, account_id`,
+    )
+    .bind(at, at - IMPORT_RETRY_SECONDS, limit)
+    .all<{ id: number; account_id: number }>();
+  return results.map((r) => ({ id: r.id, accountId: r.account_id })).sort((a, b) => a.id - b.id);
+}
+
+export async function followImportById(db: D1Database, id: number): Promise<FollowImport | null> {
+  const row = await db
+    .prepare("SELECT id, account_id, target, via FROM follow_imports WHERE id = ?")
+    .bind(id)
+    .first<{ id: number; account_id: number; target: string; via: string }>();
+  return row ? { id: row.id, accountId: row.account_id, target: row.target, via: row.via === "lemmy" ? "lemmy" : "mastodon" } : null;
+}
+
+/** Done with an import, whether it was followed or couldn't be found. */
+export async function finishFollowImport(db: D1Database, id: number): Promise<void> {
+  await db.prepare("DELETE FROM follow_imports WHERE id = ?").bind(id).run();
+}

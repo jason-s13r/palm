@@ -11,6 +11,7 @@
  *   pnpm palm user move <username> <actor-id>
  *   pnpm palm user delete <username> [--keep-posts]
  *   pnpm palm user export <username> [--out <file>]
+ *   pnpm palm user import <username> <file> [--via mastodon|lemmy]
  *
  * Signing keys (RSA for HTTP Signatures, Ed25519 for integrity proofs) are
  * generated here rather than in the Worker, because key generation is too slow
@@ -38,6 +39,7 @@ const USAGE = [
   "  pnpm palm user move <username> <actor-id> [--local]          (followers are moved on the next cron run)",
   "  pnpm palm user delete <username> [--keep-posts] [--local]",
   "  pnpm palm user export <username> [--out <file>] [--local]",
+  "  pnpm palm user import <username> <file> [--via mastodon|lemmy] [--local]   (follows from another server, sent a few at a time)",
   "  pnpm palm community create <name> --domain <domain> [--db <d1-name>] [--title <title>] [--description <text>] [--local]",
   "  pnpm palm invite create --domain <domain> [--db <d1-name>] [--count <n>] [--local]",
   "  pnpm palm keys stock [--db <d1-name>] [--count <n>] [--local]   (keys for communities made in apps)",
@@ -162,6 +164,7 @@ function userArgs(args: string[]) {
       local: { type: "boolean", default: false },
       "keep-posts": { type: "boolean", default: false },
       out: { type: "string" },
+      via: { type: "string" },
     },
   });
   const username = positionals[0]?.toLowerCase();
@@ -190,6 +193,63 @@ function userMove(args: string[]): void {
   const target = actorId(rest[0]);
   run(db, local, `UPDATE accounts SET moved_to = ${sqlString(target)}, move_sent_at = NULL, profile_version = profile_version + 1 WHERE id = ${accountSql(domain, username)};`);
   if (db) console.log(`\n@${username}@${domain} moves to ${target}; its followers are told on the next cron run.`);
+}
+
+type Via = "mastodon" | "lemmy";
+
+/**
+ * The follows in an export from another server: Mastodon's
+ * following_accounts.csv, Lemmy's settings export, or palm's own export.
+ * People come in as Mastodon follows and communities as Lemmy subscriptions,
+ * unless `via` says otherwise.
+ */
+function followsIn(text: string, via?: Via): { target: string; via: Via }[] {
+  const found: { target: string; via: Via }[] = [];
+  const add = (target: string, as: Via) => found.push({ target, via: via ?? as });
+  const urlsOf = (value: unknown) =>
+    (Array.isArray(value) ? value : []).filter((v): v is string => typeof v === "string" && /^https:\/\/\S+$/.test(v));
+  if (text.trimStart().startsWith("{")) {
+    const data = JSON.parse(text) as Record<string, unknown>;
+    // Lemmy: communities, and palm's people marked with #person.
+    for (const id of urlsOf(data.followed_communities)) add(id, "lemmy");
+    // palm: people and communities.
+    for (const id of urlsOf(data.following)) add(id, "mastodon");
+    for (const id of urlsOf(data.communities)) add(id, "lemmy");
+  } else {
+    // Mastodon: "Account address,Show boosts,..." then one account a line
+    // (older exports have no header).
+    for (const line of text.split(/\r?\n/)) {
+      const address = line.split(",")[0]!.trim().replace(/^@/, "");
+      if (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(address)) add(address, "mastodon");
+    }
+  }
+  const seen = new Set<string>();
+  return found.filter((f) => {
+    const key = `${f.via} ${f.target.toLowerCase()}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/** Queues follows from another server's export; the cron sends a few each run. */
+function userImport(args: string[]): void {
+  const { values, rest, username, domain, db, local } = userArgs(args);
+  if (!rest[0]) throw new Error(USAGE);
+  const via = values.via;
+  if (via !== undefined && via !== "mastodon" && via !== "lemmy") throw new Error("--via is mastodon or lemmy");
+  const follows = followsIn(readFileSync(rest[0], "utf8"), via);
+  if (!follows.length) throw new Error(`No follows found in ${rest[0]}`);
+  const at = Math.floor(Date.now() / 1000);
+  const id = accountSql(domain, username);
+  // A few hundred rows a command keeps each one well under wrangler's limits.
+  for (let i = 0; i < follows.length; i += 200) {
+    const rows = follows
+      .slice(i, i + 200)
+      .map((f) => `INSERT OR IGNORE INTO follow_imports (account_id, target, via, created_at) SELECT ${id}, ${sqlString(f.target)}, ${sqlString(f.via)}, ${at} WHERE ${id} IS NOT NULL;`);
+    run(db, local, rows.join("\n"));
+  }
+  if (db) console.log(`\nQueued ${follows.length} follows for @${username}@${domain}: the cron sends 5 every 10 minutes (about ${Math.ceil(follows.length / 30)} h).`);
 }
 
 /** Deletes an account. Its name stays taken; other servers are told on the next cron run. */
@@ -333,6 +393,7 @@ async function main(argv: string[]): Promise<void> {
   if (group === "user" && command === "move") return userMove(rest);
   if (group === "user" && command === "delete") return userDelete(rest);
   if (group === "user" && command === "export") return userExport(rest);
+  if (group === "user" && command === "import") return userImport(rest);
   if (group === "community" && command === "create") return communityCreate(rest);
   if (group === "invite" && command === "create") return inviteCreate(rest);
   if (group === "keys" && command === "stock") return keysStock(rest);

@@ -92,6 +92,8 @@ export type FederationTask =
   | { kind: "card"; postId: number }
   /** A local account moved elsewhere: its followers are sent a Move. */
   | { kind: "moved"; accountId: number }
+  /** A follow brought from another server (`follow_imports`): look it up and follow it. */
+  | { kind: "import_follow"; importId: number }
   /** A local account was deleted: its followers are sent a Delete of it. */
   | { kind: "account_deleted"; accountId: number }
   /** Fetches a remote community's recent posts after the first local subscription. */

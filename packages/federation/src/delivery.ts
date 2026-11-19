@@ -47,6 +47,7 @@ import { backfillProfile, backfillThread, resolve as resolveRemote, storeRemoteP
 import { cardForPost } from "./cards.ts";
 import { communitySenderKeys, contextsFor, federationsFor, localDomains, logProblem, personKeys, recipient, recipientOf, send } from "./shared.ts";
 import { personFor } from "./people.ts";
+import { importFollow } from "./imports.ts";
 
 const isLocal = (a: { apId: string | null }) => a.apId === null;
 
@@ -336,6 +337,9 @@ export async function runTask(ctx: RequestContext, task: FederationTask): Promis
       await markMoveSent(db, account.id);
       return;
     }
+    case "import_follow":
+      await importFollow(ctx, task.importId, (next) => runTask(ctx, next));
+      return;
     case "account_deleted": {
       const account = await accountById(db, task.accountId);
       if (!account || !isLocal(account) || !account.deleted) return;

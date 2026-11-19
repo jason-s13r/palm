@@ -15,6 +15,7 @@ import {
   setCommunityBlock,
   setUserDomainBlock,
   subscribe,
+  queueFollowImports,
   subscription,
   type Account,
 } from "@palm/db";
@@ -34,7 +35,8 @@ const fail = (c: C, error: string, status: 400 | 401 | 404 = 400) => c.json({ er
 const body = async (c: C) => (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>;
 const strings = (value: unknown) => (Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : []);
 
-// Each unknown ID is a fetch from its server: an import looks up this many at most.
+// Each unknown ID is a fetch from its server: an import looks up this many at
+// most, and leaves the rest of its follows to the cron (`follow_imports`).
 const IMPORT_LOOKUPS = 40;
 
 export const accountRoutes = new Hono<Env>();
@@ -102,7 +104,17 @@ accountRoutes.post("/api/v3/user/import_settings", async (c) => {
     return r?.kind === "community" ? r.id : null;
   };
 
+  // Follows past the lookup limit are sent later, a few at a time by the cron.
+  const later: { target: string; via: "lemmy" }[] = [];
   for (const id of strings(params.followed_communities)) {
+    if (lookups >= IMPORT_LOOKUPS) {
+      const ap = id.endsWith(PERSON) ? id.slice(0, -PERSON.length) : id;
+      const known = id.endsWith(PERSON) ? await accountByApId(db, ap) : await communityByApId(db, ap);
+      if (!known) {
+        later.push({ target: id, via: "lemmy" });
+        continue;
+      }
+    }
     if (id.endsWith(PERSON)) {
       const target = await personFor(id.slice(0, -PERSON.length));
       if (!target || target.id === me.id) continue;
@@ -130,6 +142,7 @@ accountRoutes.post("/api/v3/user/import_settings", async (c) => {
       await subscribe(db, communityId, me.id);
     }
   }
+  await queueFollowImports(db, me.id, later);
   for (const id of strings(params.blocked_communities)) {
     const communityId = await communityFor(id);
     if (communityId) await setCommunityBlock(db, me.id, communityId, true);
