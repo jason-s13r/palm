@@ -17,6 +17,11 @@ outside this repo (the Palm project's `palm-decisions.md`).
 - `packages/adapter-lemmy`, `packages/adapter-mastodon`: the client APIs as
   Hono apps over palm's data. Unknown endpoints are logged as
   `{"palm":"unknown_endpoint"}` so the next one to build shows in the logs.
+  The Pixelfed app is served by the Mastodon adapter too (`pixelfed.ts`):
+  Pixelfed's API is Mastodon's plus extra fields, added only for Pixelfed
+  apps (`_pe=1`, `X-PIXELFED-APP` or an app named for Pixelfed), and its own
+  endpoints under `/api/v1.1`, `/api/v1.2` and `/api/pixelfed`. The app checks
+  `/api/nodeinfo/2.0.json` for "pixelfed"; standard nodeinfo stays Lemmy.
 - `packages/federation`: ActivityPub on Fedify: WebFinger, Person actors,
   followers, the inboxes and nodeinfo, with Fedify's key-value store on D1
   (`D1KvStore`) and its message queue on a Cloudflare Queue

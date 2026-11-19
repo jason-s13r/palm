@@ -5,8 +5,8 @@ Workers.
 
 palm is a small, multi-user ActivityPub server for a household or a group of
 friends. Each person gets one account, `@name@your.domain`, that works from
-Lemmy apps (Voyager, Mlem, Thunder) and Mastodon apps (Mastodon, Ivory, Ice
-Cubes). It's built on [Fedify](https://fedify.dev) and runs on Cloudflare's
+Lemmy apps (Voyager, Mlem, Thunder), Mastodon apps (Mastodon, Ivory, Ice
+Cubes) and the Pixelfed app. It's built on [Fedify](https://fedify.dev) and runs on Cloudflare's
 free plan.
 
 The name is MLAP backwards: Mastodon, Lemmy, ActivityPub.
@@ -22,6 +22,12 @@ The name is MLAP backwards: Mastodon, Lemmy, ActivityPub.
 - **Mastodon apps**: sign-in, home, local, public and hashtag timelines,
   posting with images and video, replies, edits, direct messages, boosts,
   favourites, bookmarks, follows, profiles and grouped notifications.
+- **The Pixelfed app**: sign-in, the photo grid on profiles, albums, the
+  home and network feeds, likes ("liked by"), comments, hashtags, discover
+  (trending photos, hashtags and people), direct messages, reports and
+  profile edits. Stories, collections, Pixelfed's push (it goes through
+  pixelfed.org) and its admin screens aren't there; the app hides stories
+  when there are none.
 - **Both at once**: a Lemmy comment is a Mastodon reply, an upvote is a
   favourite, a save is a bookmark. In Lemmy apps each person is a
   community (`!name@their.server`), with their statuses as posts; subscribing
@@ -43,10 +49,12 @@ One Worker serves the domain and routes on the path:
 | `/.well-known/webfinger`, `/users`, `/c`, `/objects`, `/inbox`, nodeinfo | Federation |
 | `/api/v3`, `/pictrs` | The Lemmy API, for Lemmy apps |
 | `/api/v1`, `/api/v2`, `/oauth` | The Mastodon API, for Mastodon apps |
+| `/api/v1.1`, `/api/v1.2`, `/api/pixelfed`, `/api/nodeinfo/2.0.json` | Pixelfed's extras, for the Pixelfed app |
 
 People sign in to both kinds of app with the domain itself (`your.domain`), so
 apps show their handle as `@name@your.domain`. Nodeinfo answers as Lemmy,
-which Lemmy apps check before they sign in.
+which Lemmy apps check before they sign in. The Pixelfed app checks
+Pixelfed's own path, `/api/nodeinfo/2.0.json`, which answers as Pixelfed.
 
 Data lives in one D1 database, uploads in an R2 bucket, and outgoing
 deliveries go through a Cloudflare Queue that the same Worker consumes.
