@@ -134,6 +134,34 @@ ${communities.length ? html`<h2>Communities</h2><ul>${communities.map((x) => htm
   );
 });
 
+// --- interactions from other servers ------------------------------------------
+
+/**
+ * Following or replying "from another server": Mastodon's web interface asks
+ * for the viewer's server and sends them to /authorize_interaction?uri=…
+ * there (older versions: /authorize_follow?acct=…). palm has no web sign-in,
+ * so this page says what to search for in the app instead.
+ */
+for (const [path, param] of [["/authorize_interaction", "uri"], ["/authorize_follow", "acct"]] as const) {
+  app.get(path, (c) => {
+    const target = (c.req.query(param) ?? "").trim().replace(/^acct:/, "");
+    const isHandle = /^@?[^@\s/]+@[^@\s/]+$/.test(target);
+    const query = isHandle && !target.startsWith("@") ? `@${target}` : target;
+    const usable = isHandle || /^https:\/\//.test(target);
+    return page(
+      site(c),
+      { title: "Open this in your app", description: "Follow, reply and boost from a Lemmy or Mastodon app.", url: `${origin(c)}${path}`, noindex: true },
+      usable
+        ? html`<h1>Open this in your app</h1>
+<p>${c.env.config.instance.name} is used from Lemmy and Mastodon apps, not the web. To follow, reply or boost, search for this in your app:</p>
+<p><code>${query}</code></p>
+<p class="meta">Signed in with an account on ${c.env.domain.domain}, the app finds it and you can go from there.</p>`
+        : html`<h1>Nothing to open</h1>
+<p>This link didn't say what to open. Search for the post or account in your Lemmy or Mastodon app.</p>`,
+    );
+  });
+}
+
 // --- profiles ---------------------------------------------------------------
 
 async function profile(c: C, name: string): Promise<Response> {
