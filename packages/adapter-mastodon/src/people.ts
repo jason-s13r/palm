@@ -190,6 +190,10 @@ peopleRoutes.post("/api/v1/accounts/:id{[0-9]+}/follow", async (c) => {
   } else if (!existing.mastodon) {
     // Already followed from a Lemmy app: the Mastodon side joins that follow.
     await follow(db, me.id, target.id, undefined, "mastodon");
+  } else if (existing.state === "pending" && target.apId && existing.followApId) {
+    // Still waiting: the Follow or its Accept may have been lost, so asking
+    // again sends the same Follow. Servers answer a repeat with another Accept.
+    c.env.activities.enqueue({ kind: "followed", accountId: me.id, targetId: target.id, followApId: existing.followApId, undo: false });
   }
   const [relationship] = await relationshipViews(c, me, [target.id]);
   return c.json(relationship);

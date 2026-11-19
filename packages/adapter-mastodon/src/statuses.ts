@@ -1,5 +1,8 @@
 import { escapeHtml, hashtagsIn, htmlToText, mentionsIn, previewLink, textToHtml, urls, type RequestContext } from "@palm/core";
 import {
+  claimIdempotencyKey,
+  idempotentPost,
+  settleIdempotencyKey,
   cancelScheduled,
   pollChoices,
   pollsFor,
@@ -604,6 +607,19 @@ statusRoutes.post("/api/v1/statuses", async (c) => {
     return fail(c, "Validation failed: Direct messages need someone to mention");
   }
 
+  // A retry of a post already made (or being made) gets that post back.
+  const key = (c.req.header("idempotency-key") ?? "").trim().slice(0, 128);
+  if (key) {
+    const claim = await claimIdempotencyKey(db, me.id, key);
+    if (!claim.claimed) {
+      const madeId = claim.postId ?? (await waitForIdempotentPost(db, me.id, key));
+      const made = madeId ? await postById(db, madeId) : null;
+      if (!made) return c.json({ error: "This status is still being posted" }, 409);
+      const [status] = await statuses(c.env, [made], me);
+      return c.json(status);
+    }
+  }
+
   const post = await createPost(db, {
     accountId: me.id,
     contentSource: source,
@@ -616,7 +632,11 @@ statusRoutes.post("/api/v1/statuses", async (c) => {
     parentId: parent?.id ?? null,
     // A reply in a Lemmy thread from a Mastodon app becomes a comment there.
     ...(parent?.communityId ? { communityId: parent.communityId, rootId: parent.rootId ?? parent.id } : {}),
+  }).catch(async (error: unknown) => {
+    if (key) await settleIdempotencyKey(db, me.id, key, null);
+    throw error;
   });
+  if (key) await settleIdempotencyKey(db, me.id, key, post.id);
   await attachMedia(db, post.id, me.id, mediaIds);
   await addMentions(db, post.id, mentions.accounts.map((a) => a.id));
   await addTags(db, post.id, hashtagsIn(source));
@@ -661,6 +681,16 @@ statusRoutes.post("/api/v1/statuses", async (c) => {
   const [status] = await statuses(c.env, [(await postById(db, post.id)) ?? post], me);
   return c.json(status);
 });
+
+/** A retry that arrives while the first request is still posting waits a few seconds for its post. */
+async function waitForIdempotentPost(db: D1Database, accountId: number, key: string): Promise<number | null> {
+  for (let i = 0; i < 10; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const id = await idempotentPost(db, accountId, key);
+    if (id !== null) return id;
+  }
+  return null;
+}
 
 /** Poll parameters, from JSON (poll.options) or a form (poll[options][]). */
 function pollParams(params: Record<string, unknown>): { options: string[]; expiresIn: number; multiple: boolean } | "invalid" | null {

@@ -31,6 +31,7 @@ import {
   markMoveSent,
   reportById,
   followState,
+  subscription,
   accountById,
   blockedDomains,
   communityById,
@@ -289,6 +290,11 @@ export async function runTask(ctx: RequestContext, task: FederationTask): Promis
     case "subscribed": {
       const [account, community] = await Promise.all([accountById(db, task.accountId), communityById(db, task.communityId)]);
       if (!account || !community || !isLocal(account) || isLocal(community)) return;
+      // As with people: only the current state goes out, so a retried old
+      // Undo can't end a newer subscription (Lemmy undoes by person and
+      // community, whatever the Follow's ID), nor an old Follow revive one.
+      const current = await subscription(db, community.id, account.id);
+      if (task.undo ? current !== null : current?.followApId !== task.followApId) return;
       const follow = new Follow({ id: new URL(task.followApId), actor: actorUri(account), object: communityUri(community) });
       const activity = task.undo ? new Undo({ id: new URL(`${task.followApId}/undo`), actor: actorUri(account), object: follow }) : follow;
       const to = recipientOf(community);

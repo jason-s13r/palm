@@ -725,6 +725,19 @@ ALTER TABLE account_follows ADD COLUMN lemmy INTEGER NOT NULL DEFAULT 0
 ALTER TABLE accounts ADD COLUMN profile_version INTEGER NOT NULL DEFAULT 0
 `,
   },
+  {
+    version: 26,
+    name: "idempotency keys",
+    sql: `
+CREATE TABLE IF NOT EXISTS idempotency_keys (
+  account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  key TEXT NOT NULL,
+  post_id INTEGER,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (account_id, key)
+)
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

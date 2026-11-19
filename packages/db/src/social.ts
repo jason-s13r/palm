@@ -265,10 +265,15 @@ async function insertNotification(
 ): Promise<Notification | null> {
   const at = now();
   // Nothing from someone the recipient blocked, or muted with notifications.
+  // The same notification twice in a day is one: a retried queue job, or a
+  // server delivering the same Like, boost or Follow again, would repeat it.
   const result = await db
     .prepare(
       `INSERT INTO notifications (account_id, kind, from_account_id, post_id, created_at)
        SELECT ?1, ?2, ?3, ?4, ?5 WHERE NOT EXISTS (
+         SELECT 1 FROM notifications n WHERE n.account_id = ?1 AND n.kind = ?2 AND n.from_account_id = ?3
+           AND n.post_id IS ?4 AND n.created_at > ?5 - 86400)
+       AND NOT EXISTS (
          SELECT 1 FROM account_blocks b WHERE b.account_id = ?1 AND b.target_id = ?3
            AND (b.kind = 'block' OR b.hide_notifications = 1) AND (b.expires_at IS NULL OR b.expires_at > ?5))
        AND NOT EXISTS (

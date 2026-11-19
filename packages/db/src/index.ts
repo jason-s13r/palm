@@ -1,6 +1,8 @@
 export { MIGRATIONS, SCHEMA_VERSION, statementsOf } from "./migrations.ts";
 export type { Migration } from "./migrations.ts";
 export { instanceSecret, migrate } from "./migrate.ts";
+export { claimIdempotencyKey, idempotentPost, settleIdempotencyKey } from "./idempotency.ts";
+export type { Claim } from "./idempotency.ts";
 export {
   accountByApId,
   accountByHandle,

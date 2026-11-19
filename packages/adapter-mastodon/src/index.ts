@@ -70,7 +70,7 @@ const requireAccount = (c: C) => c.get("account");
 
 const app = new Hono<Env>();
 
-app.use("*", cors({ origin: "*", allowHeaders: ["Authorization", "Content-Type"], maxAge: 86400 }));
+app.use("*", cors({ origin: "*", allowHeaders: ["Authorization", "Content-Type", "Idempotency-Key"], maxAge: 86400 }));
 
 app.use("/api/*", async (c, next) => {
   c.set("account", null);

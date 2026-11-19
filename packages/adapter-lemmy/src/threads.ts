@@ -462,6 +462,10 @@ threadRoutes.post("/api/v3/community/follow", async (c) => {
     } else {
       await subscribe(db, community.id, auth.account.id);
     }
+  } else if (existing.state === "pending" && community.apId && existing.followApId) {
+    // Still pending: the Follow or the community's Accept may have been lost,
+    // so subscribing again sends the same Follow. Lemmy accepts a repeat.
+    c.env.activities.enqueue({ kind: "subscribed", accountId: auth.account.id, communityId: community.id, followApId: existing.followApId, undo: false });
   }
   return c.json({ community_view: communityView(c.env, await communityStats(c, community)), discussion_languages: [] } satisfies CommunityResponse);
 });
@@ -482,6 +486,9 @@ async function followPerson(c: C, me: Account, targetId: number, on: boolean): P
     c.env.activities.enqueue({ kind: "followed", accountId: me.id, targetId: target.id, followApId, undo: false });
   } else if (on && existing && !existing.lemmy) {
     await follow(db, me.id, target.id, undefined, "lemmy");
+  } else if (on && existing?.state === "pending" && target.apId && existing.followApId) {
+    // Still waiting: the Follow or its Accept may have been lost; send it again.
+    c.env.activities.enqueue({ kind: "followed", accountId: me.id, targetId: target.id, followApId: existing.followApId, undo: false });
   } else if (!on && existing?.lemmy && (await unfollow(db, me.id, target.id, "lemmy"))) {
     if (target.apId && existing.followApId) {
       c.env.activities.enqueue({ kind: "followed", accountId: me.id, targetId: target.id, followApId: existing.followApId, undo: true });
