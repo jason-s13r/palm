@@ -563,6 +563,9 @@ export const statusRoutes = new Hono<Env>();
 statusRoutes.post("/api/v1/statuses", async (c) => {
   const me = c.get("account");
   if (!me) return fail(c, "The access token is invalid", 401);
+  // A moved account posts from its new home, as on Mastodon. Scheduled posts
+  // come through here too, so they stop as well.
+  if (me.movedTo) return fail(c, `This account has moved to ${me.movedTo}`, 403);
   const db = c.env.bindings.DB;
   const params = await body(c);
   const source = text(params.status).trim();

@@ -602,6 +602,7 @@ threadRoutes.get("/api/v3/post", async (c) => {
 threadRoutes.post("/api/v3/post", async (c) => {
   const auth = c.get("auth");
   if (!auth) return fail(c, "not_logged_in", 401);
+  if (auth.account.movedTo) return fail(c, "user_moved");
   const params = await body(c);
   const community = await communityFor(c, int(params.community_id), undefined);
   if (!community) return fail(c, "couldnt_find_community", 404);
@@ -766,6 +767,7 @@ threadRoutes.get("/api/v3/comment", async (c) => commentResponse(c, int(c.req.qu
 threadRoutes.post("/api/v3/comment", async (c) => {
   const auth = c.get("auth");
   if (!auth) return fail(c, "not_logged_in", 401);
+  if (auth.account.movedTo) return fail(c, "user_moved");
   const params = await body(c);
   const text = str(params.content)?.trim() ?? "";
   if (!text || text.length > MAX_BODY) return fail(c, "invalid_body_field");
