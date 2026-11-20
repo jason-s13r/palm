@@ -293,6 +293,8 @@ export type { NewStory, Story } from "./stories.ts";
 export {
   channelOwnerId,
   channelOwnerOf,
+  setVideoChapters,
+  videoChapters,
   createUpload,
   deleteUpload,
   ensureLocalChannel,
@@ -323,7 +325,7 @@ export {
   watchHistory,
   watchPositions,
 } from "./videos.ts";
-export type { ListedVideo, Transcode, VideoUpload, Video, VideoFile, VideoListing, VideoPlaylist, VideoThumbnail } from "./videos.ts";
+export type { ListedVideo, Transcode, VideoChapter, VideoUpload, Video, VideoFile, VideoListing, VideoPlaylist, VideoThumbnail } from "./videos.ts";
 export {
   acceptRunnerJob,
   addRunnerJobs,

@@ -363,6 +363,12 @@ describe("PeerTube: hosting", () => {
 
     const mine = await get<{ total: number }>("/api/v1/users/me/videos");
     expect(mine.total).toBe(1);
+
+    // The app sets chapters after an upload, an empty list included.
+    const chapters = (body: unknown) => worker.fetch(`${SITE}/api/v1/videos/${video.uuid}/chapters`, { method: "PUT", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify(body) });
+    expect((await chapters({ chapters: [] })).status).toBe(204);
+    expect((await chapters({ chapters: [{ timecode: 3, title: "Middle" }, { timecode: 0, title: "Start" }] })).status).toBe(204);
+    expect(await get(`/api/v1/videos/${video.uuid}/chapters`)).toEqual({ chapters: [{ timecode: 0, title: "Start" }, { timecode: 3, title: "Middle" }] });
   });
 
   it("takes a resumable upload in equal pieces", async () => {

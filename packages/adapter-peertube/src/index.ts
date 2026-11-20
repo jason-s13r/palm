@@ -37,6 +37,7 @@ import {
   revokeToken,
   savedVideoIds,
   setPasswordHash,
+  setVideoChapters,
   setVideoCounts,
   subscribe,
   subscription,
@@ -48,6 +49,7 @@ import {
   unsubscribe,
   videoByPostId,
   videoByUuid,
+  videoChapters,
   videoComments,
   vote,
   watchHistory,
@@ -859,11 +861,34 @@ app.get("/api/v1/videos/:id/description", async (c) => {
 
 for (const [path, body] of [
   ["captions", { total: 0, data: [] }],
-  ["chapters", { chapters: [] }],
   ["storyboards", { storyboards: [] }],
 ] as const) {
   app.get(`/api/v1/videos/:id/${path}`, (c) => c.json(body));
 }
+app.get("/api/v1/videos/:id/chapters", async (c) => {
+  const found = await findVideo(c, c.req.param("id"));
+  if (!found) return fail(c, 404, "Video not found");
+  return c.json({ chapters: await videoChapters(c.env.bindings.DB, found.post.id) });
+});
+
+// The app sends chapters after an upload (an empty list when there are none).
+app.put("/api/v1/videos/:id/chapters", async (c) => {
+  const account = me(c);
+  if (!account) return fail(c, 401, "Authentication is required.");
+  const found = await findVideo(c, c.req.param("id"));
+  if (!found) return fail(c, 404, "Video not found");
+  if (found.post.accountId !== account.id || found.post.apId !== null) return fail(c, 403, "Cannot edit another user's video");
+  const p = await params(c);
+  const chapters = (Array.isArray(p.chapters) ? p.chapters : [])
+    .map((x) => x as { timecode?: unknown; title?: unknown })
+    .map((x) => ({ timecode: Math.max(0, Math.round(Number(x.timecode) || 0)), title: String(x.title ?? "").slice(0, 100) }))
+    .filter((x) => x.title)
+    .sort((a, b) => a.timecode - b.timecode)
+    .slice(0, 100);
+  await setVideoChapters(c.env.bindings.DB, found.post.id, chapters);
+  return c.body(null, 204);
+});
+
 app.get("/api/v1/player-settings/videos/:id", (c) => c.json({ theme: "channel-default" }));
 app.get("/api/v1/player-settings/video-channels/:handle", (c) => c.json({ theme: "instance-default" }));
 

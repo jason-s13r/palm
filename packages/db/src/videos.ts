@@ -618,3 +618,18 @@ export async function staleUploads(db: D1Database): Promise<VideoUpload[]> {
   const { results } = await db.prepare("SELECT * FROM video_uploads WHERE created_at < ? LIMIT 20").bind(now() - 86400).all<UploadRow>();
   return results.map(toUpload);
 }
+
+/** A video's chapters: where each starts (seconds) and its title. */
+export interface VideoChapter {
+  timecode: number;
+  title: string;
+}
+
+export async function videoChapters(db: D1Database, postId: number): Promise<VideoChapter[]> {
+  const row = await db.prepare("SELECT chapters FROM videos WHERE post_id = ?").bind(postId).first<{ chapters: string | null }>();
+  return parse(row?.chapters ?? null, []);
+}
+
+export async function setVideoChapters(db: D1Database, postId: number, chapters: VideoChapter[]): Promise<void> {
+  await db.prepare("UPDATE videos SET chapters = ? WHERE post_id = ?").bind(chapters.length ? JSON.stringify(chapters) : null, postId).run();
+}

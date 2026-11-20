@@ -1011,6 +1011,14 @@ ALTER TABLE video_uploads ADD COLUMN buffered INTEGER NOT NULL DEFAULT 0
 ALTER TABLE video_uploads ADD COLUMN chunks INTEGER NOT NULL DEFAULT 0
 `,
   },
+  {
+    version: 34,
+    name: "video chapters",
+    // A local video's chapters, as PeerTube keeps them: [{ timecode, title }].
+    sql: `
+ALTER TABLE videos ADD COLUMN chapters TEXT
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;
