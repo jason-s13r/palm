@@ -276,6 +276,12 @@ describe("PeerTube: the app's API", () => {
     expect(channel).toMatchObject({ name: "alice_channel", displayName: "Alice makes things", videosCount: 1, ownerAccount: { name: "alice" } });
     const channelVideos = await get<{ total: number }>("/api/v1/video-channels/alice_channel@tube.example/videos");
     expect(channelVideos.total).toBe(1);
+
+    // The app browses a platform through its own server, by host; and asks for lives apart.
+    const fromHost = await get<{ data: { uuid: string }[] }>("/api/v1/search/videos?searchTarget=local&host=tube.example&count=50");
+    expect(fromHost.data.map((v) => v.uuid)).toContain(uuid);
+    expect((await get<{ total: number }>("/api/v1/search/videos?searchTarget=local&host=elsewhere.example")).total).toBe(0);
+    expect((await get<{ total: number }>("/api/v1/videos?isLive=true&host=tube.example")).total).toBe(0);
   });
 
   it("rates, comments on, and saves a video for later", async () => {

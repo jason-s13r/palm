@@ -201,6 +201,12 @@ export interface VideoListing {
   subscribedBy?: number | undefined;
   /** Only videos uploaded here. */
   localOnly?: boolean | undefined;
+  /** Only videos from this server (PeerTube's host filter). */
+  host?: string | undefined;
+  /** Only live videos (true), or none (false). */
+  isLive?: boolean | undefined;
+  /** Leave out sensitive videos (PeerTube's nsfw=false). */
+  safeOnly?: boolean | undefined;
   /** Words in the title or description. */
   search?: string | undefined;
   /** Unlisted (and the author's own private) videos too: a person's own list. */
@@ -239,6 +245,9 @@ export async function listVideos(db: D1Database, listing: VideoListing): Promise
   if (listing.channelId !== undefined) (where.push("v.channel_id = ?"), values.push(listing.channelId));
   if (listing.accountId !== undefined) (where.push("p.account_id = ?"), values.push(listing.accountId));
   if (listing.localOnly) where.push("p.ap_id IS NULL");
+  if (listing.host) (where.push("p.account_id IN (SELECT id FROM accounts WHERE domain = ?)"), values.push(listing.host.toLowerCase()));
+  if (listing.isLive !== undefined) (where.push("v.is_live = ?"), values.push(listing.isLive ? 1 : 0));
+  if (listing.safeOnly) where.push("p.sensitive = 0");
   if (listing.subscribedBy !== undefined) {
     where.push(
       `(v.channel_id IN (SELECT community_id FROM community_subscriptions WHERE account_id = ?)

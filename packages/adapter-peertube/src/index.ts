@@ -103,6 +103,19 @@ export const pageOf = (p: Record<string, unknown>) => ({ start: Math.max(0, int(
 
 const me = (c: C) => c.get("account");
 
+/** PeerTube's list filters: host (one server's videos), isLive, nsfw and isLocal. */
+function filtersOf(c: C, p: Record<string, unknown>) {
+  const host = str(p.host)?.toLowerCase();
+  const live = str(p.isLive);
+  return {
+    // This server's own host means its own uploads; another's, the videos palm keeps from it.
+    ...(host ? (isLocalHost(c, host) ? { localOnly: true } : { host }) : {}),
+    ...(str(p.isLocal) === "true" ? { localOnly: true } : {}),
+    ...(live === "true" || live === "false" ? { isLive: live === "true" } : {}),
+    ...(str(p.nsfw) === "false" ? { safeOnly: true } : {}),
+  };
+}
+
 /** Splits a PeerTube handle (name, name@host or @name@host) into its parts; no host means this server. */
 function handleOf(c: C, handle: string): { name: string; host: string } {
   const parts = decodeURIComponent(handle).replace(/^@/, "").split("@");
@@ -614,7 +627,7 @@ app.get("/api/v1/users/me/subscriptions", async (c) => {
 app.get("/api/v1/users/me/subscriptions/videos", async (c) => {
   const p = await params(c);
   const { start, count } = pageOf(p);
-  const listed = await listVideos(c.env.bindings.DB, { subscribedBy: me(c)!.id, start, count, sort: str(p.sort) });
+  const listed = await listVideos(c.env.bindings.DB, { subscribedBy: me(c)!.id, start, count, sort: str(p.sort), ...filtersOf(c, p) });
   return c.json({ total: listed.total, data: await renderVideos(c, listed.data) });
 });
 
@@ -811,13 +824,7 @@ app.get("/api/v1/users/me/video-playlists/videos-exist", async (c) => {
 app.get("/api/v1/videos", async (c) => {
   const p = await params(c);
   const { start, count } = pageOf(p);
-  const listed = await listVideos(c.env.bindings.DB, {
-    start,
-    count,
-    sort: str(p.sort),
-    localOnly: str(p.isLocal) === "true",
-    search: str(p.search),
-  });
+  const listed = await listVideos(c.env.bindings.DB, { start, count, sort: str(p.sort), search: str(p.search), ...filtersOf(c, p) });
   return c.json({ total: listed.total, data: await renderVideos(c, listed.data) });
 });
 
@@ -1065,6 +1072,7 @@ app.get("/api/v1/video-channels/:handle/videos", async (c) => {
     start,
     count,
     sort: str(p.sort),
+    ...filtersOf(c, p),
   });
   return c.json({ total: listed.total, data: await renderVideos(c, listed.data) });
 });
@@ -1084,7 +1092,7 @@ app.get("/api/v1/accounts/:handle/videos", async (c) => {
   if (!account) return fail(c, 404, "Account not found");
   const p = await params(c);
   const { start, count } = pageOf(p);
-  const listed = await listVideos(c.env.bindings.DB, { accountId: account.id, start, count, sort: str(p.sort) });
+  const listed = await listVideos(c.env.bindings.DB, { accountId: account.id, start, count, sort: str(p.sort), ...filtersOf(c, p) });
   return c.json({ total: listed.total, data: await renderVideos(c, listed.data) });
 });
 
@@ -1125,7 +1133,7 @@ app.get("/api/v1/search/videos", async (c) => {
     if (!video || !post) return c.json({ total: 0, data: [] });
     return c.json({ total: 1, data: await renderVideos(c, [{ post, video }]) });
   }
-  const listed = await listVideos(db, { search: q, start, count, sort: str(p.sort) === "-match" ? undefined : str(p.sort) });
+  const listed = await listVideos(db, { search: q, start, count, sort: str(p.sort) === "-match" ? undefined : str(p.sort), ...filtersOf(c, p) });
   return c.json({ total: listed.total, data: await renderVideos(c, listed.data) });
 });
 
