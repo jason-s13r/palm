@@ -1,3 +1,4 @@
+import { memoized } from "./memo.ts";
 import type { QuotePolicy, QuoteState } from "./quotes.ts";
 
 const now = () => Math.floor(Date.now() / 1000);
@@ -344,15 +345,20 @@ export async function lastPostAt(db: D1Database, accountId: number): Promise<num
   return row?.t ?? null;
 }
 
-/** Public and unlisted posts on a domain, for nodeinfo. */
+/** Public and unlisted posts on a domain, for nodeinfo (counted at most hourly). */
 export async function countLocalPosts(db: D1Database, domain: string): Promise<number> {
-  const row = await db
-    .prepare(
-      "SELECT COUNT(*) AS n FROM posts p JOIN accounts a ON a.id = p.account_id WHERE a.domain = ? AND p.deleted_at IS NULL AND p.visibility IN ('public', 'unlisted')",
-    )
-    .bind(domain)
-    .first<{ n: number }>();
-  return row?.n ?? 0;
+  return memoized(db, `local_posts:${domain}`, 60 * 60, async () => {
+    // From the domain's own accounts (few) to their posts, not the other way.
+    const row = await db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM posts p
+         WHERE p.account_id IN (SELECT id FROM accounts WHERE ap_id IS NULL AND domain = ?)
+           AND p.deleted_at IS NULL AND +p.visibility IN ('public', 'unlisted')`,
+      )
+      .bind(domain)
+      .first<{ n: number }>();
+    return row?.n ?? 0;
+  });
 }
 
 /** Local replies to a post, by its ActivityPub ID, oldest first. */

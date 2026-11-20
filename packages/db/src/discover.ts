@@ -1,4 +1,5 @@
 import { toPost, type Post, type PostRow } from "./posts.ts";
+import { voteCount } from "./threads.ts";
 
 /**
  * Discovery for Pixelfed's apps: trending pictures, hashtags and popular
@@ -18,7 +19,7 @@ export async function trendingMediaPosts(db: D1Database, scope: { domain: string
        WHERE p.deleted_at IS NULL AND p.visibility = 'public' AND p.root_id IS NULL AND p.parent_id IS NULL
          AND p.reblog_of IS NULL AND p.created_at > ? AND ${HAS_MEDIA} AND a.banned_at IS NULL
          AND ${scope.localOnly ? "a.ap_id IS NULL AND a.domain = ?" : "(a.ap_id IS NOT NULL OR a.domain = ?)"}
-       ORDER BY (SELECT COUNT(*) FROM votes v WHERE v.post_id = p.id AND v.score = 1) DESC, p.id DESC
+       ORDER BY ${voteCount(1)} DESC, p.id DESC
        LIMIT ?`,
     )
     .bind(now() - scope.days * 86_400, scope.domain, limit)

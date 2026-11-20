@@ -540,9 +540,9 @@ export async function placeholderAccount(
     followersCount: null,
     followingCount: null,
     statusesCount: null,
+    // Marked stale, so the next look at them fetches the real thing.
+    fetchedAt: 0,
   });
-  // Marked stale, so the next look at them fetches the real thing.
-  await db.prepare("UPDATE accounts SET fetched_at = 0 WHERE id = ?").bind(account.id).run();
   return account;
 }
 

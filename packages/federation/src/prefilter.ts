@@ -1,5 +1,4 @@
-import { setPostFlag, vote } from "@palm/db";
-import { placeholderAccount } from "./remote.ts";
+import { remoteVote, setPostFlag } from "@palm/db";
 
 /**
  * A cheap first look at a delivery, before Fedify parses it and checks its
@@ -9,8 +8,8 @@ import { placeholderAccount } from "./remote.ts";
  *   change anything here. It's answered 202 and dropped unchecked.
  * - A vote on a remote post palm keeps only moves a score. Its signature is
  *   checked here (see verifySignature) and the vote written straight to D1,
- *   without Fedify parsing it or fetching the voter's profile: a stranger
- *   voting gets a placeholder account, filled in if they ever matter.
+ *   without Fedify parsing it or fetching the voter's profile. It's kept by
+ *   the voter's ActivityPub ID (remote_votes), with no account for them.
  *
  * - Anything a community relays (Announce) when nobody here subscribes to it
  *   is dropped: its server may have missed an unsubscribe.
@@ -156,12 +155,6 @@ export async function triage(
   const wrapped = typeOf(activity) === "Announce";
   if (!wrapped && signerHost !== voterHost) return "fedify";
   if (wrapped && signer !== idOf((activity as Json).actor)) return "fedify";
-  const voter = await placeholderAccount(db, {
-    apId: act.voter,
-    username: decodeURIComponent(new URL(act.voter).pathname.split("/").filter(Boolean).at(-1) ?? "unknown"),
-    displayName: null,
-    avatarUrl: null,
-  });
-  await vote(db, post.id, voter.id, act.kind === "vote" ? act.score : 0);
+  await remoteVote(db, post.id, act.voter, act.kind === "vote" ? act.score : 0);
   return "handled";
 }

@@ -1,3 +1,4 @@
+import { voteCount } from "./threads.ts";
 const now = () => Math.floor(Date.now() / 1000);
 
 // --- following people --------------------------------------------------------
@@ -182,7 +183,7 @@ export async function interactions(db: D1Database, postIds: number[], viewerId: 
   const { results } = await db
     .prepare(
       `SELECT p.id,
-         (SELECT COUNT(*) FROM votes v WHERE v.post_id = p.id AND v.score = 1) AS favourites,
+         ${voteCount(1)} AS favourites,
          (SELECT COUNT(*) FROM boosts b WHERE b.post_id = p.id) AS boosts,
          (SELECT COUNT(*) FROM posts r WHERE r.parent_id = p.id AND r.deleted_at IS NULL AND r.reblog_of IS NULL) AS replies,
          EXISTS (SELECT 1 FROM votes v WHERE v.post_id = p.id AND v.account_id = ?1 AND v.score = 1) AS favourited,

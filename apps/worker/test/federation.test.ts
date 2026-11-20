@@ -120,7 +120,7 @@ describe("federation", () => {
       });
     };
     const like = { type: "Like", actor: "https://elsewhere.test/u/fan", object: target };
-    const score = () => db.prepare("SELECT COALESCE(SUM(score), 0) AS s FROM votes WHERE post_id = ?").bind(post!.id).first<{ s: number }>();
+    const score = () => db.prepare("SELECT COALESCE(SUM(score), 0) AS s FROM remote_votes WHERE post_id = ?").bind(post!.id).first<{ s: number }>();
 
     expect((await deliver({ type: "Announce", actor: community, object: like })).status).toBe(202);
     expect((await score())?.s).toBe(1);

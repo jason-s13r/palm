@@ -96,7 +96,12 @@ function renderBody(p: Post, attachments: Attachment[]): Html {
 }
 
 const score = async (db: D1Database, postId: number) =>
-  (await db.prepare("SELECT COALESCE(SUM(score), 0) AS s FROM votes WHERE post_id = ?").bind(postId).first<{ s: number }>())?.s ?? 0;
+  (
+    await db
+      .prepare("SELECT (SELECT COALESCE(SUM(score), 0) FROM votes WHERE post_id = ?1) + (SELECT COALESCE(SUM(score), 0) FROM remote_votes WHERE post_id = ?1) AS s")
+      .bind(postId)
+      .first<{ s: number }>()
+  )?.s ?? 0;
 
 // --- discovery: ActivityPub clients asking for a web URL get the object -----
 

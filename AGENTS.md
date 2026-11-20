@@ -42,7 +42,10 @@ outside this repo (the Palm project's `palm-decisions.md`).
 Remote people, communities and posts live in the same tables as local ones
 (`accounts`, `communities`, `posts`), marked by their `ap_id`; local rows have
 none. palm keeps a remote post only if someone here would see it, and a daily
-cron prunes old remote posts nobody here touched.
+cron prunes old remote posts nobody here touched. Other servers' votes on
+other servers' posts only move a score, so they're kept by the voter's
+ActivityPub ID (`remote_votes`), with no account row; Fedify's cache of remote
+documents stays in memory rather than D1.
 - `packages/web`: plain HTML pages for share links (profiles at `/@name`,
   posts at `/@name/id`, `/post/id` and `/comment/id`, communities at `/c/name`),
   with Open Graph tags, a few lines of CSS and no JavaScript. Browsers on an

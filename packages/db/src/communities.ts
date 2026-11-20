@@ -182,7 +182,8 @@ export async function listCommunities(db: D1Database, listing: CommunityListing)
          (SELECT COUNT(*) FROM community_subscriptions s WHERE s.community_id = c.id)
            + (SELECT COUNT(*) FROM community_followers f WHERE f.community_id = c.id) AS subscribers,
          (SELECT COUNT(*) FROM posts p WHERE p.community_id = c.id AND p.root_id IS NULL AND p.deleted_at IS NULL) AS post_count,
-         (SELECT COUNT(*) FROM posts p WHERE p.community_id = c.id AND p.root_id IS NOT NULL AND p.deleted_at IS NULL) AS comment_count,
+         (SELECT COUNT(*) FROM posts x WHERE x.deleted_at IS NULL AND x.root_id IN
+            (SELECT p.id FROM posts p WHERE p.community_id = c.id AND p.root_id IS NULL)) AS comment_count,
          (SELECT state FROM community_subscriptions s WHERE s.community_id = c.id AND s.account_id = ?) AS subscription
        FROM communities c WHERE ${where.join(" AND ")}
        ORDER BY subscribers DESC, c.id LIMIT ? OFFSET ?`,

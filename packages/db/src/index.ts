@@ -111,6 +111,8 @@ export {
   threadCounts,
   threadSort,
   vote,
+  remoteVote,
+  voteCount,
 } from "./threads.ts";
 export type { CommentListing, PostListing, Scope, StatusListing, Tally, ThreadComment, ThreadPost, ThreadSort } from "./threads.ts";
 export {

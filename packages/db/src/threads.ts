@@ -1,3 +1,4 @@
+import { memoized } from "./memo.ts";
 import { toPost, type Post, type PostRow } from "./posts.ts";
 
 const now = () => Math.floor(Date.now() / 1000);
@@ -26,13 +27,28 @@ export interface ThreadComment extends Post, Tally {
 
 type TallyRow = { upvotes: number; downvotes: number; my_vote: number | null; saved: number };
 
+/**
+ * How many up (1) or down (-1) votes post `p` has: votes by accounts here,
+ * plus remote_votes (other servers' people voting on other servers' posts).
+ */
+export const voteCount = (score: 1 | -1, post = "p.id") =>
+  `((SELECT COUNT(*) FROM votes v WHERE v.post_id = ${post} AND v.score = ${score}) + (SELECT COUNT(*) FROM remote_votes rv WHERE rv.post_id = ${post} AND rv.score = ${score}))`;
+
 const TALLY = `
-  (SELECT COUNT(*) FROM votes v WHERE v.post_id = p.id AND v.score = 1) AS upvotes,
-  (SELECT COUNT(*) FROM votes v WHERE v.post_id = p.id AND v.score = -1) AS downvotes,
+  ${voteCount(1)} AS upvotes,
+  ${voteCount(-1)} AS downvotes,
   (SELECT score FROM votes v WHERE v.post_id = p.id AND v.account_id = ?1) AS my_vote,
   EXISTS (SELECT 1 FROM bookmarks k WHERE k.post_id = p.id AND k.account_id = ?1) AS saved`;
 
 const tally = (r: TallyRow): Tally => ({ upvotes: r.upvotes, downvotes: r.downvotes, myVote: r.my_vote ?? 0, saved: r.saved === 1 });
+
+/**
+ * Sorts by score, comments or activity count votes and comments for every
+ * post they consider, so they consider the newest CANDIDATES (past the page
+ * being read) rather than everything palm holds: a front page of "All" read
+ * tens of thousands of rows otherwise. Pinned posts are always candidates.
+ */
+const CANDIDATES = 200;
 
 /** Lemmy's sorts, reduced to what palm can order by. */
 export type ThreadSort = "new" | "old" | "top" | "active" | "comments" | "controversial";
@@ -106,16 +122,20 @@ export async function listThreadPosts(db: D1Database, listing: PostListing): Pro
   // Pinned posts lead: a community's in the community, the instance's on the front page.
   const pinned = listing.communityId !== undefined ? "p.featured_community DESC, " : listing.scope === "local" && !listing.ids ? "p.featured_local DESC, " : "";
   const limitAt = 3 + params.length;
+  const capped = !listing.ids && listing.sort !== "new" && listing.sort !== "old";
+  const from = capped
+    ? `(SELECT p.* FROM posts p JOIN communities c ON c.id = p.community_id WHERE ${where.join(" AND ")}
+        ORDER BY ${pinned}p.id DESC LIMIT ?${limitAt + 2}) p`
+    : `posts p JOIN communities c ON c.id = p.community_id WHERE ${where.join(" AND ")}`;
   const { results } = await db
     .prepare(
       `SELECT p.*, ${TALLY},
          (SELECT COUNT(*) FROM posts x WHERE x.root_id = p.id AND x.deleted_at IS NULL) AS comment_count,
          COALESCE((SELECT MAX(x.created_at) FROM posts x WHERE x.root_id = p.id AND x.deleted_at IS NULL), p.created_at) AS active_at
-       FROM posts p JOIN communities c ON c.id = p.community_id
-       WHERE ${where.join(" AND ")}
+       FROM ${from}
        ORDER BY ${pinned}${order} LIMIT ?${limitAt} OFFSET ?${limitAt + 1}`,
     )
-    .bind(listing.viewerId ?? -1, listing.domain, ...params, listing.limit, listing.offset)
+    .bind(listing.viewerId ?? -1, listing.domain, ...params, listing.limit, listing.offset, ...(capped ? [listing.offset + CANDIDATES] : []))
     .all<PostRow & TallyRow & { comment_count: number; active_at: number }>();
   return results.map((r) => ({ ...toPost(r), ...tally(r), comments: r.comment_count, activeAt: r.active_at }));
 }
@@ -224,6 +244,25 @@ export async function vote(db: D1Database, postId: number, accountId: number, sc
     .run();
 }
 
+/**
+ * Sets a vote by someone on another server on a post from another server:
+ * 1, -1, or 0 to take it back. Kept by the voter's ActivityPub ID, with no
+ * account, since it only moves a score.
+ */
+export async function remoteVote(db: D1Database, postId: number, actor: string, score: number): Promise<void> {
+  if (score === 0) {
+    await db.prepare("DELETE FROM remote_votes WHERE post_id = ? AND actor = ?").bind(postId, actor).run();
+    return;
+  }
+  await db
+    .prepare(
+      `INSERT INTO remote_votes (post_id, actor, score, created_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT (post_id, actor) DO UPDATE SET score = excluded.score`,
+    )
+    .bind(postId, actor, score > 0 ? 1 : -1, now())
+    .run();
+}
+
 /** Lemmy counts for a person's profile. */
 export async function threadCounts(db: D1Database, accountId: number): Promise<{ posts: number; comments: number }> {
   const row = await db
@@ -237,18 +276,23 @@ export async function threadCounts(db: D1Database, accountId: number): Promise<{
   return { posts: row?.posts ?? 0, comments: row?.comments ?? 0 };
 }
 
-/** Site-wide Lemmy counts for a domain. */
+/** Site-wide Lemmy counts for a domain (counted at most every ten minutes). */
 export async function siteCounts(db: D1Database, domain: string): Promise<{ posts: number; comments: number; communities: number }> {
-  const row = await db
-    .prepare(
-      `SELECT
-         (SELECT COUNT(*) FROM posts p JOIN communities c ON c.id = p.community_id WHERE c.domain = ?1 AND c.ap_id IS NULL AND p.root_id IS NULL AND p.deleted_at IS NULL) AS posts,
-         (SELECT COUNT(*) FROM posts p JOIN communities c ON c.id = p.community_id WHERE c.domain = ?1 AND c.ap_id IS NULL AND p.root_id IS NOT NULL AND p.deleted_at IS NULL) AS comments,
-         (SELECT COUNT(*) FROM communities WHERE domain = ?1 AND ap_id IS NULL) AS communities`,
-    )
-    .bind(domain)
-    .first<{ posts: number; comments: number; communities: number }>();
-  return { posts: row?.posts ?? 0, comments: row?.comments ?? 0, communities: row?.communities ?? 0 };
+  return memoized(db, `site_counts:${domain}`, 10 * 60, async () => {
+    // Comments are counted through their posts (posts_community, then
+    // posts_root): no index finds comments by community directly.
+    const row = await db
+      .prepare(
+        `SELECT
+           (SELECT COUNT(*) FROM posts p JOIN communities c ON c.id = p.community_id WHERE c.domain = ?1 AND c.ap_id IS NULL AND p.root_id IS NULL AND p.deleted_at IS NULL) AS posts,
+           (SELECT COUNT(*) FROM posts x WHERE x.deleted_at IS NULL AND x.root_id IN
+              (SELECT p.id FROM posts p JOIN communities c ON c.id = p.community_id WHERE c.domain = ?1 AND c.ap_id IS NULL AND p.root_id IS NULL)) AS comments,
+           (SELECT COUNT(*) FROM communities WHERE domain = ?1 AND ap_id IS NULL) AS communities`,
+      )
+      .bind(domain)
+      .first<{ posts: number; comments: number; communities: number }>();
+    return { posts: row?.posts ?? 0, comments: row?.comments ?? 0, communities: row?.communities ?? 0 };
+  });
 }
 
 // --- statuses as Lemmy threads ---------------------------------------------
@@ -321,16 +365,19 @@ export async function listStatusPosts(db: D1Database, listing: StatusListing): P
       SELECT x.id, x.created_at FROM posts x JOIN d ON x.parent_id = d.id WHERE x.deleted_at IS NULL AND ${REPLY_VISIBLE}
     )`;
   const limitAt = 2 + params.length;
+  const capped = !listing.ids && listing.sort !== "new" && listing.sort !== "old";
+  const from = capped
+    ? `(SELECT p.* FROM posts p WHERE ${where.join(" AND ")} ORDER BY p.id DESC LIMIT ?${limitAt + 2}) p`
+    : `posts p WHERE ${where.join(" AND ")}`;
   const { results } = await db
     .prepare(
       `SELECT p.*, ${TALLY},
          (${below} SELECT COUNT(*) FROM d) AS comment_count,
          COALESCE((${below} SELECT MAX(created_at) FROM d), p.created_at) AS active_at
-       FROM posts p
-       WHERE ${where.join(" AND ")}
+       FROM ${from}
        ORDER BY ${order} LIMIT ?${limitAt} OFFSET ?${limitAt + 1}`,
     )
-    .bind(listing.viewerId ?? -1, ...params, listing.limit, listing.offset)
+    .bind(listing.viewerId ?? -1, ...params, listing.limit, listing.offset, ...(capped ? [listing.offset + CANDIDATES] : []))
     .all<PostRow & TallyRow & { comment_count: number; active_at: number }>();
   return results.map((r) => ({ ...toPost(r), ...tally(r), comments: r.comment_count, activeAt: r.active_at }));
 }

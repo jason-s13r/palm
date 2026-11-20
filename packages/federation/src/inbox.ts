@@ -54,6 +54,7 @@ import {
   unfollow,
   unsubscribe,
   updateRemotePost,
+  remoteVote,
   vote,
   type Community,
   type Post,
@@ -273,10 +274,16 @@ async function onDelete(ctx: Ctx, del: Delete, via: Via): Promise<void> {
 async function onVote(ctx: Ctx, activity: Like | Dislike, via: Via): Promise<void> {
   const post = await postFor(ctx, activity.objectId);
   if (!post || !activity.actorId) return;
-  const voter = await ensureAccount(ctx, activity.actorId);
-  if (!voter) return;
   const db = ctx.data.bindings.DB;
   const score = activity instanceof Dislike ? -1 : 1;
+  // A vote on another server's post only moves its score: no account needed.
+  if (post.apId) {
+    await remoteVote(db, post.id, activity.actorId.href, score);
+    if (!via.community) await relayIfLocalCommunity(ctx, post, activity);
+    return;
+  }
+  const voter = await ensureAccount(ctx, activity.actorId);
+  if (!voter) return;
   await vote(db, post.id, voter.id, score);
   const author = await localAuthorOf(ctx, post);
   // A favourite on Mastodon, an upvote on Lemmy: only Mastodon apps show these.
@@ -321,8 +328,11 @@ async function onUndo(ctx: Ctx, undo: Undo, via: Via): Promise<void> {
     if (target && "community" in target) await removeCommunityFollower(db, target.community.id, undo.actorId.href);
   } else if (object instanceof Like || object instanceof Dislike) {
     const post = await postFor(ctx, object.objectId);
-    const voter = await ensureAccount(ctx, undo.actorId);
-    if (post && voter) await vote(db, post.id, voter.id, 0);
+    if (post?.apId) await remoteVote(db, post.id, undo.actorId.href, 0);
+    else if (post) {
+      const voter = await ensureAccount(ctx, undo.actorId);
+      if (voter) await vote(db, post.id, voter.id, 0);
+    }
     if (!via.community) await relayIfLocalCommunity(ctx, post, undo);
   } else if (object instanceof Announce && object.id) {
     const booster = await ensureAccount(ctx, undo.actorId);

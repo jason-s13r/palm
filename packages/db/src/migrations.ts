@@ -756,6 +756,85 @@ CREATE TABLE IF NOT EXISTS follow_imports (
 )
 `,
   },
+  {
+    version: 28,
+    name: "cheaper reads and writes",
+    // D1 counts every row an index touches, so: the cron's lookups of local
+    // accounts get an index of their own (there are few, among thousands of
+    // remote ones); a duplicate index on posts goes; and tables keyed by their
+    // primary key are rebuilt WITHOUT ROWID, so a write is one row, not two.
+    //
+    // Remote votes on remote posts move to remote_votes, keyed by the voter's
+    // ActivityPub ID: they only move a score, so the voter needs no account.
+    // Fedify's cached remote documents aren't carried over: palm keeps them in
+    // memory now (see D1KvStore).
+    sql: `
+CREATE INDEX IF NOT EXISTS accounts_local ON accounts (id) WHERE ap_id IS NULL
+;
+DROP INDEX IF EXISTS posts_in_reply_to_all
+;
+CREATE TABLE IF NOT EXISTS remote_votes (
+  post_id INTEGER NOT NULL REFERENCES posts (id),
+  actor TEXT NOT NULL,
+  score INTEGER NOT NULL CHECK (score IN (-1, 1)),
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (post_id, actor)
+) WITHOUT ROWID
+;
+INSERT OR IGNORE INTO remote_votes (post_id, actor, score, created_at)
+SELECT v.post_id, a.ap_id, v.score, v.created_at
+FROM votes v JOIN accounts a ON a.id = v.account_id JOIN posts p ON p.id = v.post_id
+WHERE a.ap_id IS NOT NULL AND p.ap_id IS NOT NULL
+;
+CREATE TABLE votes_new (
+  post_id INTEGER NOT NULL REFERENCES posts (id),
+  account_id INTEGER NOT NULL REFERENCES accounts (id),
+  score INTEGER NOT NULL CHECK (score IN (-1, 1)),
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (post_id, account_id)
+) WITHOUT ROWID
+;
+INSERT INTO votes_new (post_id, account_id, score, created_at)
+SELECT v.post_id, v.account_id, v.score, v.created_at
+FROM votes v JOIN accounts a ON a.id = v.account_id JOIN posts p ON p.id = v.post_id
+WHERE a.ap_id IS NULL OR p.ap_id IS NULL
+;
+DROP TABLE votes
+;
+ALTER TABLE votes_new RENAME TO votes
+;
+CREATE TABLE post_tags_new (
+  post_id INTEGER NOT NULL REFERENCES posts (id),
+  tag TEXT NOT NULL,
+  PRIMARY KEY (post_id, tag)
+) WITHOUT ROWID
+;
+INSERT INTO post_tags_new (post_id, tag) SELECT t.post_id, t.tag FROM post_tags t JOIN posts p ON p.id = t.post_id
+;
+DROP TABLE post_tags
+;
+ALTER TABLE post_tags_new RENAME TO post_tags
+;
+CREATE INDEX IF NOT EXISTS post_tags_tag ON post_tags (tag, post_id)
+;
+CREATE TABLE fedify_kv_new (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  expires_at INTEGER
+) WITHOUT ROWID
+;
+INSERT INTO fedify_kv_new (key, value, expires_at)
+SELECT key, value, expires_at FROM fedify_kv
+WHERE key NOT LIKE '_fedify' || char(31) || 'remoteDocument' || char(31) || '%'
+  AND (expires_at IS NULL OR expires_at > unixepoch())
+;
+DROP TABLE fedify_kv
+;
+ALTER TABLE fedify_kv_new RENAME TO fedify_kv
+;
+CREATE INDEX IF NOT EXISTS fedify_kv_expires ON fedify_kv (expires_at) WHERE expires_at IS NOT NULL
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

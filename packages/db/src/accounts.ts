@@ -158,6 +158,8 @@ export interface RemoteAccount {
   /** The account it moved to (Mastodon's movedTo). */
   movedTo?: string | null;
   alsoKnownAs?: string[];
+  /** When the actor was last fetched; 0 marks a placeholder to fetch on next look. Defaults to now. */
+  fetchedAt?: number;
 }
 
 /** Records a remote person, or refreshes what palm knows of them. */
@@ -190,7 +192,7 @@ export async function upsertRemoteAccount(db: D1Database, remote: RemoteAccount)
       remote.avatarUrl,
       remote.headerUrl,
       remote.actorType,
-      now(),
+      remote.fetchedAt ?? now(),
       remote.outboxUrl,
       remote.followersCount,
       remote.followingCount,

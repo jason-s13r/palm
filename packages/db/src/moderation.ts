@@ -1,3 +1,4 @@
+import { memoized } from "./memo.ts";
 import { toAccount, type Account, type AccountRow } from "./accounts.ts";
 import type { KeyAlgorithm } from "./federation.ts";
 
@@ -68,13 +69,15 @@ export async function setBlockedDomains(db: D1Database, domains: string[]): Prom
   await db.batch(statements);
 }
 
-/** Servers palm has met, for Lemmy's federated instances list. */
+/** Servers palm has met, for Lemmy's federated instances list (worked out at most hourly). */
 export async function knownDomains(db: D1Database, limit = 500): Promise<string[]> {
-  const { results } = await db
-    .prepare("SELECT DISTINCT domain FROM accounts WHERE ap_id IS NOT NULL UNION SELECT DISTINCT domain FROM communities WHERE ap_id IS NOT NULL LIMIT ?")
-    .bind(limit)
-    .all<{ domain: string }>();
-  return results.map((r) => r.domain).sort();
+  return memoized(db, `known_domains:${limit}`, 60 * 60, async () => {
+    const { results } = await db
+      .prepare("SELECT DISTINCT domain FROM accounts WHERE ap_id IS NOT NULL UNION SELECT DISTINCT domain FROM communities WHERE ap_id IS NOT NULL LIMIT ?")
+      .bind(limit)
+      .all<{ domain: string }>();
+    return results.map((r) => r.domain).sort();
+  });
 }
 
 // --- invites ---------------------------------------------------------------------
@@ -168,6 +171,7 @@ export async function prune(db: D1Database, days = 30, batch = 300): Promise<num
     const marks = ids.map(() => "?").join(", ");
     await db.batch([
       db.prepare(`DELETE FROM votes WHERE post_id IN (${marks})`).bind(...ids),
+      db.prepare(`DELETE FROM remote_votes WHERE post_id IN (${marks})`).bind(...ids),
       db.prepare(`DELETE FROM boosts WHERE post_id IN (${marks})`).bind(...ids),
       db.prepare(`DELETE FROM bookmarks WHERE post_id IN (${marks})`).bind(...ids),
       db.prepare(`DELETE FROM mentions WHERE post_id IN (${marks})`).bind(...ids),
