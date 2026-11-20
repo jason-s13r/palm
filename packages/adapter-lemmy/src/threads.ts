@@ -26,6 +26,8 @@ import {
   hasLocalSubscribers,
   listThreadPosts,
   mediaById,
+  mediaForPosts,
+  type Media,
   postByIdAny,
   restorePost,
   subscribe,
@@ -211,16 +213,30 @@ async function contextFor(c: C, items: Placed[]) {
   };
 }
 
-/** A status as a Lemmy post: a title from its text, and its first picture as the link. */
-function asLemmyPost<T extends ThreadPost>(p: T): T {
-  if (p.communityId !== null) return p;
-  const picture = p.attachments.find((a) => a.mediaType?.startsWith("image/") || /\.(jpe?g|png|gif|webp)(\?|$)/i.test(a.url));
-  return { ...p, title: statusTitle(p), linkUrl: p.linkUrl ?? picture?.url ?? null };
+/** Whether an attachment is a picture Lemmy apps can show as the post's image. */
+const isPicture = (a: { url: string; mediaType: string | null }) => a.mediaType?.startsWith("image/") || /\.(jpe?g|png|gif|webp|avif)(\?|$)/i.test(a.url);
+
+/**
+ * A post as Lemmy apps want it. A status gets a title from its text; any post
+ * without a link gets its first picture as the link (a local post's from the
+ * media table, another server's from the attachments it sent), which is how
+ * Lemmy apps tell an image post.
+ */
+function asLemmyPost<T extends ThreadPost>(p: T, domain: string, media?: Media[]): T {
+  const titled = p.communityId === null ? { title: statusTitle(p) } : {};
+  if (p.linkUrl) return { ...p, ...titled };
+  const local = media?.find((m) => m.contentType.startsWith("image/"));
+  const picture = local ? urls.media(domain, local.file) : p.attachments.find(isPicture)?.url;
+  return { ...p, ...titled, linkUrl: picture ?? null };
 }
+
+/** Local posts' uploads, for those without a link. */
+const pictureMedia = (c: C, posts: ThreadPost[]) => mediaForPosts(c.env.bindings.DB, posts.filter((p) => p.apId === null && !p.linkUrl).map((p) => p.id));
 
 export async function postViews(c: C, posts: ThreadPost[]) {
   const viewer = c.get("auth")?.account ?? null;
-  const shown = posts.map(asLemmyPost);
+  const media = await pictureMedia(c, posts);
+  const shown = posts.map((p) => asLemmyPost(p, c.env.domain.domain, media.get(p.id)));
   const [ctxOf, hidden, cards, marks] = await Promise.all([
     contextFor(c, posts),
     hiddenFor(c.env.bindings.DB, viewer?.id),
@@ -252,7 +268,9 @@ export async function commentViews(c: C, comments: ThreadComment[]) {
     listThreadPosts(c.env.bindings.DB, { domain: c.env.domain.domain, scope: "all", ids, sort: "new", viewerId, limit: 1000, offset: 0 }),
     listStatusPosts(c.env.bindings.DB, { ids, sort: "new", viewerId, limit: 1000, offset: 0 }),
   ]);
-  const rootById = new Map([...threads, ...statuses].map((r) => [r.id, asLemmyPost(r)]));
+  const roots = [...threads, ...statuses];
+  const media = await pictureMedia(c, roots);
+  const rootById = new Map(roots.map((r) => [r.id, asLemmyPost(r, c.env.domain.domain, media.get(r.id))]));
   const ctxOf = await contextFor(
     c,
     comments.map((x) => ({ accountId: x.accountId, communityId: x.communityId, ownerId: rootById.get(x.rootId ?? 0)?.accountId })),
@@ -854,16 +872,22 @@ threadRoutes.put("/api/v3/comment/save", async (c) => {
   return commentResponse(c, found.id);
 });
 
-/** A person's Lemmy posts and comments, newest first, for their profile. */
+/**
+ * A person's posts and comments, newest first, for their profile. Their
+ * statuses (Mastodon, Pixelfed) count as posts, as in their person community.
+ */
 export async function personThreads(c: C, accountId: number) {
   const { limit, offset } = paging(c, 20, 50);
   const db = c.env.bindings.DB;
   const viewerId = c.get("auth")?.account.id ?? null;
-  const [posts, comments] = await Promise.all([
-    listThreadPosts(db, { domain: c.env.domain.domain, scope: "all", creatorId: accountId, sort: "new", viewerId, limit, offset }),
+  // Both post lists start at the top, so the merged page is cut from them.
+  const [posts, statuses, comments] = await Promise.all([
+    listThreadPosts(db, { domain: c.env.domain.domain, scope: "all", creatorId: accountId, sort: "new", viewerId, limit: offset + limit, offset: 0 }),
+    listStatusPosts(db, { authorIds: [accountId], sort: "new", viewerId, limit: offset + limit, offset: 0 }),
     listThreadComments(db, { domain: c.env.domain.domain, scope: "all", creatorId: accountId, sort: "new", viewerId, limit, offset }),
   ]);
-  return { posts: await postViews(c, posts), comments: await commentViews(c, comments) };
+  const page = mergeSorted(posts, statuses, "new").slice(offset, offset + limit);
+  return { posts: await postViews(c, page), comments: await commentViews(c, comments) };
 }
 
 /** Search: communities and posts on this domain whose names or text match. */

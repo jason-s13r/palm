@@ -263,12 +263,13 @@ export async function remoteVote(db: D1Database, postId: number, actor: string, 
     .run();
 }
 
-/** Lemmy counts for a person's profile. */
+/** Lemmy counts for a person's profile; their statuses count as posts. */
 export async function threadCounts(db: D1Database, accountId: number): Promise<{ posts: number; comments: number }> {
   const row = await db
     .prepare(
       `SELECT
-         (SELECT COUNT(*) FROM posts WHERE account_id = ?1 AND community_id IS NOT NULL AND root_id IS NULL AND deleted_at IS NULL) AS posts,
+         (SELECT COUNT(*) FROM posts WHERE account_id = ?1 AND community_id IS NOT NULL AND root_id IS NULL AND deleted_at IS NULL)
+           + (SELECT COUNT(*) FROM posts p WHERE p.account_id = ?1 AND ${STATUS_WHERE}) AS posts,
          (SELECT COUNT(*) FROM posts WHERE account_id = ?1 AND root_id IS NOT NULL AND deleted_at IS NULL) AS comments`,
     )
     .bind(accountId)

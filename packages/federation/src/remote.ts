@@ -63,7 +63,15 @@ import { localDomains, logProblem } from "./shared.ts";
 const ACTOR_TTL_SECONDS = 3 * 24 * 60 * 60;
 const now = () => Math.floor(Date.now() / 1000);
 
-const hrefOf = (value: URL | Link | null | undefined): string | null =>
+/** Lemmy sends a post's image as an `Image` with no mediaType; work it out from the class or the file name. */
+const IMAGE_EXTENSIONS: Record<string, string> = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif", webp: "image/webp", avif: "image/avif" };
+function guessImageType(attachment: object, url: string): string | null {
+  const ext = /\.([a-z0-9]+)(?:[?#]|$)/i.exec(new URL(url).pathname)?.[1]?.toLowerCase();
+  if (ext && IMAGE_EXTENSIONS[ext]) return IMAGE_EXTENSIONS[ext];
+  return attachment instanceof Image ? "image/*" : null;
+}
+
+const hrefOf =(value: URL | Link | null | undefined): string | null =>
   value instanceof URL ? value.href : value instanceof Link ? (value.href?.href ?? null) : null;
 
 /** Collects an async iterable, stopping at `limit` items. */
@@ -290,6 +298,10 @@ export async function storeRemotePost(
     }
   }
 
+  // A community comment whose parent can't be fetched has no thread to sit in;
+  // kept, it would show as a post of its own.
+  if (community !== null && parentId && !parent) return null;
+
   const wanted =
     reason.required ||
     reason.addressedHere ||
@@ -305,7 +317,7 @@ export async function storeRemotePost(
     if (attachment instanceof Link) linkUrl ??= attachment.href?.href ?? null;
     else if (attachment instanceof Document || attachment instanceof Image || attachment instanceof Video) {
       const url = hrefOf(attachment.url);
-      if (url) attachments.push({ url, mediaType: attachment.mediaType ?? null, description: text(attachment.name) });
+      if (url) attachments.push({ url, mediaType: attachment.mediaType ?? guessImageType(attachment, url), description: text(attachment.name) });
     }
   }
   const isThreadPost = community !== null && !parent;

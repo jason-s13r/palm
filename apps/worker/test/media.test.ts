@@ -13,6 +13,23 @@ const imageForm = (field: string, extra: Record<string, string> = {}) => {
 };
 
 describe("Media", () => {
+  it("shows a status's picture as its image in Lemmy apps, and the status on the poster's Lemmy profile", async () => {
+    const id = await createAccount("snapper", "pw-pw-pw");
+    const auth = { authorization: `Bearer ${await mastodonToken(id)}` };
+    const media = await (await worker.fetch(`${MASTODON}/api/v2/media`, { method: "POST", headers: auth, body: imageForm("file") })).json<{ id: string; url: string }>();
+    const status = await (
+      await worker.fetch(`${MASTODON}/api/v1/statuses`, { ...json({ status: "dog.", media_ids: [media.id] }), headers: { ...auth, "content-type": "application/json" } })
+    ).json<{ id: string }>();
+
+    type View = { post: { id: number; url?: string; thumbnail_url?: string } };
+    const one = await (await worker.fetch(`${DOMAIN}/api/v3/post?id=${status.id}`)).json<{ post_view: View }>();
+    expect(one.post_view.post).toMatchObject({ url: media.url, thumbnail_url: media.url });
+
+    const profile = await (await worker.fetch(`${DOMAIN}/api/v3/user?username=snapper`)).json<{ posts: View[]; person_view: { counts: { post_count: number } } }>();
+    expect(profile.posts.map((p) => p.post.id)).toContain(Number(status.id));
+    expect(profile.person_view.counts.post_count).toBe(1);
+  });
+
   it("uploads an image from a Mastodon app, attaches it, serves it and federates it", async () => {
     const id = await createAccount("yan", "pw");
     const auth = { authorization: `Bearer ${await mastodonToken(id)}` };
