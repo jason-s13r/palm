@@ -1,5 +1,18 @@
 # Changelog
 
+## worker@0.11.1 (2026-11-20)
+
+### Fixes
+
+- resumable uploads in pieces under 5 MiB, as the PeerTube app sends
+
+- PeerTube lists honour host, isLive and nsfw
+
+### Dependencies
+
+- db: 0.8.0 -> 0.8.1
+
+
 ## worker@0.11.0 (2026-11-20)
 
 ### Features
