@@ -107,13 +107,14 @@ type Posted = Pick<Post, "client" | "clientApp" | "clientDevice" | "communityId"
  * Where a post was written, as far as the instance's `postClients` setting
  * shows: " · on Pixelfed · via Ivory for iPhone". "On" is the kind of post:
  * anything in a community is Lemmy's; a local status is Pixelfed's when a
- * Pixelfed app wrote it, Mastodon's otherwise. Another server's status says
+ * Pixelfed app wrote it, Mastodon's when another app did. Another server's status says
  * nothing, since palm doesn't know what that server runs.
  */
 function postedOf(c: C, p: Posted): Html | string {
   const level = c.env.config.postClients ?? "app";
   if (level === "off") return "";
-  const on = p.communityId !== null ? "Lemmy" : p.apId !== null ? null : p.client === "pixelfed" ? "Pixelfed" : "Mastodon";
+  // A local status from before palm kept its client says nothing: it could be either.
+  const on = p.communityId !== null ? "Lemmy" : p.apId !== null || !p.client ? null : p.client === "pixelfed" ? "Pixelfed" : "Mastodon";
   if (!on) return "";
   const parts: (Html | string)[] = [html` · <span class="via">on ${on}</span>`];
   if (level === "app" || level === "device") {
@@ -123,7 +124,8 @@ function postedOf(c: C, p: Posted): Html | string {
     const device = level === "device" ? p.clientDevice : null;
     // "on Pixelfed · via Pixelfed" says nothing new, unless a device follows.
     if (app && app.toLowerCase() === on.toLowerCase() && !device) app = null;
-    const via = app && device ? `${app} for ${device}` : (app ?? device);
+    // Some apps name their platform already ("Pixelfed for iOS"), so the device isn't added twice.
+    const via = app && device && !/\bfor\s+\S/i.test(app) ? `${app} for ${device}` : (app ?? device);
     if (via) parts.push(html` · <span class="via">via ${via}</span>`);
   }
   return html`${parts}`;

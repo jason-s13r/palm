@@ -44,6 +44,14 @@ describe("Web pages", () => {
     expect(page).not.toContain("plover</a> @plover@palm.test");
     // Comments name people by handle, so another server's show its host; display names show on hover.
     expect(page).toContain('title="A &quot;Gull&quot;">gull@far.example</a>');
+
+    // A status from before palm kept its client doesn't guess which kind it is.
+    const old = await db
+      .prepare("INSERT INTO posts (account_id, content_source, content_html, spoiler_text, sensitive, visibility, created_at) VALUES (?, 'old', '<p>old</p>', '', 0, 'public', 3) RETURNING id")
+      .bind(plover.id)
+      .first<{ id: number }>();
+    const oldPage = await (await worker.fetch(`${SITE}/@plover/${old!.id}`, BROWSER)).text();
+    expect(oldPage).not.toContain("on Mastodon");
   });
 
   it("says what kind of post it is and which app and device it came from", async () => {
