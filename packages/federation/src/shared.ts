@@ -35,12 +35,20 @@ export interface Federations {
 // One pair per database per isolate: building them is the costly part. The
 // built pair is kept, not a pending promise, which is tied to its request.
 const built = new WeakMap<D1Database, Federations>();
+const builtTrusted = new WeakMap<D1Database, Federations>();
 
-export async function federationsFor(bindings: RequestContext["bindings"]): Promise<Federations> {
-  const known = built.get(bindings.DB);
+/**
+ * The two federations for a database. `trusted` builds a pair that skips
+ * signature checks, for deliveries palm has already authenticated itself
+ * (see trustedDelivery in inbox-auth.ts); nothing else may use it.
+ */
+export async function federationsFor(bindings: RequestContext["bindings"], trusted = false): Promise<Federations> {
+  const cache = trusted ? builtTrusted : built;
+  const known = cache.get(bindings.DB);
   if (known) return known;
   const options = (name: FederationName) => ({
     kv: new D1KvStore(bindings.DB),
+    ...(trusted ? { skipSignatureVerification: true } : {}),
     // With a queue, outgoing deliveries become queue jobs, which the
     // Worker's queue handler runs (see processQueueMessage). Received
     // activities are handled in the request: a busy Lemmy community sends
@@ -57,8 +65,8 @@ export async function federationsFor(bindings: RequestContext["bindings"]): Prom
   signRefusedFetches(people);
   signRefusedFetches(communities);
   // Two requests arriving together may both build; the first one kept wins.
-  const found = built.get(bindings.DB) ?? { people, communities };
-  built.set(bindings.DB, found);
+  const found = cache.get(bindings.DB) ?? { people, communities };
+  cache.set(bindings.DB, found);
   return found;
 }
 

@@ -6,6 +6,7 @@ import { processQueueMessage as processMessage } from "./delivery.ts";
 import type { QueueBody } from "./queue.ts";
 import { triage } from "./prefilter.ts";
 import { verifySignature } from "./signature.ts";
+import { trustedDelivery } from "./inbox-auth.ts";
 import { federationsFor } from "./shared.ts";
 import { isStoryActivity, receiveStoryActivity } from "./stories.ts";
 
@@ -77,6 +78,15 @@ export async function handleFederation(
       return "fedify" as const;
     });
     if (outcome !== "fedify") return new Response(null, { status: 202 });
+    // An activity whose HTTP signature is its own actor's: its LD signature
+    // needn't be checked (see inbox-auth.ts).
+    const trusted = parsed ? await trustedDelivery(db, request, body, parsed) : null;
+    if (trusted) {
+      const { people, communities } = await federationsFor(ctx.bindings, true);
+      const options = { contextData: ctx, onNotFound: fallback, onNotAcceptable: fallback };
+      const target = url.pathname.startsWith("/c/") || url.pathname === "/communities/inbox" ? communities : people;
+      return target.fetch(trusted, options);
+    }
   }
   // Paths Fedify doesn't serve (web pages, the bare domain, scanners trying
   // /.env) go straight to the fallback: building the federations costs more
