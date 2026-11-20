@@ -1,5 +1,16 @@
 # Changelog
 
+## worker@0.12.1 (2026-11-20)
+
+### Fixes
+
+- uploads in pieces of any size, and video files shaped as PeerTube sends them
+
+### Dependencies
+
+- db: 0.9.0 -> 0.9.1
+
+
 ## worker@0.12.0 (2026-11-20)
 
 ### Features

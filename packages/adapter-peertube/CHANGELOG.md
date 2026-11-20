@@ -1,5 +1,12 @@
 # Changelog
 
+## adapter-peertube@0.2.1 (2026-11-20)
+
+### Fixes
+
+- uploads in pieces of any size, and video files shaped as PeerTube sends them
+
+
 ## adapter-peertube@0.2.0 (2026-11-20)
 
 ### Features
