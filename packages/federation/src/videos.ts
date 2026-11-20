@@ -92,7 +92,8 @@ const iso = (seconds: number) => new Date(seconds * 1000).toISOString();
 export async function localVideoObject(ctx: RequestContext, postId: number): Promise<{ object: Json; author: Account; channel: Community | null } | null> {
   const db = ctx.bindings.DB;
   const post = await postById(db, postId);
-  if (!post || post.apId !== null) return null;
+  // Only PeerTube uploads are PeerTube's Video; a status or Lemmy post with a video stays what it was.
+  if (!post || post.apId !== null || post.client !== "peertube") return null;
   const video = await videoByPostId(db, postId);
   const author = await accountById(db, post.accountId);
   if (!video || !author) return null;

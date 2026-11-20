@@ -12,12 +12,24 @@ export const MEDIA_TYPES: Record<string, string> = {
   "video/mp4": "mp4",
   "video/webm": "webm",
   "video/quicktime": "mov",
+  // Taken only when something can transcode them (see storeMedia).
+  "video/x-matroska": "mkv",
+  "video/x-msvideo": "avi",
+  "video/3gpp": "3gp",
+  "video/x-m4v": "m4v",
+  "video/mpeg": "mpg",
+  "video/ogg": "ogv",
 };
+
+/** Videos that play in browsers and phones as they are. Others wait for a transcoder. */
+const PLAYABLE_VIDEO = new Set(["video/mp4", "video/webm", "video/quicktime"]);
 
 /** The largest image palm takes, in bytes. */
 export const MAX_MEDIA_SIZE = 10 * 1024 * 1024;
 /** The largest video: a phone clip of a minute or two. */
 export const MAX_VIDEO_SIZE = 40 * 1024 * 1024;
+/** The largest video when something can transcode it: still one request, under Cloudflare's 100 MB. */
+export const MAX_TRANSCODED_VIDEO_SIZE = 75 * 1024 * 1024;
 
 export const isVideo = (contentType: string) => contentType.startsWith("video/");
 
@@ -68,10 +80,14 @@ export async function storeMedia(
   accountId: number,
   file: File,
   description: string | null,
+  options: { transcoder?: boolean } = {},
 ): Promise<Media | UploadProblem> {
   if (!bucket) return "no_storage";
   if (!MEDIA_TYPES[file.type]) return "unsupported_type";
-  if (file.size > (isVideo(file.type) ? MAX_VIDEO_SIZE : MAX_MEDIA_SIZE)) return "too_large";
+  // With a transcoder, videos in other formats are taken, and bigger ones: its H.264 copy is what plays.
+  if (isVideo(file.type) && !PLAYABLE_VIDEO.has(file.type) && !options.transcoder) return "unsupported_type";
+  const maxVideo = options.transcoder ? MAX_TRANSCODED_VIDEO_SIZE : MAX_VIDEO_SIZE;
+  if (file.size > (isVideo(file.type) ? maxVideo : MAX_MEDIA_SIZE)) return "too_large";
   // Hex, so the served name is the same in any case.
   const id = [...crypto.getRandomValues(new Uint8Array(12))].map((b) => b.toString(16).padStart(2, "0")).join("");
   await bucket.put(`media/${id}`, file.stream(), { httpMetadata: { contentType: file.type } });
@@ -164,4 +180,27 @@ export async function mediaResponse(bucket: R2Bucket | undefined, idOrFile: stri
   }
   headers.set("content-length", String(object.size));
   return new Response("body" in object ? (object as R2ObjectBody).body : null, { headers });
+}
+
+/** Replaces a video's file with another (a transcoder's H.264 copy): same ID, so every link to it plays the new one. */
+export async function replaceMediaFile(db: D1Database, bucket: R2Bucket, id: string, body: ReadableStream | ArrayBuffer, contentType: string, size: number): Promise<void> {
+  await bucket.put(`media/${id}`, body, { httpMetadata: { contentType } });
+  await db.prepare("UPDATE media SET content_type = ?, size = ? WHERE id = ?").bind(contentType, size, id).run();
+}
+
+/**
+ * Local posts with a video attached and no video record yet: Lemmy, Mastodon
+ * and Pixelfed uploads for a transcoder to work on. A few at a time.
+ */
+export async function untranscodedVideoMedia(db: D1Database, limit = 3): Promise<Media[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT m.* FROM media m JOIN posts p ON p.id = m.post_id
+       WHERE m.content_type LIKE 'video/%' AND p.ap_id IS NULL AND p.deleted_at IS NULL
+         AND NOT EXISTS (SELECT 1 FROM videos v WHERE v.post_id = m.post_id)
+       ORDER BY m.created_at DESC LIMIT ?`,
+    )
+    .bind(limit)
+    .all<MediaRow>();
+  return results.map(toMedia);
 }

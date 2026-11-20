@@ -18,6 +18,11 @@ import {
   videoByPostId,
   videoMediaIds,
   postById,
+  mediaById,
+  replaceMediaFile,
+  saveVideo,
+  setVideoMedia,
+  untranscodedVideoMedia,
   videosWithoutHls,
   type RunnerJob,
   type RunnerJobType,
@@ -25,7 +30,7 @@ import {
 } from "@palm/db";
 import { Hono } from "hono";
 import { fail, type C, type Env } from "./http.ts";
-import type { Probe } from "./mp4.ts";
+import { PLAYS_EVERYWHERE, probeMp4, r2Reader, type Probe } from "./mp4.ts";
 
 /**
  * PeerTube's remote runners: `peertube-runner` (PeerTube's own, with ffmpeg)
@@ -243,9 +248,9 @@ runnerRoutes.post("/api/v1/runners/jobs/:uuid/success", async (c) => {
   const ratio = video.aspectRatio ?? 16 / 9;
   const even = (n: number) => Math.round(n / 2) * 2;
   const [width, height] = ratio >= 1 ? [even(found.job.resolution * ratio), found.job.resolution] : [found.job.resolution, even(found.job.resolution / ratio)];
-  const fileId = await keep(c, post.accountId, file.stream(), "video/mp4", file.size);
-  const fileUrl = urls.media(c.env.domain.domain, `${fileId}.mp4`);
   if (hls) {
+    const fileId = await keep(c, post.accountId, file.stream(), "video/mp4", file.size);
+    const fileUrl = urls.media(c.env.domain.domain, `${fileId}.mp4`);
     // The rendition's playlist names its file by the runner's own name; palm serves it from R2.
     const text = (await playlist!.text()).replaceAll(file.name, fileUrl);
     const playlistId = await keep(c, post.accountId, text, "application/vnd.apple.mpegurl", text.length);
@@ -257,11 +262,20 @@ runnerRoutes.post("/api/v1/runners/jobs/:uuid/success", async (c) => {
       hls: { url: masterUrl(c.env, video.uuid), segmentsSha256Url: null, files: renditions.sort((a, b) => b.height - a.height) },
     });
   } else {
-    // The original upload stays; an earlier rendition at this height is replaced.
+    // An H.264 copy of an upload that doesn't play everywhere (HEVC, WebM,
+    // MKV...): it takes the upload's place, under the same ID, so every link
+    // to it (a status's attachment, a Lemmy post's link) plays the copy.
     const { mediaId } = await videoMediaIds(db, post.id);
-    const kept = video.files.filter((f) => f.height !== height || (mediaId !== null && f.url.includes(`/${mediaId}.`)));
-    const files2 = [...kept, { url: fileUrl, mediaType: "video/mp4", height, width, size: file.size, fps: found.job.fps }];
-    await updateVideo(db, post.id, { files: files2.sort((a, b) => b.height - a.height) });
+    if (!mediaId) {
+      await finishRunnerJob(db, found.job.uuid, "errored", "The video has no upload to replace");
+      return fail(c, 400, "The video has no upload to replace");
+    }
+    const before = await mediaById(db, mediaId);
+    await replaceMediaFile(db, c.env.bindings.MEDIA, mediaId, file.stream(), "video/mp4", file.size);
+    const fileUrl = urls.media(c.env.domain.domain, `${mediaId}.mp4`);
+    await updateVideo(db, post.id, { files: [{ url: fileUrl, mediaType: "video/mp4", height, width, size: file.size, fps: found.job.fps }] });
+    // A Lemmy post links to its upload by name, which now ends in .mp4.
+    if (before && post.linkUrl?.endsWith(`/${before.file}`)) await db.prepare("UPDATE posts SET link_url = ? WHERE id = ?").bind(fileUrl, post.id).run();
   }
   await finishRunnerJob(db, found.job.uuid, "completed");
   await settle(c.env, post.id);
@@ -291,7 +305,54 @@ export function masterPlaylist(video: Video): string | null {
 async function settle(ctx: RequestContext, postId: number): Promise<void> {
   if ((await runnerJobsLeft(ctx.bindings.DB, postId)) > 0) return;
   await setTranscode(ctx.bindings.DB, postId, null);
-  ctx.activities.enqueue({ kind: "video_published", postId, update: true });
+  // A PeerTube upload federates as PeerTube's Video; anything else as the post it was, now with its new file.
+  const post = await postById(ctx.bindings.DB, postId);
+  if (post?.client === "peertube") ctx.activities.enqueue({ kind: "video_published", postId, update: true });
+  else if (post) ctx.activities.enqueue({ kind: "post_updated", postId });
+}
+
+/**
+ * Videos posted from Lemmy, Mastodon and Pixelfed apps, handed to the runner
+ * too: HLS for PeerTube apps, and an H.264 copy in place of an upload that
+ * doesn't play everywhere. The cron calls this; a few posts a run.
+ */
+export async function queueAttachmentTranscodes(ctx: RequestContext): Promise<void> {
+  if (!enabled(ctx) || !ctx.bindings.MEDIA) return;
+  const db = ctx.bindings.DB;
+  for (const media of await untranscodedVideoMedia(db)) {
+    const post = media.postId !== null ? await postById(db, media.postId) : null;
+    if (!post) continue;
+    const readable = media.contentType === "video/mp4" || media.contentType === "video/quicktime" || media.contentType === "video/x-m4v";
+    const probe = readable ? await probeMp4(r2Reader(ctx.bindings.MEDIA, `media/${media.id}`), media.size) : null;
+    const playsEverywhere = media.contentType === "video/mp4" && PLAYS_EVERYWHERE.has(probe?.videoCodec ?? "");
+    await saveVideo(db, {
+      postId: post.id,
+      uuid: crypto.randomUUID(),
+      // A Lemmy post's community is its channel; a status has none (its person stands in).
+      channelId: post.communityId,
+      duration: Math.round(probe?.duration ?? 0),
+      views: 0,
+      likes: 0,
+      dislikes: 0,
+      state: 1,
+      isLive: false,
+      category: null,
+      licence: null,
+      language: post.language,
+      aspectRatio: probe?.width && probe.height ? Math.round((probe.width / probe.height) * 10000) / 10000 : null,
+      thumbnails: [],
+      files: [{ url: urls.media(ctx.domain.domain, media.file), mediaType: media.contentType, height: probe?.height ?? 0, width: probe?.width ?? null, size: media.size, fps: probe?.fps ?? -1 }],
+      hls: null,
+      embedUrl: null,
+      commentsEnabled: true,
+      downloadEnabled: true,
+      support: null,
+      originallyPublishedAt: null,
+    });
+    await setVideoMedia(db, post.id, { mediaId: media.id });
+    // A file palm can't read (WebM, MKV...) is assumed 720p: the runner reads it properly.
+    await queueRunnerJobs(db, post.id, probe ?? { width: 1280, height: 720, fps: 30, duration: 0 }, playsEverywhere);
+  }
 }
 
 /**

@@ -1,4 +1,4 @@
-import { escapeHtml, hashtagsIn, htmlToText, mentionsIn, previewLink, textToHtml, urls, type RequestContext } from "@palm/core";
+import { escapeHtml, hashtagsIn, htmlToText, mentionsIn, previewLink, textToHtml, transcoderOf, urls, type RequestContext } from "@palm/core";
 import {
   claimIdempotencyKey,
   idempotentPost,
@@ -82,7 +82,7 @@ import {
 } from "@palm/db";
 import { Hono, type Context } from "hono";
 import { clientOf } from "./client.ts";
-import { account, iso, type AccountStats } from "./views.ts";
+import { account, iso, mediaLimits, type AccountStats } from "./views.ts";
 
 type Env = { Bindings: RequestContext; Variables: { account: Account | null; app: OAuthApp | null } };
 type C = Context<Env>;
@@ -1059,10 +1059,11 @@ async function upload(c: C) {
     me.id,
     file,
     typeof description === "string" && description.trim() ? description.trim() : null,
+    { transcoder: transcoderOf(c.env.bindings) !== null },
   );
   if (stored === "no_storage") return fail(c, "Uploads aren't available on this server");
   if (stored === "unsupported_type") return fail(c, "Validation failed: File content type is invalid");
-  if (stored === "too_large") return fail(c, "Validation failed: File file size must be less than 10 MB (40 MB for video)");
+  if (stored === "too_large") return fail(c, `Validation failed: File file size must be less than 10 MB (${mediaLimits(c.env).videoSize / 1024 / 1024} MB for video)`);
   return c.json(mediaAttachment(c.env, stored));
 }
 

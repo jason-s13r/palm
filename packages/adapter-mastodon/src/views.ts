@@ -1,5 +1,5 @@
 import type { RequestContext } from "@palm/core";
-import { urls } from "@palm/core";
+import { transcoderOf, urls } from "@palm/core";
 import type { Account } from "@palm/db";
 
 /**
@@ -99,16 +99,26 @@ export function credentialAccount(ctx: RequestContext, a: Account, stats?: Accou
   };
 }
 
-const configuration = (host: string) => ({
+/** What media this deployment takes: more video formats, and bigger, when something can transcode them. */
+export function mediaLimits(ctx: RequestContext) {
+  const transcoder = transcoderOf(ctx.bindings) !== null;
+  return {
+    types: ["image/jpeg", "image/png", "image/gif", "image/webp", "video/mp4", "video/webm", "video/quicktime", ...(transcoder ? ["video/x-matroska", "video/x-msvideo", "video/3gpp", "video/x-m4v", "video/mpeg", "video/ogg"] : [])],
+    videoSize: transcoder ? 75 * 1024 * 1024 : 40 * 1024 * 1024,
+    transcoder,
+  };
+}
+
+const configuration = (host: string, media: ReturnType<typeof mediaLimits>) => ({
   urls: { streaming: `wss://${host}` },
   vapid: { public_key: "" },
   accounts: { max_featured_tags: 10, max_pinned_statuses: 5 },
   statuses: { max_characters: 5000, max_media_attachments: 4, characters_reserved_per_url: 23 },
   media_attachments: {
-    supported_mime_types: ["image/jpeg", "image/png", "image/gif", "image/webp", "video/mp4", "video/webm", "video/quicktime"],
+    supported_mime_types: media.types,
     image_size_limit: 10_485_760,
     image_matrix_limit: 16_777_216,
-    video_size_limit: 41_943_040,
+    video_size_limit: media.videoSize,
     video_frame_rate_limit: 60,
     video_matrix_limit: 8_294_400,
   },
@@ -128,7 +138,7 @@ export function instanceV2(ctx: RequestContext, palmVersion: string, users: numb
     thumbnail: { url: avatarUrl(ctx.host) },
     icon: [],
     languages: ["en"],
-    configuration: configuration(ctx.host),
+    configuration: configuration(ctx.host, mediaLimits(ctx)),
     registrations:
       ctx.config.registration === "invite"
         ? { enabled: true, approval_required: false, message: "Sign-up needs an invite code: put it in the reason field.", url: null }
@@ -155,7 +165,7 @@ export function instanceV1(ctx: RequestContext, palmVersion: string, users: numb
     registrations: ctx.config.registration === "invite",
     approval_required: false,
     invites_enabled: false,
-    configuration: configuration(ctx.host),
+    configuration: configuration(ctx.host, mediaLimits(ctx)),
     contact_account: null,
     rules: [],
   };

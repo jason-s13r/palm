@@ -23,6 +23,7 @@ import {
   videoMediaIds,
   type Account,
   type Video,
+  MEDIA_TYPES,
   type UploadPiece,
   type VideoThumbnail,
 } from "@palm/db";
@@ -70,12 +71,12 @@ export function capabilities(ctx: RequestContext): Capabilities {
     frames: typeof env.MEDIA_TRANSFORMS?.input === "function",
     quota: Math.max(0, Number.isFinite(quotaMb) ? quotaMb : 2048) * MIB,
     chunkSize: CHUNK,
-    // Stream takes anything; runners get files palm can read (MP4 and QuickTime share a format).
-    extensions: transcoder === "stream" ? [".mp4", ".m4v", ".mov", ".webm", ".mkv"] : transcoder === "runner" ? [".mp4", ".m4v", ".mov"] : [".mp4", ".m4v"],
+    // With a transcoder, other formats are taken: its H.264 copy is what plays.
+    extensions: transcoder ? [".mp4", ".m4v", ".mov", ".webm", ".mkv", ".avi", ".3gp"] : [".mp4", ".m4v"],
   };
 }
 
-const TYPES: Record<string, string> = { ".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm", ".mkv": "video/x-matroska" };
+const TYPES: Record<string, string> = { ".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm", ".mkv": "video/x-matroska", ".avi": "video/x-msvideo", ".3gp": "video/3gpp" };
 const extensionOf = (filename: string) => /\.[a-z0-9]+$/i.exec(filename)?.[0]?.toLowerCase() ?? "";
 
 const hexId = () => [...crypto.getRandomValues(new Uint8Array(12))].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -308,7 +309,7 @@ async function publishUpload(
   const meta = upload.meta;
   const description = (str(meta.description) ?? "").trim();
   const name = (str(meta.name) ?? "Untitled").trim().slice(0, 120);
-  const ext = upload.contentType === "video/mp4" ? "mp4" : upload.contentType === "video/quicktime" ? "mov" : upload.contentType === "video/webm" ? "webm" : "bin";
+  const ext = MEDIA_TYPES[upload.contentType] ?? "bin";
   const fileUrl = urls.media(c.env.domain.domain, `${upload.mediaId}.${ext}`);
   const agent = userAgentClient(c.req.header("user-agent"));
   const post = await createPost(db, {
@@ -376,7 +377,8 @@ async function publishUpload(
       console.warn(JSON.stringify({ palm: "stream_upload_failed", postId: post.id, error: String(error) }));
     }
   } else if (caps.transcoder === "runner") {
-    await queueRunnerJobs(db, post.id, probe, PLAYS_EVERYWHERE.has(probe?.videoCodec ?? ""));
+    // A file palm can't read (WebM, MKV...) is assumed 720p: the runner reads it properly.
+    await queueRunnerJobs(db, post.id, probe ?? { width: 1280, height: 720, fps: 30, duration: 0 }, upload.contentType === "video/mp4" && PLAYS_EVERYWHERE.has(probe?.videoCodec ?? ""));
   }
 
   if (post.visibility !== "direct") c.env.activities.enqueue({ kind: "video_published", postId: post.id, update: false });

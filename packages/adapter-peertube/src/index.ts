@@ -84,7 +84,7 @@ import {
 
 export { PEERTUBE_VERSION } from "./views.ts";
 export { capabilities } from "./upload.ts";
-export { backfillRunnerJobs, runnerSocket } from "./runner.ts";
+export { backfillRunnerJobs, queueAttachmentTranscodes, runnerSocket } from "./runner.ts";
 export { videoMaintenance } from "./maintenance.ts";
 export type { C, Env } from "./http.ts";
 

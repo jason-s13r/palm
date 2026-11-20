@@ -1,5 +1,5 @@
 import { randomToken } from "@palm/auth";
-import { nodeinfoVersion, urls, type RequestContext } from "@palm/core";
+import { nodeinfoVersion, transcoderOf, urls, type RequestContext } from "@palm/core";
 import {
   accountById,
   accountByHandle,
@@ -34,7 +34,7 @@ import {
 import { Hono, type Context } from "hono";
 import { isPixelfed } from "./client.ts";
 import { accountStats, accountStatsMany, MAX_ATTACHMENTS, MAX_CHARACTERS, statuses } from "./statuses.ts";
-import { account, credentialAccount } from "./views.ts";
+import { account, credentialAccount, mediaLimits } from "./views.ts";
 
 /**
  * Pixelfed's apps. Pixelfed's API is Mastodon's with extras: a few fields on
@@ -282,8 +282,8 @@ pixelfedRoutes.get("/api/v2.1/config", (c) =>
         image_size_limit: 10_240 * 1024,
         max_album_limit: MAX_ATTACHMENTS,
         max_alt_text_length: 1500,
-        supported_mime_types: ["image/jpeg", "image/png", "image/gif", "image/webp", "video/mp4"],
-        video_size_limit: 40 * 1024 * 1024,
+        supported_mime_types: ["image/jpeg", "image/png", "image/gif", "image/webp", "video/mp4", ...(mediaLimits(c.env).transcoder ? ["video/quicktime"] : [])],
+        video_size_limit: mediaLimits(c.env).videoSize,
       },
       statuses: { max_characters: MAX_CHARACTERS },
     },
@@ -629,7 +629,7 @@ async function newStory(c: C, me: Account, file: unknown, options: { duration: n
   if ((await liveStoryCount(db, me.id)) >= MAX_STORIES) {
     return c.json({ code: 418, error: `You’ve reached your daily limit of ${MAX_STORIES} Stories.` }, 418 as 400);
   }
-  const stored = await storeMedia(db, c.env.bindings.MEDIA, me.id, file, null);
+  const stored = await storeMedia(db, c.env.bindings.MEDIA, me.id, file, null, { transcoder: transcoderOf(c.env.bindings) !== null });
   if (typeof stored === "string") {
     return fail(c, stored === "too_large" ? "That file is too large." : stored === "no_storage" ? "Uploads aren't available on this server." : "Unsupported file type.", 422);
   }

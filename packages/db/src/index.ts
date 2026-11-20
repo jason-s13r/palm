@@ -117,6 +117,9 @@ export {
 } from "./threads.ts";
 export type { CommentListing, PostListing, Scope, StatusListing, Tally, ThreadComment, ThreadPost, ThreadSort } from "./threads.ts";
 export {
+  replaceMediaFile,
+  untranscodedVideoMedia,
+  MAX_TRANSCODED_VIDEO_SIZE,
   attachMedia,
   deleteMedia,
   describeMedia,

@@ -1,6 +1,6 @@
 import { handleLemmy } from "@palm/adapter-lemmy";
 import { handleMastodon, publishDueStatuses } from "@palm/adapter-mastodon";
-import { backfillRunnerJobs, handlePeerTube, isPeerTubePath, runnerSocket, videoMaintenance } from "@palm/adapter-peertube";
+import { backfillRunnerJobs, handlePeerTube, queueAttachmentTranscodes, isPeerTubePath, runnerSocket, videoMaintenance } from "@palm/adapter-peertube";
 import { activitySink, handleFederation, processQueueMessage, serveStory, serveVideoObject, type QueueBody } from "@palm/federation";
 import { contextScope, defineConfig, enterContext, normaliseHost, resolveSurface, type DomainConfig, type PalmBindings, type PalmConfig, type RequestContext } from "@palm/core";
 import { claimFollowImports, deleteMedia, domainOf, mediaById, migrate, pendingDeletes, pendingMoves, prune, removeEndedStories } from "@palm/db";
@@ -89,6 +89,7 @@ async function scheduled(config: PalmConfig, controller: ScheduledController, en
   if (ended.removed) console.log(JSON.stringify({ palm: "stories_ended", stories: ended.removed }));
   // PeerTube video: Stream's renditions as they finish, and abandoned uploads.
   const first = contextFor("");
+  if (first) await queueAttachmentTranscodes(first).catch((error: unknown) => console.warn(JSON.stringify({ palm: "attachment_transcodes_failed", error: String(error) })));
   if (first) await backfillRunnerJobs(first).catch((error: unknown) => console.warn(JSON.stringify({ palm: "runner_backfill_failed", error: String(error) })));
   if (first) await videoMaintenance(first).catch((error: unknown) => console.warn(JSON.stringify({ palm: "video_maintenance_failed", error: String(error) })));
   const at = new Date(controller.scheduledTime);

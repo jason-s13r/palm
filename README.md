@@ -197,7 +197,7 @@ has bound, and palm works out which from its bindings:
 | --- | --- | --- |
 | Free | `MEDIA` (R2) | The MP4 as uploaded, read for its length, size and frame rate (no ffmpeg). Use H.264 MP4: other servers play the file as it is. |
 | Free (5,000 a month) | `MEDIA_TRANSFORMS` (Media Transformations) | A thumbnail from a frame of the video, for files under 100 MB. |
-| Self-hosted | `PEERTUBE_RUNNER_TOKEN` (a secret) | Renditions (240p up to 720p, H.264) made by [`peertube-runner`](https://docs.joinpeertube.org/maintain/tools#peertube-runner) on a machine of yours. MOV (an iPhone's HEVC, say) is taken too. |
+| Self-hosted | `PEERTUBE_RUNNER_TOKEN` (a secret) | HLS renditions (240p up to the upload's own, H.264) made by [`peertube-runner`](https://docs.joinpeertube.org/maintain/tools#peertube-runner) on a machine of yours, for videos from any app. A file that doesn't play everywhere (MOV, WebM, MKV, AVI, 3GP, or HEVC) is replaced by the runner's H.264 MP4, and Lemmy, Mastodon and Pixelfed apps can attach videos up to 75 MB. |
 | Paid | `STREAM` (Cloudflare Stream) | Stream's HLS playlist and an H.264 MP4 of every upload; MOV, WebM and MKV are taken. |
 
 ```jsonc
@@ -227,9 +227,8 @@ Each person's videos go in one channel, `!name_channel@your.domain`, made on
 their first upload. Lemmy apps see it as a community they moderate; PeerTube
 servers follow it as a channel.
 
-The App Store build of the official PeerTube app signs in only to the
-platforms on Framasoft's list; the Android builds (F-Droid, the APK) let you
-add any server.
+The official PeerTube app (App Store, F-Droid or the APK) signs in with the
+domain, as Lemmy and Mastodon apps do.
 
 ## Releases
 

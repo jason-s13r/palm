@@ -38,6 +38,17 @@ export interface PalmBindings {
   PALM_VIDEO_QUOTA_MB?: string;
 }
 
+/**
+ * What makes video renditions in this deployment, from its bindings:
+ * Cloudflare Stream (paid), PeerTube's remote runners (a machine of your own),
+ * or nothing (videos play as uploaded).
+ */
+export function transcoderOf(bindings: PalmBindings): "stream" | "runner" | null {
+  if (typeof bindings.STREAM?.upload === "function") return "stream";
+  if (typeof bindings.PEERTUBE_RUNNER_TOKEN === "string" && bindings.PEERTUBE_RUNNER_TOKEN.length >= 16) return "runner";
+  return null;
+}
+
 /** The parts of Cloudflare Stream's Worker binding palm uses. */
 export interface StreamBinding {
   upload(url: string, params?: { meta?: Record<string, string>; creator?: string }): Promise<{ uid?: string; id?: string }>;

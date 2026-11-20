@@ -5,7 +5,7 @@ import { fromShortUuid, toShortUuid } from "../../../packages/adapter-peertube/s
 import { parseDuration, videoFromJson } from "../../../packages/federation/src/video-json.ts";
 import { saveVideo, subscribe, migrate } from "@palm/db";
 import { describe, expect, it } from "vitest";
-import { createAccount, db, giveKeys, worker } from "./helpers.ts";
+import { createAccount, db, giveKeys, MASTODON, mastodonToken, worker } from "./helpers.ts";
 
 // What PeerTube apps send, on the bare domain they sign in to.
 const SITE = "https://palm.test";
@@ -482,13 +482,46 @@ describe("PeerTube: hosting", () => {
     expect(rendition).toContain('#EXT-X-MAP:URI="https://palm.test/pictrs/image/');
   });
 
-  it("refuses files it can't play without a transcoder", async () => {
+  it("has runners transcode a video posted from a Mastodon app, replacing a file that won't play everywhere", async () => {
+    const id = await createAccount("pt_mkv", "pw-long-enough");
+    await giveKeys(id);
+    const auth = { authorization: `Bearer ${await mastodonToken(id)}` };
+    const form = new FormData();
+    form.append("file", new File([new Uint8Array(2000)], "clip.mkv", { type: "video/x-matroska" }));
+    const media = await (await worker.fetch(`${MASTODON}/api/v2/media`, { method: "POST", headers: auth, body: form })).json<{ id: string; type: string }>();
+    expect(media.type).toBe("video");
+    const status = await (await worker.fetch(`${MASTODON}/api/v1/statuses`, { method: "POST", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify({ status: "a clip", media_ids: [media.id] }) })).json<{ id: string }>();
+
+    await (worker as unknown as { scheduled(o: { cron: string; scheduledTime: number }): Promise<unknown> }).scheduled({ cron: "*/10 * * * *", scheduledTime: Date.UTC(2026, 0, 1, 12, 0) });
+    const jobs = await db.prepare("SELECT uuid, type FROM runner_jobs WHERE post_id = ?").bind(Number(status.id)).all<{ uuid: string; type: string }>();
+    expect(jobs.results.map((j) => j.type)).toContain("vod-hls-transcoding");
+    const web = jobs.results.find((j) => j.type === "vod-web-video-transcoding")!;
+    expect(web).toBeDefined();
+
+    const call = (path: string, body: Record<string, unknown>) =>
+      worker.fetch(`${SITE}/api/v1/runners${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    const { runnerToken } = await (await call("/register", { registrationToken: "test-runner-registration-token", name: "mkv" })).json<{ runnerToken: string }>();
+    const { job } = await (await call(`/jobs/${web.uuid}/accept`, { runnerToken })).json<{ job: { jobToken: string } }>();
+    const done = new FormData();
+    done.set("runnerToken", runnerToken);
+    done.set("jobToken", job.jobToken);
+    done.set("payload[videoFile]", new File([new Uint8Array(3000)], "out.mp4", { type: "video/mp4" }));
+    expect((await worker.fetch(`${SITE}/api/v1/runners/jobs/${web.uuid}/success`, { method: "POST", body: done })).status).toBe(204);
+
+    const row = await db.prepare("SELECT content_type, size FROM media WHERE id = ?").bind(media.id).first<{ content_type: string; size: number }>();
+    expect(row).toEqual({ content_type: "video/mp4", size: 3000 });
+    const shown = await (await worker.fetch(`${MASTODON}/api/v1/statuses/${status.id}`, { headers: auth })).json<{ media_attachments: { url: string }[] }>();
+    expect(shown.media_attachments[0]!.url).toMatch(/\.mp4$/);
+    expect((await (await worker.fetch(shown.media_attachments[0]!.url)).arrayBuffer()).byteLength).toBe(3000);
+  });
+
+  it("refuses files no transcoder takes", async () => {
     await createAccount("pt_mov", "pw-long-enough");
     const { auth } = await signIn("pt_mov", "pw-long-enough");
     const res = await worker.fetch(`${SITE}/api/v1/videos/upload-resumable`, {
       method: "POST",
-      headers: { ...auth, "content-type": "application/json", "x-upload-content-length": "1000", "x-upload-content-type": "video/webm" },
-      body: JSON.stringify({ name: "Nope", channelId: 1, filename: "clip.webm" }),
+      headers: { ...auth, "content-type": "application/json", "x-upload-content-length": "1000", "x-upload-content-type": "video/x-flv" },
+      body: JSON.stringify({ name: "Nope", channelId: 1, filename: "clip.flv" }),
     });
     expect(res.status).toBe(415);
   });

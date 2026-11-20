@@ -1,5 +1,5 @@
 import { hashPassword, needsRehash, signJwt, verifyJwt, verifyPassword } from "@palm/auth";
-import { nodeinfoVersion, uploadCacheKey, type RequestContext } from "@palm/core";
+import { nodeinfoVersion, transcoderOf, uploadCacheKey, type RequestContext } from "@palm/core";
 import {
   accountByHandle,
   accountById,
@@ -118,7 +118,7 @@ app.post("/pictrs/image", async (c) => {
   const form = await c.req.formData().catch(() => null);
   const file = form?.getAll("images[]").find((f): f is File => f instanceof File) ?? (form?.get("images") as File | null);
   if (!(file instanceof File)) return c.json({ msg: "no_image" }, 400);
-  const stored = await storeMedia(c.env.bindings.DB, c.env.bindings.MEDIA, auth.account.id, file, null);
+  const stored = await storeMedia(c.env.bindings.DB, c.env.bindings.MEDIA, auth.account.id, file, null, { transcoder: transcoderOf(c.env.bindings) !== null });
   if (typeof stored === "string") return c.json({ msg: stored }, stored === "no_storage" ? 503 : 400);
   return c.json({ msg: "ok", files: [{ file: stored.file, delete_token: stored.deleteToken }] });
 });
