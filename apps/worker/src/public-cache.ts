@@ -17,7 +17,8 @@ import { profileVersion } from "@palm/db";
 
 const DAY = 24 * 60 * 60;
 const COLLECTION_SECONDS = 10 * 60;
-const NODEINFO_SECONDS = 60 * 60;
+/** Nodeinfo's counts are themselves worked out at most hourly; nobody needs them fresher. */
+const NODEINFO_SECONDS = 6 * 60 * 60;
 
 interface Rule {
   ttl: number;

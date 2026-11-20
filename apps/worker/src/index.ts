@@ -185,6 +185,13 @@ export async function handle(
   }
 
   const served = surface;
+  // Nodeinfo's links are the same for every request, and crawlers ask for
+  // them often: answered before any database or Fedify work. Pixelfed's own
+  // fetches are pointed at the Pixelfed nodeinfo, so it sends stories;
+  // everyone else gets Lemmy's (Voyager needs it).
+  if (surface.kind === "federation" && url.pathname === "/.well-known/nodeinfo" && request.method === "GET") {
+    return nodeinfoLinks(surface.domain.domain, /\bPixelfed\//.test(request.headers.get("user-agent") ?? ""));
+  }
   // Uploads come from cache when they can, before any database work.
   if (url.pathname.startsWith("/pictrs/image/") && !url.pathname.startsWith("/pictrs/image/delete/")) {
     return serveUpload(request, url, surface.domain.domain, (p) => executionCtx.waitUntil(p), () => routeRequest());
@@ -228,12 +235,6 @@ export async function handle(
         if (url.pathname.startsWith("/stories/")) {
           const story = await serveStory(request, ctx);
           if (story) return story;
-        }
-        // Pixelfed sends stories only to servers whose nodeinfo says Pixelfed,
-        // so its own fetches are pointed at the Pixelfed nodeinfo the app reads.
-        // Everyone else still sees Lemmy (Voyager needs it).
-        if (url.pathname === "/.well-known/nodeinfo" && /\bPixelfed\//.test(request.headers.get("user-agent") ?? "")) {
-          return json({ links: [{ rel: "http://nodeinfo.diaspora.software/ns/schema/2.0", href: `https://${served.domain.domain}/api/nodeinfo/2.0.json` }] });
         }
         // Actors, collections, WebFinger and nodeinfo come from cache when they can.
         return servePublic(request, ctx, () => handleFederation(request, ctx, (req) => federationFallback(config, req, new URL(req.url), ctx)));
@@ -331,10 +332,24 @@ async function proxyMedia(request: Request, ctx: RequestContext): Promise<Respon
   return response;
 }
 
+/** /.well-known/nodeinfo, as Fedify answers it (or Pixelfed's, for Pixelfed servers). */
+function nodeinfoLinks(domain: string, pixelfed: boolean): Response {
+  const link = pixelfed
+    ? { rel: "http://nodeinfo.diaspora.software/ns/schema/2.0", href: `https://${domain}/api/nodeinfo/2.0.json` }
+    : {
+        rel: "http://nodeinfo.diaspora.software/ns/schema/2.1",
+        href: `https://${domain}/nodeinfo/2.1`,
+        type: 'application/json; profile="http://nodeinfo.diaspora.software/ns/schema/2.1#"',
+      };
+  return new Response(JSON.stringify({ links: [link] }), {
+    headers: { "content-type": pixelfed ? "application/json; charset=utf-8" : "application/jrd+json" },
+  });
+}
+
 /** Crawlers may read the web pages; the APIs and sign-in aren't for them. */
 function robotsResponse(): Response {
   return new Response("User-agent: *\nDisallow: /api/\nDisallow: /oauth/\nDisallow: /pictrs/\nAllow: /\n", {
-    headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=86400" },
+    headers: { "content-type": "text/plain; charset=utf-8" },
   });
 }
 
