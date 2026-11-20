@@ -1,6 +1,6 @@
 {
   "name": "@palm/core",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "private": true,
   "type": "module",
   "description": "palm's configuration model and host routing.",

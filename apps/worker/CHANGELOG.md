@@ -1,5 +1,22 @@
 # Changelog
 
+## worker@0.11.0 (2026-11-20)
+
+### Features
+
+- PeerTube apps, and video hosting
+  Watching from PeerTube apps over videos federated here; uploads to R2, with
+  thumbnails, renditions and HLS from Media Transformations, peertube-runner or
+  Stream when bound.
+
+### Dependencies
+
+- core: 1.4.0 -> 1.5.0
+- db: 0.7.0 -> 0.8.0
+- federation: 0.6.0 -> 0.7.0
+- web: 0.2.1 -> 0.3.0
+
+
 ## worker@0.10.0 (2026-11-20)
 
 ### Features
