@@ -64,7 +64,7 @@ describe("Posting", () => {
       content: "<p>federate me</p>",
       summary: "cw",
       sensitive: true,
-      to: "as:Public",
+      to: "https://www.w3.org/ns/activitystreams#Public",
       cc: "https://palm.test/users/lux/followers",
     });
 

@@ -99,11 +99,39 @@ export async function handleFederation(
     // A browser asking for an actor or object gets the browser fallback too.
     onNotAcceptable: fallback,
   };
-  if (url.pathname.startsWith("/c/") || url.pathname === "/communities/inbox") return communities.fetch(request, options);
+  if (url.pathname.startsWith("/c/") || url.pathname === "/communities/inbox") return publicAddressing(await communities.fetch(request, options));
   if (url.pathname === "/.well-known/webfinger") {
     return people.fetch(request, { ...options, onNotFound: (req) => communities.fetch(req, options) });
   }
-  return people.fetch(request, options);
+  return publicAddressing(await people.fetch(request, options));
+}
+
+const PUBLIC = "https://www.w3.org/ns/activitystreams#Public";
+const ADDRESSING = new Set(["to", "cc", "bto", "bcc", "audience"]);
+
+/** Spells out `as:Public` in addressing, as Fedify does for what it sends. */
+function expandPublic(value: unknown, key?: string): unknown {
+  if (typeof value === "string") return key && ADDRESSING.has(key) && (value === "as:Public" || value === "Public") ? PUBLIC : value;
+  if (Array.isArray(value)) return value.map((v) => expandPublic(v, key));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, k === "@context" ? v : expandPublic(v, k)]));
+  }
+  return value;
+}
+
+/**
+ * Objects and collections palm serves, with `as:Public` spelled out. Lemmy
+ * compares addressing as plain URLs, so it refuses a fetched post addressed
+ * to `as:Public` as not public. Signed documents are left as they are.
+ */
+async function publicAddressing(res: Response): Promise<Response> {
+  const type = res.headers.get("content-type") ?? "";
+  if (!res.ok || !/activity\+json|ld\+json/.test(type)) return res;
+  const text = await res.text();
+  if (!text.includes("Public")) return new Response(text, res);
+  const doc = JSON.parse(text) as Record<string, unknown>;
+  if ("proof" in doc || "signature" in doc) return new Response(text, res);
+  return new Response(JSON.stringify(expandPublic(doc)), res);
 }
 
 function parseJson(body: string): Record<string, unknown> | null {

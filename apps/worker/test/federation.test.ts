@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createAccount, db, giveKeys, mastodonToken, worker } from "./helpers.ts";
+import { createAccount, createCommunity, db, giveKeys, mastodonToken, worker } from "./helpers.ts";
 
 const DOMAIN = "https://palm.test";
 const AP = { headers: { accept: "application/activity+json" } };
@@ -37,6 +37,24 @@ describe("federation", () => {
     const res = await worker.fetch(`${DOMAIN}/users/ivy/outbox`, AP);
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ type: "OrderedCollection", totalItems: 0 });
+  });
+
+  it("serves a community post as Lemmy reads one: public, with the community in cc", async () => {
+    const author = await createAccount("poster", "pw");
+    await giveKeys(author);
+    const community = await createCommunity("ccs");
+    const post = await db
+      .prepare(
+        "INSERT INTO posts (account_id, community_id, title, content_source, content_html, visibility, created_at) VALUES (?, ?, 'Hello', 'x', '<p>x</p>', 'public', ?) RETURNING id",
+      )
+      .bind(author, community, Math.floor(Date.now() / 1000))
+      .first<{ id: number }>();
+    const page = await (await worker.fetch(`${DOMAIN}/objects/${post!.id}`, AP)).json<{ type: string; to: unknown; cc: unknown; audience: string }>();
+    expect(page.type).toBe("Page");
+    // Lemmy matches addressing as plain URLs.
+    expect([page.to].flat()).toContain("https://www.w3.org/ns/activitystreams#Public");
+    expect([page.cc].flat()).toContain("https://palm.test/c/ccs");
+    expect(page.audience).toBe("https://palm.test/c/ccs");
   });
 
   it("returns 404 for an unknown actor", async () => {

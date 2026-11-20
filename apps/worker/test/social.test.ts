@@ -168,7 +168,8 @@ describe("Communities on the network", () => {
       type: "Page",
       name: "A title",
       audience: "https://palm.test/c/pages",
-      to: ["https://palm.test/c/pages", "as:Public"],
+      to: "https://www.w3.org/ns/activitystreams#Public",
+      cc: "https://palm.test/c/pages",
       source: { content: "Some **markdown**", mediaType: "text/markdown" },
       attachment: { type: "Link", href: "https://example.com/" },
     });

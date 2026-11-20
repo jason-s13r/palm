@@ -96,11 +96,11 @@ export function addressing(parts: PostParts): { tos: URL[]; ccs: URL[] } {
   const { post, author, community, parent, mentions } = parts;
   const people = [...mentions.map(actorUri), ...(parent && parent.author.id !== author.id ? [actorUri(parent.author)] : [])];
   if (community) {
-    // Lemmy: a post goes to its community and the public; a comment to the
-    // public, with the community and whoever it answers copied in.
-    return post.rootId === null
-      ? { tos: [communityUri(community), PUBLIC_COLLECTION], ccs: people }
-      : { tos: [PUBLIC_COLLECTION], ccs: [communityUri(community), ...people] };
+    // Lemmy: posts and comments go to the public, with the community and
+    // whoever they mention or answer copied in, as Lemmy sends them. Lemmy
+    // 0.19 can't read a Create or Update of a Page or Note without a cc (and
+    // Fedify leaves an empty one out), so the community goes there.
+    return { tos: [PUBLIC_COLLECTION], ccs: [communityUri(community), ...people] };
   }
   const followers = followersUri(author);
   switch (post.visibility) {
