@@ -299,6 +299,8 @@ describe("PeerTube: the app's API", () => {
     expect(thread.comment).toMatchObject({ text: "Great video", threadId: thread.comment.id });
     const reply = await (await send("POST", `/api/v1/videos/${uuid}/comments/${thread.comment.id}`, { text: "Agreed" })).json<{ comment: { id: number; threadId: number; inReplyToCommentId: number } }>();
     expect(reply.comment).toMatchObject({ threadId: thread.comment.id, inReplyToCommentId: thread.comment.id });
+    // The app asks with a trailing slash.
+    expect((await get<{ total: number }>(`/api/v1/videos/${uuid}/comment-threads/?count=0`)).total).toBe(1);
     const threads = await get<{ total: number; data: { id: number; totalReplies: number }[] }>(`/api/v1/videos/${uuid}/comment-threads`);
     expect(threads.data).toEqual([expect.objectContaining({ id: thread.comment.id, totalReplies: 1 })]);
     const tree = await get<{ comment: { id: number }; children: { comment: { text: string } }[] }>(`/api/v1/videos/${uuid}/comment-threads/${thread.comment.id}`);

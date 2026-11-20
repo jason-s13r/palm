@@ -256,7 +256,7 @@ async function renderChannel(c: C, channel: Channel) {
 
 // --- the app ---------------------------------------------------------------------
 
-const app = new Hono<Env>();
+const app = new Hono<Env>({ strict: false });
 
 app.use("*", cors({ origin: "*", allowHeaders: ["Authorization", "Content-Type", "Content-Range", "X-Upload-Content-Length", "X-Upload-Content-Type"], exposeHeaders: ["Location", "Range", "Retry-After"], maxAge: 86400 }));
 
@@ -1207,6 +1207,8 @@ const watchRedirect = async (c: C, id: string) => {
     : `https://${c.env.domain.domain}/@${encodeURIComponent(author?.username ?? "")}/${found.post.id}`;
   return c.redirect(target, 302);
 };
+// The app loads PeerTube's server-string translations; palm's labels are English already.
+app.get("/client/locales/:lang/server.json", (c) => c.json({}, 200, { "cache-control": "public, max-age=86400" }));
 app.get("/w/:id", (c) => watchRedirect(c, c.req.param("id")));
 app.get("/videos/watch/:id", (c) => watchRedirect(c, c.req.param("id")));
 app.get("/videos/embed/:id", (c) => watchRedirect(c, c.req.param("id")));

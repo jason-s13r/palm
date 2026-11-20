@@ -102,7 +102,7 @@ async function body(request: Request): Promise<{ fields: Record<string, unknown>
   return { fields, files };
 }
 
-export const runnerRoutes = new Hono<Env>();
+export const runnerRoutes = new Hono<Env>({ strict: false });
 
 runnerRoutes.use("/api/v1/runners/*", async (c, next) => {
   if (!enabled(c.env)) return fail(c, 404, "This server has no remote runners.");

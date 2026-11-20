@@ -80,7 +80,7 @@ const extensionOf = (filename: string) => /\.[a-z0-9]+$/i.exec(filename)?.[0]?.t
 
 const hexId = () => [...crypto.getRandomValues(new Uint8Array(12))].map((b) => b.toString(16).padStart(2, "0")).join("");
 
-export const uploadRoutes = new Hono<Env>();
+export const uploadRoutes = new Hono<Env>({ strict: false });
 
 async function quotaLeft(c: C, account: Account): Promise<number> {
   const row = await c.env.bindings.DB.prepare("SELECT COALESCE(SUM(size), 0) AS n FROM media WHERE account_id = ? AND content_type NOT LIKE 'image/%'")

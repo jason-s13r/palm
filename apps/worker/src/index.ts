@@ -240,7 +240,7 @@ export async function handle(
 }
 
 /** PeerTube's watch links (/w/{shortUUID}, /videos/watch/{uuid}), as its apps share them. */
-const isPeerTubeLink = (path: string) => /^\/(w\/[^/]+|videos\/watch\/[^/]+|videos\/embed\/[^/]+)$/.test(path);
+const isPeerTubeLink = (path: string) => /^\/(w\/[^/]+|videos\/watch\/[^/]+|videos\/embed\/[^/]+|client\/locales\/[^/]+\/server\.json)$/.test(path);
 
 /** Paths the Mastodon API owns on the bare domain. */
 function isMastodonPath(path: string): boolean {
