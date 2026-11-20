@@ -1,5 +1,20 @@
 # Changelog
 
+## adapter-mastodon@0.9.0 (2026-11-20)
+
+### Features
+
+- runners transcode any uploaded video
+  Videos from Lemmy, Mastodon and Pixelfed apps get HLS too, and a file that
+  doesn't play everywhere is replaced by the runner's H.264 MP4. With a
+  transcoder, MOV, WebM, MKV, AVI and 3GP are taken, up to 75 MB.
+
+### Dependencies
+
+- core: 1.5.1 -> 1.6.0
+- db: 0.9.1 -> 0.10.0
+
+
 ## adapter-mastodon@0.8.0 (2026-11-20)
 
 ### Features
