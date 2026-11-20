@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createAccount, createCommunity, json, MASTODON, mastodonToken, worker } from "./helpers.ts";
+import { createAccount, createCommunity, db, json, MASTODON, mastodonToken, worker } from "./helpers.ts";
 
 const SITE = "https://palm.test";
 const BROWSER = { headers: { accept: "text/html,application/xhtml+xml" }, redirect: "manual" as const };
@@ -25,6 +25,25 @@ async function lemmyLogin(username: string) {
 const meta = (page: string, property: string) => page.match(new RegExp(`<meta (?:property|name)="${property}" content="([^"]*)"`))?.[1];
 
 describe("Web pages", () => {
+  it("names people as Lemmy does: a name here, name@server elsewhere", async () => {
+    const plover = await mastodonUser("plover");
+    const status = await (await plover.post("/api/v1/statuses", { status: "anyone there?" })).json<{ id: string }>();
+    const far = await db
+      .prepare(
+        "INSERT INTO accounts (domain, username, display_name, role, created_at, ap_id, inbox) VALUES ('far.example', 'gull', 'A \"Gull\"', 'user', 1, 'https://far.example/u/gull', 'https://far.example/inbox') RETURNING id",
+      )
+      .first<{ id: number }>();
+    await db
+      .prepare("INSERT INTO posts (account_id, content_source, content_html, spoiler_text, sensitive, visibility, in_reply_to, parent_id, created_at, ap_id) VALUES (?, 'yes', '<p>yes</p>', '', 0, 'public', ?, ?, 2, 'https://far.example/n/1')")
+      .bind(far!.id, `https://palm.test/objects/${status.id}`, Number(status.id))
+      .run();
+
+    const page = await (await worker.fetch(`${SITE}/@plover/${status.id}`, BROWSER)).text();
+    expect(page).toContain(">plover</a> · ");
+    expect(page).not.toContain("@plover@palm.test ·");
+    expect(page).toContain('title="A &quot;Gull&quot;">gull@far.example</a>');
+  });
+
   it("says what kind of post it is and which app and device it came from", async () => {
     const id = await createAccount("kestrel", "pw-pw-pw");
     const headers = { authorization: `Bearer ${await mastodonToken(id)}`, "content-type": "application/json", "user-agent": "Test/1.0 (iPhone; iOS 18.1)" };

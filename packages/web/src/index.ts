@@ -53,6 +53,11 @@ const fallbackImage = (c: C) => `${origin(c)}/palm/avatar.png`;
 
 const handleOf = (a: Account) => `@${a.username}@${a.domain}`;
 const nameOf = (a: Account) => a.displayName || a.username;
+/** How bylines name someone, as Lemmy does: "jason" here, "master5o1@lemmy.nz" elsewhere. */
+const shortHandle = (a: Account) => (a.apId ? `${a.username}@${a.domain}` : a.username);
+/** A byline's link to someone, with their display name on hover. */
+const personLink = (a: Account) =>
+  html`<a href="${profileHref(a)}"${a.displayName && a.displayName !== a.username ? html` title="${a.displayName}"` : ""}>${shortHandle(a)}</a>`;
 
 /** Where palm shows a person: their own page here, or their server's. */
 const profileHref = (a: Account) => (a.apId ? (a.profileUrl ?? a.apId) : `/@${encodeURIComponent(a.username)}`);
@@ -274,7 +279,7 @@ function renderThread(c: C, comments: ThreadComment[], authors: Map<number, Acco
   const one = (x: ThreadComment): Html => {
     const author = authors.get(x.accountId);
     const body = x.deleted || !author ? html`<p class="meta">[deleted]</p>` : renderBody(x, attachmentsOf(c, x, media));
-    return html`<li id="c${x.id}"><div class="meta">${author ? html`<a href="${profileHref(author)}">${nameOf(author)}</a>` : "someone"} · ${points(x.upvotes - x.downvotes)} · ${time(x.createdAt)}${postedOf(c, x)} · <a href="/comment/${x.id}">link</a></div>${body}${
+    return html`<li id="c${x.id}"><div class="meta">${author ? personLink(author) : "someone"} · ${points(x.upvotes - x.downvotes)} · ${time(x.createdAt)}${postedOf(c, x)} · <a href="/comment/${x.id}">link</a></div>${body}${
       children(x).length ? html`<ul class="thread">${children(x).map(one)}</ul>` : ""
     }</li>`;
   };
@@ -320,7 +325,7 @@ async function postPage(c: C, id: number): Promise<Response> {
   const live = comments.filter((x) => !x.deleted).length;
   const context = [
     root && root.id !== post.id && isPublic(root) ? html`<p class="meta">On <a href="${postHref(root, authors.get(root.accountId))}">${root.title ?? excerpt(root.contentHtml, 80)}</a></p>` : "",
-    parent && isPublic(parent) ? html`<p class="meta">In reply to <a href="${postHref(parent, authors.get(parent.accountId))}">${authors.get(parent.accountId) ? nameOf(authors.get(parent.accountId)!) : "a post"}</a></p>` : "",
+    parent && isPublic(parent) ? html`<p class="meta">In reply to <a href="${postHref(parent, authors.get(parent.accountId))}">${authors.get(parent.accountId) ? shortHandle(authors.get(parent.accountId)!) : "a post"}</a></p>` : "",
   ];
   return page(
     site(c),
@@ -340,7 +345,7 @@ async function postPage(c: C, id: number): Promise<Response> {
     html`<article>
 ${context}
 ${post.title ? html`<h1>${post.title}</h1>` : ""}
-<p class="meta"><a href="${profileHref(author)}">${nameOf(author)}</a> ${handleOf(author)} · ${time(post.createdAt)}${postedOf(c, post)}${
+<p class="meta">${personLink(author)} · ${time(post.createdAt)}${postedOf(c, post)}${
       community ? html` · in <a href="${communityHref(community)}">!${community.name}${community.apId ? `@${community.domain}` : ""}</a>` : ""
     } · ${points(votes)}</p>
 ${post.linkUrl ? html`<p><a href="${post.linkUrl}">${post.linkUrl}</a></p>` : ""}
@@ -397,7 +402,7 @@ ${posts.length ? "" : html`<p>No posts yet.</p>`}
       const author = authors.get(p.accountId);
       const href = postHref(p);
       return html`<li><a href="${p.linkUrl ?? href}">${p.title ?? "(untitled)"}</a>${p.linkUrl ? html` <span class="meta">(${hostOf(p.linkUrl)})</span>` : ""}
-<div class="meta">${points(p.upvotes - p.downvotes)} · ${author ? html`<a href="${profileHref(author)}">${nameOf(author)}</a>` : ""} · ${time(p.createdAt)}${postedOf(c, p)} · <a href="${href}">${p.comments} comments</a></div></li>`;
+<div class="meta">${points(p.upvotes - p.downvotes)} · ${author ? personLink(author) : ""} · ${time(p.createdAt)}${postedOf(c, p)} · <a href="${href}">${p.comments} comments</a></div></li>`;
     })}</ol>
 ${posts.length === 25 ? html`<p><a href="?page=${pageNo + 1}">More</a></p>` : ""}`,
   );
