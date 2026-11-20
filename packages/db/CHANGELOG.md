@@ -1,5 +1,14 @@
 # Changelog
 
+## db@0.7.0 (2026-11-20)
+
+### Features
+
+- profile directory, and Pixelfed's login activity
+
+- Pixelfed stories
+
+
 ## db@0.6.0 (2026-11-20)
 
 ### Features

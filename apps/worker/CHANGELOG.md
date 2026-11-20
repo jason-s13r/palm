@@ -1,5 +1,21 @@
 # Changelog
 
+## worker@0.10.0 (2026-11-20)
+
+### Features
+
+- profile directory, and Pixelfed's login activity
+
+- Pixelfed stories
+
+### Dependencies
+
+- core: 1.3.0 -> 1.4.0
+- db: 0.6.0 -> 0.7.0
+- adapter-mastodon: 0.7.0 -> 0.8.0
+- federation: 0.5.2 -> 0.6.0
+
+
 ## worker@0.9.1 (2026-11-20)
 
 ### Fixes

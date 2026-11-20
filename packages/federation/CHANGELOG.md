@@ -1,5 +1,17 @@
 # Changelog
 
+## federation@0.6.0 (2026-11-20)
+
+### Features
+
+- Pixelfed stories
+
+### Dependencies
+
+- core: 1.3.0 -> 1.4.0
+- db: 0.6.0 -> 0.7.0
+
+
 ## federation@0.5.2 (2026-11-20)
 
 ### Fixes

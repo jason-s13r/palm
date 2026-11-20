@@ -1,5 +1,12 @@
 # Changelog
 
+## core@1.4.0 (2026-11-20)
+
+### Features
+
+- Pixelfed stories
+
+
 ## core@1.3.0 (2026-11-20)
 
 ### Features
