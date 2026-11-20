@@ -835,6 +835,16 @@ ALTER TABLE fedify_kv_new RENAME TO fedify_kv
 CREATE INDEX IF NOT EXISTS fedify_kv_expires ON fedify_kv (expires_at) WHERE expires_at IS NOT NULL
 `,
   },
+  {
+    version: 29,
+    name: "post clients",
+    // Which client API (lemmy, mastodon, pixelfed) and app made a local post.
+    sql: `
+ALTER TABLE posts ADD COLUMN client TEXT
+;
+ALTER TABLE posts ADD COLUMN client_app TEXT
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

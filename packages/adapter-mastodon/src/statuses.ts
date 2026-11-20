@@ -81,6 +81,7 @@ import {
   type Visibility,
 } from "@palm/db";
 import { Hono, type Context } from "hono";
+import { clientOf } from "./client.ts";
 import { account, iso, type AccountStats } from "./views.ts";
 
 type Env = { Bindings: RequestContext; Variables: { account: Account | null; app: OAuthApp | null } };
@@ -371,7 +372,7 @@ async function renderStatuses(ctx: RequestContext, posts: Post[], viewer: Accoun
         ),
         filtered: [],
         reblog: null as unknown,
-        application: null,
+        application: post.apId === null && post.clientApp ? { name: post.clientApp, website: null } : null,
         account: authorView,
         media_attachments: [
           ...(media.get(post.id) ?? []).map((m) => mediaAttachment(ctx, m, author.domain)),
@@ -625,6 +626,7 @@ statusRoutes.post("/api/v1/statuses", async (c) => {
 
   const post = await createPost(db, {
     accountId: me.id,
+    ...clientOf(c),
     contentSource: source,
     contentHtml: textToHtml(source, mentions.links, tagLink(c)),
     spoilerText: text(params.spoiler_text).trim(),

@@ -16,6 +16,7 @@ import {
   type OAuthApp,
 } from "@palm/db";
 import { Hono, type Context } from "hono";
+import { isPixelfed } from "./client.ts";
 import { accountStats, accountStatsMany, MAX_ATTACHMENTS, MAX_CHARACTERS, statuses } from "./statuses.ts";
 import { account, credentialAccount } from "./views.ts";
 
@@ -39,12 +40,9 @@ export const PIXELFED_COMPAT_VERSION = "0.15.2";
 /** Max bio length, as Pixelfed's config reports it. */
 const MAX_BIO = 500;
 
-const fail = (c: C, error: string, status: 400 | 401 | 403 | 404 | 422 = 422) => c.json({ error }, status);
+export { isPixelfed };
 
-/** Whether a request comes from a Pixelfed app: `_pe=1`, its header, or an app named for it. */
-export function isPixelfed(c: C): boolean {
-  return c.req.query("_pe") !== undefined || c.req.header("x-pixelfed-app") !== undefined || /pixelfed/i.test(c.get("app")?.name ?? "");
-}
+const fail = (c: C, error: string, status: 400 | 401 | 403 | 404 | 422 = 422) => c.json({ error }, status);
 
 const stripHtml = (html: string) =>
   html

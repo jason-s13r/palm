@@ -25,6 +25,18 @@ async function lemmyLogin(username: string) {
 const meta = (page: string, property: string) => page.match(new RegExp(`<meta (?:property|name)="${property}" content="([^"]*)"`))?.[1];
 
 describe("Web pages", () => {
+  it("says which app a local post was made from", async () => {
+    const finch = await mastodonUser("kestrel");
+    const status = await (await finch.post("/api/v1/statuses", { status: "from a Mastodon app" })).json<{ id: string; application: { name: string } | null }>();
+    expect(status.application?.name).toBe("Test");
+    const reply = await lemmyLogin("kestrel");
+    await reply("/comment", { post_id: Number(status.id), content: "from a Lemmy app" });
+
+    const page = await (await worker.fetch(`${SITE}/@kestrel/${status.id}`, BROWSER)).text();
+    expect(page).toContain("via Test (Mastodon)");
+    expect(page).toContain("via Lemmy");
+  });
+
   it("shows a profile and a status with its replies, with link-preview tags and no scripts", async () => {
     const wren = await mastodonUser("wren");
     const status = await (await wren.post("/api/v1/statuses", { status: "Hello from <script>alert(1)</script> the web" })).json<{ id: string }>();
@@ -55,7 +67,7 @@ describe("Web pages", () => {
   it("shows a community and a Lemmy post with nested comments", async () => {
     const communityId = await createCommunity("webby", "Web things");
     await createAccount("finch", "pw-pw-pw");
-    const call = await lemmyLogin("finch");
+    const call = await lemmyLogin("kestrel");
     const post = await (await call("/post", { community_id: communityId, name: "A link post", url: "https://example.com/thing" })).json<{ post_view: { post: { id: number } } }>();
     const id = post.post_view.post.id;
     const top = await (await call("/comment", { post_id: id, content: "top" })).json<{ comment_view: { comment: { id: number } } }>();

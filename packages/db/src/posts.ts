@@ -54,7 +54,14 @@ export interface Post {
   /** Lemmy: pinned to the top of its community, or of the instance. */
   featuredCommunity: boolean;
   featuredLocal: boolean;
+  /** A local post's client API: which kind of app made it. Null for remote posts and older local ones. */
+  client: PostClient | null;
+  /** The app's own name, when it gave one (a Mastodon app's OAuth name, such as "Ivory"). */
+  clientApp: string | null;
 }
+
+/** The client APIs palm serves. */
+export type PostClient = "lemmy" | "mastodon" | "pixelfed";
 
 /** A remote post's image or other file, kept as a link to where it lives. */
 export interface RemoteAttachment {
@@ -92,6 +99,8 @@ interface PostRow {
   quote_authorization?: string | null;
   featured_community?: number | null;
   featured_local?: number | null;
+  client?: string | null;
+  client_app?: string | null;
 }
 
 export const toPost = (r: PostRow): Post => ({
@@ -123,6 +132,8 @@ export const toPost = (r: PostRow): Post => ({
   quoteAuthorization: r.quote_authorization ?? null,
   featuredCommunity: r.featured_community === 1,
   featuredLocal: r.featured_local === 1,
+  client: (r.client as PostClient | null | undefined) ?? null,
+  clientApp: r.client_app ?? null,
 });
 
 export type { PostRow };
@@ -130,9 +141,9 @@ export type { PostRow };
 /** What a new post needs; the thread fields default to a plain status. */
 export type NewPost = Omit<
   Post,
-  "id" | "createdAt" | "updatedAt" | "communityId" | "title" | "linkUrl" | "rootId" | "parentId" | "path" | "apId" | "url" | "attachments" | "reblogOf" | "locked" | "featuredCommunity" | "featuredLocal" | "quoteOf" | "quotePolicy" | "quoteState" | "quoteAuthorization"
+  "id" | "createdAt" | "updatedAt" | "communityId" | "title" | "linkUrl" | "rootId" | "parentId" | "path" | "apId" | "url" | "attachments" | "reblogOf" | "locked" | "featuredCommunity" | "featuredLocal" | "quoteOf" | "quotePolicy" | "quoteState" | "quoteAuthorization" | "client" | "clientApp"
 > &
-  Partial<Pick<Post, "communityId" | "title" | "linkUrl" | "rootId" | "parentId" | "apId" | "url" | "createdAt" | "updatedAt" | "attachments">>;
+  Partial<Pick<Post, "communityId" | "title" | "linkUrl" | "rootId" | "parentId" | "apId" | "url" | "createdAt" | "updatedAt" | "attachments" | "client" | "clientApp">>;
 
 type PostHook = (db: D1Database, post: Post) => Promise<void>;
 const postHooks: PostHook[] = [];
@@ -151,8 +162,8 @@ export async function createPost(db: D1Database, post: NewPost): Promise<Post> {
   const row = await db
     .prepare(
       `INSERT INTO posts (account_id, content_source, content_html, spoiler_text, sensitive, visibility, language, in_reply_to,
-                          community_id, title, link_url, root_id, parent_id, created_at, ap_id, url, updated_at, attachments)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+                          community_id, title, link_url, root_id, parent_id, created_at, ap_id, url, updated_at, attachments, client, client_app)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .bind(
       post.accountId,
@@ -173,6 +184,8 @@ export async function createPost(db: D1Database, post: NewPost): Promise<Post> {
       post.url ?? null,
       post.updatedAt ?? null,
       post.attachments?.length ? JSON.stringify(post.attachments) : null,
+      post.client ?? null,
+      post.clientApp?.slice(0, 100) ?? null,
     )
     .first<PostRow>();
   if (!row) throw new Error("Post was not created.");

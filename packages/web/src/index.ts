@@ -15,6 +15,7 @@ import {
   type Community,
   type Media,
   type Post,
+  type PostClient,
   type ThreadComment,
 } from "@palm/db";
 import { Hono, type Context } from "hono";
@@ -89,6 +90,17 @@ const renderAttachments = (list: Attachment[]) =>
   );
 
 /** A post's text, behind a summary when it carries a content warning. */
+/** The service names a post's client shows as. */
+const CLIENT_NAMES: Record<PostClient, string> = { lemmy: "Lemmy", mastodon: "Mastodon", pixelfed: "Pixelfed" };
+
+/** " · via Ivory (Mastodon)", " · via Pixelfed", or nothing for posts that don't say. */
+function viaOf(p: Pick<Post, "client" | "clientApp">): Html | string {
+  if (!p.client) return "";
+  const service = CLIENT_NAMES[p.client];
+  const app = p.clientApp && p.clientApp.toLowerCase() !== service.toLowerCase() ? p.clientApp : null;
+  return html` · <span class="via">via ${app ? html`${app} (${service})` : service}</span>`;
+}
+
 function renderBody(p: Post, attachments: Attachment[]): Html {
   const inner = html`<div class="content">${raw(p.contentHtml)}</div>${renderAttachments(attachments)}`;
   if (p.spoilerText || p.sensitive) return html`<details><summary>${p.spoilerText || "Sensitive content"}</summary>${inner}</details>`;
@@ -194,13 +206,13 @@ async function profile(c: C, name: string): Promise<Response> {
   const before = Number(c.req.query("before")) || Number.MAX_SAFE_INTEGER;
   const { results } = await db
     .prepare(
-      `SELECT id, title, content_html, community_id, created_at FROM posts
+      `SELECT id, title, content_html, community_id, created_at, client, client_app FROM posts
        WHERE account_id = ? AND deleted_at IS NULL AND visibility = 'public' AND reblog_of IS NULL
          AND root_id IS NULL AND parent_id IS NULL AND in_reply_to IS NULL AND id < ?
        ORDER BY id DESC LIMIT 20`,
     )
     .bind(account.id, before)
-    .all<{ id: number; title: string | null; content_html: string; community_id: number | null; created_at: number }>();
+    .all<{ id: number; title: string | null; content_html: string; community_id: number | null; created_at: number; client: PostClient | null; client_app: string | null }>();
   const url = `${origin(c)}/@${account.username}`;
   const bio = account.bio ?? "";
   return page(
@@ -221,7 +233,7 @@ ${results.length ? "" : html`<p>Nothing public yet.</p>`}
 <ol class="posts">${results.map(
       (p) =>
         html`<li><a href="${p.community_id !== null ? `/post/${p.id}` : `/@${account.username}/${p.id}`}">${p.title ?? (excerpt(p.content_html, 140) || "(no text)")}</a>
-<div class="meta">${time(p.created_at)}</div></li>`,
+<div class="meta">${time(p.created_at)}${viaOf({ client: p.client, clientApp: p.client_app })}</div></li>`,
     )}</ol>
 ${results.length === 20 ? html`<p><a href="?before=${results.at(-1)!.id}">Older</a></p>` : ""}`,
   );
@@ -242,7 +254,7 @@ function renderThread(c: C, comments: ThreadComment[], authors: Map<number, Acco
   const one = (x: ThreadComment): Html => {
     const author = authors.get(x.accountId);
     const body = x.deleted || !author ? html`<p class="meta">[deleted]</p>` : renderBody(x, attachmentsOf(c, x, media));
-    return html`<li id="c${x.id}"><div class="meta">${author ? html`<a href="${profileHref(author)}">${nameOf(author)}</a>` : "someone"} · ${points(x.upvotes - x.downvotes)} · ${time(x.createdAt)} · <a href="/comment/${x.id}">link</a></div>${body}${
+    return html`<li id="c${x.id}"><div class="meta">${author ? html`<a href="${profileHref(author)}">${nameOf(author)}</a>` : "someone"} · ${points(x.upvotes - x.downvotes)} · ${time(x.createdAt)}${viaOf(x)} · <a href="/comment/${x.id}">link</a></div>${body}${
       children(x).length ? html`<ul class="thread">${children(x).map(one)}</ul>` : ""
     }</li>`;
   };
@@ -308,7 +320,7 @@ async function postPage(c: C, id: number): Promise<Response> {
     html`<article>
 ${context}
 ${post.title ? html`<h1>${post.title}</h1>` : ""}
-<p class="meta"><a href="${profileHref(author)}">${nameOf(author)}</a> ${handleOf(author)} · ${time(post.createdAt)}${
+<p class="meta"><a href="${profileHref(author)}">${nameOf(author)}</a> ${handleOf(author)} · ${time(post.createdAt)}${viaOf(post)}${
       community ? html` · in <a href="${communityHref(community)}">!${community.name}${community.apId ? `@${community.domain}` : ""}</a>` : ""
     } · ${points(votes)}</p>
 ${post.linkUrl ? html`<p><a href="${post.linkUrl}">${post.linkUrl}</a></p>` : ""}
@@ -365,7 +377,7 @@ ${posts.length ? "" : html`<p>No posts yet.</p>`}
       const author = authors.get(p.accountId);
       const href = postHref(p);
       return html`<li><a href="${p.linkUrl ?? href}">${p.title ?? "(untitled)"}</a>${p.linkUrl ? html` <span class="meta">(${hostOf(p.linkUrl)})</span>` : ""}
-<div class="meta">${points(p.upvotes - p.downvotes)} · ${author ? html`<a href="${profileHref(author)}">${nameOf(author)}</a>` : ""} · ${time(p.createdAt)} · <a href="${href}">${p.comments} comments</a></div></li>`;
+<div class="meta">${points(p.upvotes - p.downvotes)} · ${author ? html`<a href="${profileHref(author)}">${nameOf(author)}</a>` : ""} · ${time(p.createdAt)}${viaOf(p)} · <a href="${href}">${p.comments} comments</a></div></li>`;
     })}</ol>
 ${posts.length === 25 ? html`<p><a href="?page=${pageNo + 1}">More</a></p>` : ""}`,
   );
