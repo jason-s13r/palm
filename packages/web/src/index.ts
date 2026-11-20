@@ -53,11 +53,14 @@ const fallbackImage = (c: C) => `${origin(c)}/palm/avatar.png`;
 
 const handleOf = (a: Account) => `@${a.username}@${a.domain}`;
 const nameOf = (a: Account) => a.displayName || a.username;
-/** How bylines name someone, as Lemmy does: "jason" here, "master5o1@lemmy.nz" elsewhere. */
+/** A handle as bylines show it: "jason" here, "master5o1@lemmy.nz" elsewhere. */
 const shortHandle = (a: Account) => (a.apId ? `${a.username}@${a.domain}` : a.username);
-/** A byline's link to someone, with their display name on hover. */
-const personLink = (a: Account) =>
-  html`<a href="${profileHref(a)}"${a.displayName && a.displayName !== a.username ? html` title="${a.displayName}"` : ""}>${shortHandle(a)}</a>`;
+const hasDisplayName = (a: Account) => !!a.displayName && a.displayName !== a.username;
+/** Short bylines (comments, lists) use the handle, so local and remote people tell apart; the display name shows on hover. */
+const personLink = (a: Account) => html`<a href="${profileHref(a)}"${hasDisplayName(a) ? html` title="${a.displayName}"` : ""}>${shortHandle(a)}</a>`;
+/** A post's byline: "Jason Test @jason@1j.nz", or the handle alone when there's no display name to go with it. */
+const authorLine = (a: Account) =>
+  hasDisplayName(a) ? html`<a href="${profileHref(a)}">${a.displayName}</a> ${handleOf(a)}` : html`<a href="${profileHref(a)}">${shortHandle(a)}</a>`;
 
 /** Where palm shows a person: their own page here, or their server's. */
 const profileHref = (a: Account) => (a.apId ? (a.profileUrl ?? a.apId) : `/@${encodeURIComponent(a.username)}`);
@@ -345,7 +348,7 @@ async function postPage(c: C, id: number): Promise<Response> {
     html`<article>
 ${context}
 ${post.title ? html`<h1>${post.title}</h1>` : ""}
-<p class="meta">${personLink(author)} · ${time(post.createdAt)}${postedOf(c, post)}${
+<p class="meta">${authorLine(author)} · ${time(post.createdAt)}${postedOf(c, post)}${
       community ? html` · in <a href="${communityHref(community)}">!${community.name}${community.apId ? `@${community.domain}` : ""}</a>` : ""
     } · ${points(votes)}</p>
 ${post.linkUrl ? html`<p><a href="${post.linkUrl}">${post.linkUrl}</a></p>` : ""}

@@ -25,7 +25,7 @@ async function lemmyLogin(username: string) {
 const meta = (page: string, property: string) => page.match(new RegExp(`<meta (?:property|name)="${property}" content="([^"]*)"`))?.[1];
 
 describe("Web pages", () => {
-  it("names people as Lemmy does: a name here, name@server elsewhere", async () => {
+  it("names people by handle in bylines, and drops the repeat when there's no display name", async () => {
     const plover = await mastodonUser("plover");
     const status = await (await plover.post("/api/v1/statuses", { status: "anyone there?" })).json<{ id: string }>();
     const far = await db
@@ -39,8 +39,10 @@ describe("Web pages", () => {
       .run();
 
     const page = await (await worker.fetch(`${SITE}/@plover/${status.id}`, BROWSER)).text();
+    // No display name: the handle alone, not "plover @plover@palm.test".
     expect(page).toContain(">plover</a> · ");
-    expect(page).not.toContain("@plover@palm.test ·");
+    expect(page).not.toContain("plover</a> @plover@palm.test");
+    // Comments name people by handle, so another server's show its host; display names show on hover.
     expect(page).toContain('title="A &quot;Gull&quot;">gull@far.example</a>');
   });
 
