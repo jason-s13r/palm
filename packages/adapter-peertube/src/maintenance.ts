@@ -10,6 +10,7 @@ export async function videoMaintenance(ctx: RequestContext): Promise<void> {
   const db = ctx.bindings.DB;
   for (const upload of await staleUploads(db)) {
     await ctx.bindings.MEDIA?.resumeMultipartUpload(`media/${upload.mediaId}`, upload.r2UploadId).abort().catch(() => undefined);
+    if (upload.chunks) await ctx.bindings.MEDIA?.delete(Array.from({ length: upload.chunks }, (_, i) => `uploads/${upload.id}/${i}`)).catch(() => undefined);
     await deleteUpload(db, upload.id);
   }
   const stream = ctx.bindings.STREAM;

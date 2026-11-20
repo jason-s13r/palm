@@ -997,6 +997,20 @@ CREATE TABLE IF NOT EXISTS runner_jobs (
 CREATE INDEX IF NOT EXISTS runner_jobs_state ON runner_jobs (state, created_at)
 `,
   },
+  {
+    version: 33,
+    name: "video upload buffering",
+    // Apps that send small pieces (the PeerTube app sends 1 MiB): pieces wait
+    // in R2 until there's a part's worth (R2 wants 5 MiB parts). chunk_size is
+    // the app's piece size, buffered the bytes waiting, chunks how many.
+    sql: `
+ALTER TABLE video_uploads ADD COLUMN chunk_size INTEGER
+;
+ALTER TABLE video_uploads ADD COLUMN buffered INTEGER NOT NULL DEFAULT 0
+;
+ALTER TABLE video_uploads ADD COLUMN chunks INTEGER NOT NULL DEFAULT 0
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

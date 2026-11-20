@@ -392,6 +392,36 @@ describe("PeerTube: hosting", () => {
     expect(details).toMatchObject({ duration: 5, files: [{ size: bytes.length }] });
   });
 
+  it("takes the PeerTube app's 1 MiB pieces, joining them into 5 MiB parts", async () => {
+    const id = await createAccount("pt_small", "pw-long-enough");
+    await giveKeys(id);
+    const { auth, get } = await signIn("pt_small", "pw-long-enough");
+    // As the app sent it: 3 MB, an octet-stream, in 1 MiB pieces. And a bigger one, over a part.
+    for (const extra of [3 * 1024 * 1024, 11 * 1024 * 1024 + 7]) {
+      const bytes = mp4File(extra);
+      const start = await worker.fetch(`${SITE}/api/v1/videos/upload-resumable`, {
+        method: "POST",
+        headers: { ...auth, "content-type": "application/json", "x-upload-content-length": String(bytes.length), "x-upload-content-type": "application/octet-stream" },
+        body: JSON.stringify({ name: "Small pieces", channelId: 1, filename: "phone.mp4" }),
+      });
+      expect(start.status).toBe(201);
+      const location = `https:${start.headers.get("location")}`;
+      const piece = 1024 * 1024;
+      let res: Response | null = null;
+      for (let at = 0; at < bytes.length; at += piece) {
+        const end = Math.min(at + piece, bytes.length);
+        res = await worker.fetch(location, { method: "PUT", headers: { ...auth, "content-type": "application/octet-stream", "content-range": `bytes ${at}-${end - 1}/${bytes.length}` }, body: bytes.slice(at, end) });
+        expect(res.status, `piece at ${at}`).toBe(end === bytes.length ? 200 : 308);
+        if (end < bytes.length) expect(res.headers.get("range")).toBe(`bytes=0-${end - 1}`);
+      }
+      const { video } = await res!.json<{ video: { uuid: string } }>();
+      const details = await get<{ duration: number; files: { size: number; fileUrl: string }[] }>(`/api/v1/videos/${video.uuid}`);
+      expect(details).toMatchObject({ duration: 5, files: [{ size: bytes.length }] });
+      const file = await worker.fetch(details.files[0]!.fileUrl);
+      expect(new Uint8Array(await file.arrayBuffer())).toEqual(bytes);
+    }
+  });
+
   it("refuses files it can't play without a transcoder", async () => {
     await createAccount("pt_mov", "pw-long-enough");
     const { auth } = await signIn("pt_mov", "pw-long-enough");
