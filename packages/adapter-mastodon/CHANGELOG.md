@@ -1,5 +1,16 @@
 # Changelog
 
+## adapter-mastodon@0.6.1 (2026-11-20)
+
+### Fixes
+
+- the App Store Pixelfed app signs in, and its legal links stay on palm
+  The App Store build of the Pixelfed app needs Pixelfed 0.14.4 or later, so
+  palm's Pixelfed nodeinfo now reports 0.15.2. /site/terms, /site/privacy,
+  /site/help and /e/terms, /e/privacy, which the app links to, get a page of
+  their own instead of falling through to browserRedirect.
+
+
 ## adapter-mastodon@0.6.0 (2026-11-19)
 
 ### Features
