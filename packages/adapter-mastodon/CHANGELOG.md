@@ -1,5 +1,17 @@
 # Changelog
 
+## adapter-mastodon@0.6.2 (2026-11-20)
+
+### Fixes
+
+- Pixelfed's /api/v2.1/config, which the App Store app checks
+  The App Store build of the Pixelfed app (1.8) reads the server's version from
+  /api/v2.1/config, not /api/nodeinfo/2.0.json, and refused palm with "needs to
+  be running Pixelfed 0.14.4" because that path was a 404. palm now answers it
+  (version 0.15.2, as on pixelfed.social), and the account timeline settings
+  beside it, and routes /api/v2.1/ to the Mastodon adapter.
+
+
 ## adapter-mastodon@0.6.1 (2026-11-20)
 
 ### Fixes
