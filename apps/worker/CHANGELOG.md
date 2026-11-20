@@ -1,5 +1,16 @@
 # Changelog
 
+## worker@0.13.2 (2026-11-20)
+
+### Fixes
+
+- address community posts so Lemmy accepts them
+
+### Dependencies
+
+- federation: 0.8.1 -> 0.8.2
+
+
 ## worker@0.13.1 (2026-11-20)
 
 ### Fixes

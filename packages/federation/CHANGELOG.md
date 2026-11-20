@@ -1,5 +1,12 @@
 # Changelog
 
+## federation@0.8.2 (2026-11-20)
+
+### Fixes
+
+- address community posts so Lemmy accepts them
+
+
 ## federation@0.8.1 (2026-11-20)
 
 ### Fixes
