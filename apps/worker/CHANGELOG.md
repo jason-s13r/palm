@@ -1,5 +1,18 @@
 # Changelog
 
+## worker@0.13.1 (2026-11-20)
+
+### Fixes
+
+- skip LD signature checks on deliveries signed by their actor
+
+- answer /.well-known/nodeinfo without the database
+
+### Dependencies
+
+- federation: 0.8.0 -> 0.8.1
+
+
 ## worker@0.13.0 (2026-11-20)
 
 ### Features

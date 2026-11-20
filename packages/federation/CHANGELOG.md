@@ -1,5 +1,12 @@
 # Changelog
 
+## federation@0.8.1 (2026-11-20)
+
+### Fixes
+
+- skip LD signature checks on deliveries signed by their actor
+
+
 ## federation@0.8.0 (2026-11-20)
 
 ### Features
