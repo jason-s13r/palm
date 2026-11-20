@@ -243,6 +243,47 @@ pixelfedRoutes.get("/api/v2/config", (c) =>
   }),
 );
 
+// What the App Store app (1.8) reads before signing in: its version needs 0.14.4.
+pixelfedRoutes.get("/api/v2.1/config", (c) =>
+  c.json({
+    version: PIXELFED_COMPAT_VERSION,
+    oauth: true,
+    signup: { curated: false, mobile_registration: false },
+    features: {
+      stories: false,
+      video: true,
+      timelines: { local: true, network: true },
+      collections: { api_version: "1.2", add_others_posts: false },
+      content_credentials: { enabled: false, signing: false, ai_labels: false },
+    },
+    limits: {
+      account: { max_avatar_size: 10_240, max_bio_length: MAX_BIO, max_name_length: 30, min_password_length: 8 },
+      collections: { max_collection_length: 0, max_collections_per_post: 0 },
+      direct_messages: {
+        max_characters: MAX_CHARACTERS,
+        max_media_attachments: MAX_ATTACHMENTS,
+        group_chats: { enabled: false, max_participants: 0 },
+      },
+      media: {
+        image_size_limit: 10_240 * 1024,
+        max_album_limit: MAX_ATTACHMENTS,
+        max_alt_text_length: 1500,
+        supported_mime_types: ["image/jpeg", "image/png", "image/gif", "image/webp", "video/mp4"],
+        video_size_limit: 40 * 1024 * 1024,
+      },
+      statuses: { max_characters: MAX_CHARACTERS },
+    },
+  }),
+);
+
+// Boosts in the home feed: palm shows them, as Mastodon does, and keeps no setting.
+for (const method of ["get", "post"] as const) {
+  pixelfedRoutes[method]("/api/v2.1/account/timeline/settings", (c) => {
+    if (!c.get("account")) return fail(c, "The access token is invalid", 401);
+    return c.json({ reblogs_enabled: true, photo_reblogs_only: false });
+  });
+}
+
 pixelfedRoutes.get("/api/v1.1/compose/settings", (c) =>
   c.json({
     allowed_media_types: ["image/jpeg", "image/png", "image/gif", "image/webp", "video/mp4"],

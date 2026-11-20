@@ -66,6 +66,12 @@ describe("Pixelfed apps", () => {
     const [major, minor, patch] = pixelfed.software.version.match(/^(\d+)\.(\d+)\.(\d+)/)!.slice(1).map(Number);
     expect(major! * 1e6 + minor! * 1e3 + patch!).toBeGreaterThanOrEqual(14_004);
 
+    // The App Store app (1.8) checks this one instead.
+    const config = await (await worker.fetch(`${SITE}/api/v2.1/config`)).json<{ version: string; oauth: boolean }>();
+    expect(config.oauth).toBe(true);
+    const [cMajor, cMinor, cPatch] = config.version.split(".").map(Number);
+    expect(cMajor! * 1e6 + cMinor! * 1e3 + cPatch!).toBeGreaterThanOrEqual(14_004);
+
     const wellKnown = await (await worker.fetch(`${SITE}/.well-known/nodeinfo`, { headers: { accept: "application/json" } })).json<{ links: { href: string }[] }>();
     const nodeinfo = await (await worker.fetch(wellKnown.links[0]!.href, { headers: { accept: "application/json" } })).json<{ software: { name: string } }>();
     expect(nodeinfo.software.name).toBe("lemmy");

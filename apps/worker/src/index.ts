@@ -215,6 +215,7 @@ function isMastodonPath(path: string): boolean {
     // Pixelfed's apps: its extra API versions, and its own nodeinfo path.
     path.startsWith("/api/v1.1/") ||
     path.startsWith("/api/v1.2/") ||
+    path.startsWith("/api/v2.1/") ||
     path.startsWith("/api/pixelfed/") ||
     path === "/api/nodeinfo/2.0.json" ||
     path.startsWith("/oauth/") ||

@@ -20,8 +20,9 @@ outside this repo (the Palm project's `palm-decisions.md`).
   The Pixelfed app is served by the Mastodon adapter too (`pixelfed.ts`):
   Pixelfed's API is Mastodon's plus extra fields, added only for Pixelfed
   apps (`_pe=1`, `X-PIXELFED-APP` or an app named for Pixelfed), and its own
-  endpoints under `/api/v1.1`, `/api/v1.2` and `/api/pixelfed`. The app checks
-  `/api/nodeinfo/2.0.json` for "pixelfed"; standard nodeinfo stays Lemmy.
+  endpoints under `/api/v1.1`, `/api/v1.2`, `/api/v2.1` and `/api/pixelfed`. The app checks
+  `/api/nodeinfo/2.0.json` for "pixelfed" (the App Store build reads
+  `/api/v2.1/config`'s version); standard nodeinfo stays Lemmy.
 - `packages/federation`: ActivityPub on Fedify: WebFinger, Person actors,
   followers, the inboxes and nodeinfo, with Fedify's key-value store on D1
   (`D1KvStore`) and its message queue on a Cloudflare Queue

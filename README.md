@@ -49,7 +49,7 @@ One Worker serves the domain and routes on the path:
 | `/.well-known/webfinger`, `/users`, `/c`, `/objects`, `/inbox`, nodeinfo | Federation |
 | `/api/v3`, `/pictrs` | The Lemmy API, for Lemmy apps |
 | `/api/v1`, `/api/v2`, `/oauth` | The Mastodon API, for Mastodon apps |
-| `/api/v1.1`, `/api/v1.2`, `/api/pixelfed`, `/api/nodeinfo/2.0.json` | Pixelfed's extras, for the Pixelfed app |
+| `/api/v1.1`, `/api/v1.2`, `/api/v2.1`, `/api/pixelfed`, `/api/nodeinfo/2.0.json` | Pixelfed's extras, for the Pixelfed app |
 
 People sign in to both kinds of app with the domain itself (`your.domain`), so
 apps show their handle as `@name@your.domain`. Nodeinfo answers as Lemmy,
