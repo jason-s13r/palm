@@ -351,6 +351,11 @@ pixelfedRoutes.get("/api/v1.1/accounts/mutuals/:id{[0-9]+}", async (c) => {
   return c.json(await accountViews(c, await accountsInOrder(c, await mutualFollowIds(c.env.bindings.DB, me.id, Number(c.req.param("id"))))));
 });
 
+// Pixelfed's security screen. palm keeps no sign-in history.
+for (const path of ["/api/v1.1/accounts/login-activity", "/api/pixelfed/v1/accounts/login-activity"]) {
+  pixelfedRoutes.get(path, (c) => (c.get("account") ? c.json([]) : fail(c, "The access token is invalid", 401)));
+}
+
 pixelfedRoutes.delete("/api/v1.1/accounts/avatar", async (c) => {
   const me = c.get("account");
   if (!me) return fail(c, "The access token is invalid", 401);

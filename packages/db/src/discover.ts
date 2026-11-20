@@ -56,6 +56,27 @@ export async function popularLocalAccountIds(db: D1Database, domain: string, exc
 }
 
 /**
+ * Mastodon's profile directory: local people (and, unless `local`, others
+ * palm knows), newest or most recently posting first.
+ */
+export async function directoryAccountIds(
+  db: D1Database,
+  domain: string,
+  options: { local: boolean; order: "active" | "new"; offset: number; limit: number },
+): Promise<number[]> {
+  const where = options.local ? "a.ap_id IS NULL AND a.domain = ?1" : "(a.ap_id IS NOT NULL OR a.domain = ?1)";
+  const order =
+    options.order === "new"
+      ? "a.created_at DESC, a.id DESC"
+      : "(SELECT MAX(p.created_at) FROM posts p WHERE p.account_id = a.id AND p.deleted_at IS NULL) DESC NULLS LAST, a.id DESC";
+  const { results } = await db
+    .prepare(`SELECT a.id FROM accounts a WHERE ${where} AND a.deleted_at IS NULL AND a.banned_at IS NULL ORDER BY ${order} LIMIT ?2 OFFSET ?3`)
+    .bind(domain, options.limit, options.offset)
+    .all<{ id: number }>();
+  return results.map((r) => r.id);
+}
+
+/**
  * People `accountId` follows who also follow `targetId`, from the follows palm
  * knows: its own, and other servers' followers of local accounts.
  */

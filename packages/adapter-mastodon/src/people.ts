@@ -1,5 +1,6 @@
 import { type RequestContext, urls } from "@palm/core";
 import {
+  directoryAccountIds,
   isQuotePolicy,
   setAccountQuotePolicy,
   createReport,
@@ -307,6 +308,18 @@ for (const [method, on] of [["post", true], ["delete", false]] as const) {
     return c.json({});
   });
 }
+
+// The profile directory: local people by default here, as palm keeps few others' posts.
+peopleRoutes.get("/api/v1/directory", async (c) => {
+  const db = c.env.bindings.DB;
+  const limit = Math.min(Math.max(Number(c.req.query("limit")) || 40, 1), 80);
+  const offset = Math.max(Number(c.req.query("offset")) || 0, 0);
+  const local = c.req.query("local") !== "false";
+  const order = c.req.query("order") === "new" ? "new" : "active";
+  const ids = await directoryAccountIds(db, c.env.domain.domain, { local, order, offset, limit });
+  const found = await accountsByIds(db, ids);
+  return c.json(await accountViews(c, ids.flatMap((id) => (found.get(id) ? [found.get(id)!] : []))));
+});
 
 peopleRoutes.get("/api/v1/accounts/:id{[0-9]+}/following", async (c) => {
   const db = c.env.bindings.DB;

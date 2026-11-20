@@ -152,6 +152,9 @@ describe("Pixelfed apps", () => {
     expect(await get("api/v1.2/stories/carousel")).toEqual({ nodes: [] });
     expect(await get("api/v1.1/collections/self?page=1")).toEqual([]);
     expect(await get("api/v1.1/nag/state")).toEqual({ active: false });
+    expect(await get("api/v1.1/accounts/login-activity")).toEqual([]);
+    const directory = await get<{ id: string }[]>("api/v1/directory?order=new&local=true&limit=80");
+    expect(directory.map((a) => a.id)).toContain(String(id));
     expect((await get<{ common: { timelines: object } }>("api/pixelfed/v1/app/settings")).common.timelines).toBeTruthy();
     expect((await call("GET", "api/v1.1/push/state")).status).toBe(404);
     const home = await call("GET", "api/v1/timelines/home?_pe=1&limit=20");
