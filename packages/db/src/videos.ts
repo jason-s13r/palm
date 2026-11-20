@@ -525,6 +525,13 @@ export async function pendingTranscodes(db: D1Database, provider: Transcode["pro
 
 // --- resumable uploads ---------------------------------------------------------------
 
+/** Bytes of an upload waiting in R2. */
+export interface UploadPiece {
+  key: string;
+  start: number;
+  length: number;
+}
+
 /** A video being sent in pieces (PeerTube's resumable upload), into an R2 multipart upload. */
 export interface VideoUpload {
   id: string;
@@ -539,8 +546,10 @@ export interface VideoUpload {
   chunkSize: number | null;
   /** Bytes received but not yet in a part: small pieces waiting in R2. */
   buffered: number;
-  /** How many pieces are waiting. */
+  /** How many pieces have been stored in R2 (each under uploads/<id>/<n>). */
   chunks: number;
+  /** The bytes waiting to be joined into a part, in order: a piece, from where its unused bytes start. */
+  pieces: UploadPiece[];
   parts: { partNumber: number; etag: string }[];
   /** The video's details, as the app sent them when it started. */
   meta: Record<string, unknown>;
@@ -559,6 +568,7 @@ interface UploadRow {
   chunk_size?: number | null;
   buffered?: number | null;
   chunks?: number | null;
+  pieces?: string | null;
   parts: string;
   meta: string;
   created_at: number;
@@ -576,12 +586,13 @@ const toUpload = (r: UploadRow): VideoUpload => ({
   chunkSize: r.chunk_size ?? null,
   buffered: r.buffered ?? 0,
   chunks: r.chunks ?? 0,
+  pieces: parse(r.pieces ?? null, []),
   parts: parse(r.parts, []),
   meta: parse(r.meta, {}),
   createdAt: r.created_at,
 });
 
-export async function createUpload(db: D1Database, upload: Omit<VideoUpload, "received" | "partSize" | "chunkSize" | "buffered" | "chunks" | "parts" | "createdAt">): Promise<void> {
+export async function createUpload(db: D1Database, upload: Omit<VideoUpload, "received" | "partSize" | "chunkSize" | "buffered" | "chunks" | "pieces" | "parts" | "createdAt">): Promise<void> {
   await db
     .prepare("INSERT INTO video_uploads (id, account_id, media_id, content_type, r2_upload_id, size, meta, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
     .bind(upload.id, upload.accountId, upload.mediaId, upload.contentType, upload.r2UploadId, upload.size, JSON.stringify(upload.meta), now())
@@ -595,18 +606,17 @@ export async function uploadById(db: D1Database, id: string): Promise<VideoUploa
 
 /**
  * Records a received piece, if no other request recorded one at the same
- * place first: the bytes, and either the part it completed or that it's
- * waiting to be joined into one.
+ * place first: the bytes, the parts it completed, and what's left waiting.
  */
 export async function recordUploadPart(
   db: D1Database,
   upload: VideoUpload,
-  piece: { length: number; partSize: number; chunkSize: number; part: { partNumber: number; etag: string } | null; buffered: number; chunks: number },
+  piece: { length: number; parts: { partNumber: number; etag: string }[]; pieces: UploadPiece[]; chunks: number },
 ): Promise<boolean> {
-  const parts = piece.part ? [...upload.parts.filter((p) => p.partNumber !== piece.part!.partNumber), piece.part] : upload.parts;
+  const buffered = piece.pieces.reduce((n, p) => n + p.length, 0);
   const result = await db
-    .prepare("UPDATE video_uploads SET received = received + ?, part_size = ?, chunk_size = ?, buffered = ?, chunks = ?, parts = ? WHERE id = ? AND received = ?")
-    .bind(piece.length, piece.partSize, piece.chunkSize, piece.buffered, piece.chunks, JSON.stringify(parts), upload.id, upload.received)
+    .prepare("UPDATE video_uploads SET received = received + ?, buffered = ?, chunks = ?, pieces = ?, parts = ? WHERE id = ? AND received = ?")
+    .bind(piece.length, buffered, piece.chunks, JSON.stringify(piece.pieces), JSON.stringify(piece.parts), upload.id, upload.received)
     .run();
   return (result.meta.changes ?? 0) > 0;
 }

@@ -325,7 +325,7 @@ export {
   watchHistory,
   watchPositions,
 } from "./videos.ts";
-export type { ListedVideo, Transcode, VideoChapter, VideoUpload, Video, VideoFile, VideoListing, VideoPlaylist, VideoThumbnail } from "./videos.ts";
+export type { ListedVideo, UploadPiece, Transcode, VideoChapter, VideoUpload, Video, VideoFile, VideoListing, VideoPlaylist, VideoThumbnail } from "./videos.ts";
 export {
   acceptRunnerJob,
   addRunnerJobs,

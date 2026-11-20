@@ -23,6 +23,7 @@ import {
   videoMediaIds,
   type Account,
   type Video,
+  type UploadPiece,
   type VideoThumbnail,
 } from "@palm/db";
 import { Hono } from "hono";
@@ -53,8 +54,7 @@ export interface Capabilities {
 
 const MIB = 1024 * 1024;
 /** R2's smallest multipart part (but the last). */
-const MIN_PART = 5 * MIB;
-const CHUNK = 10 * MIB;
+const CHUNK = 8 * MIB;
 /** A whole video in one request (PeerTube's older upload): under Cloudflare's 100 MB request limit. */
 const MAX_SINGLE_UPLOAD = 95 * MIB;
 
@@ -107,18 +107,40 @@ async function admit(c: C, filename: string, size: number, type: string): Promis
 
 // --- resumable upload: start, pieces, cancel ----------------------------------------
 
-/** Waiting pieces, one after another, as one stream of known length (R2's uploadPart needs the length). */
-async function joinPieces(bucket: R2Bucket, keys: string[], total: number): Promise<ReadableStream> {
-  const { readable, writable } = new FixedLengthStream(total);
+/** Each part of an R2 multipart upload but the last: R2 wants them equal, and at least 5 MiB. */
+const PART = 8 * MIB;
+
+/**
+ * The first `take` bytes of the waiting pieces, as one stream of known length
+ * (R2's uploadPart needs the length), read from R2 by range; and what's left
+ * waiting after them, and the pieces used up.
+ */
+function takePieces(bucket: R2Bucket, pieces: UploadPiece[], take: number): { stream: ReadableStream; rest: UploadPiece[]; done: string[] } {
+  const plan: { key: string; offset: number; length: number }[] = [];
+  const rest: UploadPiece[] = [];
+  const done: string[] = [];
+  let need = take;
+  for (const piece of pieces) {
+    if (need === 0) {
+      rest.push(piece);
+      continue;
+    }
+    const n = Math.min(need, piece.length);
+    plan.push({ key: piece.key, offset: piece.start, length: n });
+    need -= n;
+    if (n === piece.length) done.push(piece.key);
+    else rest.push({ key: piece.key, start: piece.start + n, length: piece.length - n });
+  }
+  const { readable, writable } = new FixedLengthStream(take);
   (async () => {
-    for (const key of keys) {
-      const piece = await bucket.get(key);
-      if (!piece) throw new Error(`Missing upload piece ${key}`);
-      await piece.body.pipeTo(writable, { preventClose: true });
+    for (const range of plan) {
+      const object = await bucket.get(range.key, { range: { offset: range.offset, length: range.length } });
+      if (!object) throw new Error(`Missing upload piece ${range.key}`);
+      await object.body.pipeTo(writable, { preventClose: true });
     }
     await writable.close();
   })().catch((error: unknown) => writable.abort(error).catch(() => undefined));
-  return readable;
+  return { stream: readable, rest, done };
 }
 
 uploadRoutes.post("/api/v1/videos/upload-resumable", async (c) => {
@@ -166,38 +188,30 @@ uploadRoutes.put("/api/v1/videos/upload-resumable", async (c) => {
   // A piece palm already has (a retry), or one past what it has: tell the app where to go on from.
   if (start !== upload.received) return incomplete(upload.received);
   const last = end + 1 === upload.size;
-  // The app picks its piece size (the PeerTube app sends 1 MiB). R2 wants
-  // equal parts of at least 5 MiB, so smaller pieces wait in R2 until there
-  // are enough to join into one part.
-  const chunkSize = upload.chunkSize ?? length;
-  if (!last && length !== chunkSize) return fail(c, 400, `Send the upload in equal pieces (this one started with ${chunkSize} bytes).`);
-  const partSize = upload.partSize ?? (chunkSize >= MIN_PART ? chunkSize : chunkSize * Math.ceil(MIN_PART / chunkSize));
   const body = c.req.raw.body;
   if (!body) return fail(c, 400, "The piece was empty.");
+  // Apps pick their piece sizes (the PeerTube app starts at 1 MiB and grows
+  // them). R2 wants equal parts of at least 5 MiB, so pieces wait in R2 and
+  // are cut into parts of PART bytes; the last part takes what's left.
+  const key = `uploads/${upload.id}/${upload.chunks}`;
+  await bucket.put(key, body);
+  let pieces: UploadPiece[] = [...upload.pieces, { key, start: 0, length }];
+  let waiting = pieces.reduce((n, p) => n + p.length, 0);
+  const parts = [...upload.parts];
   const multipart = bucket.resumeMultipartUpload(`media/${upload.mediaId}`, upload.r2UploadId);
-  const flushed = upload.received - upload.buffered;
-  const partNumber = Math.floor(flushed / partSize) + 1;
-  let part: { partNumber: number; etag: string } | null = null;
-  let buffered = 0;
-  let chunks = 0;
-  if (upload.buffered === 0 && (length === partSize || last)) {
-    part = await multipart.uploadPart(partNumber, body);
-  } else {
-    const pieceKey = (n: number) => `uploads/${upload.id}/${n}`;
-    await bucket.put(pieceKey(upload.chunks), body);
-    buffered = upload.buffered + length;
-    chunks = upload.chunks + 1;
-    if (buffered >= partSize || last) {
-      part = await multipart.uploadPart(partNumber, await joinPieces(bucket, Array.from({ length: chunks }, (_, i) => pieceKey(i)), buffered));
-      c.env.waitUntil(bucket.delete(Array.from({ length: chunks }, (_, i) => pieceKey(i))).catch(() => undefined));
-      buffered = 0;
-      chunks = 0;
-    }
+  const used: string[] = [];
+  while (waiting >= PART || (last && waiting > 0)) {
+    const take = Math.min(PART, waiting);
+    const { stream, rest, done } = takePieces(bucket, pieces, take);
+    parts.push(await multipart.uploadPart(parts.length + 1, stream));
+    used.push(...done);
+    pieces = rest;
+    waiting -= take;
   }
-  const recorded = await recordUploadPart(db, upload, { length, partSize, chunkSize, part, buffered, chunks });
+  const recorded = await recordUploadPart(db, upload, { length, parts, pieces, chunks: upload.chunks + 1 });
   if (!recorded) return incomplete((await uploadById(db, upload.id))?.received ?? upload.received);
+  if (used.length) c.env.waitUntil(bucket.delete(used).catch(() => undefined));
   if (!last) return incomplete(upload.received + length);
-  const parts = [...upload.parts.filter((x) => x.partNumber !== part!.partNumber), part!].sort((a, b) => a.partNumber - b.partNumber);
   await multipart.complete(parts);
   await deleteUpload(db, upload.id);
   const video = await publishUpload(c, account, { mediaId: upload.mediaId, contentType: upload.contentType, size: upload.size, meta: upload.meta, thumbnail: null });

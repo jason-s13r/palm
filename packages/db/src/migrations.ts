@@ -1019,6 +1019,15 @@ ALTER TABLE video_uploads ADD COLUMN chunks INTEGER NOT NULL DEFAULT 0
 ALTER TABLE videos ADD COLUMN chapters TEXT
 `,
   },
+  {
+    version: 35,
+    name: "video upload pieces",
+    // The pieces of an upload waiting in R2, any size: [{ key, start, length }].
+    // The PeerTube app grows its pieces as it goes (1 MiB, then 2 MiB...).
+    sql: `
+ALTER TABLE video_uploads ADD COLUMN pieces TEXT NOT NULL DEFAULT '[]'
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

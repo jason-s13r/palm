@@ -37,6 +37,7 @@ export function accountView(ctx: RequestContext, a: Account, counts?: { follower
     updatedAt: iso(a.fetchedAt ?? a.createdAt),
     avatars: images(ctx, a.avatarUrl, local),
     avatar: images(ctx, a.avatarUrl, local)[0] ?? null,
+    hostRedundancyAllowed: false,
     displayName: a.displayName || a.username,
     description: a.bio ? a.bio.replace(/<[^>]+>/g, "") : "",
     ...(local ? { userId: a.id } : {}),
@@ -57,7 +58,8 @@ export function channelView(ctx: RequestContext, channel: Channel, extra: { owne
     return {
       ...a,
       id: PERSON_CHANNEL_BASE + channel.account.id,
-      support: null,
+      support: "",
+      hostRedundancyAllowed: false,
       isLocal: channel.account.apId === null,
       banners: [],
       ownerAccount: a,
@@ -80,7 +82,8 @@ export function channelView(ctx: RequestContext, channel: Channel, extra: { owne
     banners: images(ctx, c.bannerUrl, local, 1920),
     displayName: c.title || c.name,
     description: c.description ? c.description.replace(/<[^>]+>/g, "") : "",
-    support: null,
+    support: "",
+    hostRedundancyAllowed: false,
     isLocal: local,
     ...(extra.owner ? { ownerAccount: accountView(ctx, extra.owner) } : {}),
     ...(extra.videosCount !== undefined ? { videosCount: extra.videosCount } : {}),
@@ -157,7 +160,7 @@ export function videoView(ctx: RequestContext, post: Post, video: Video, author:
     thumbnailUrl: small?.fileUrl ?? null,
     previewPath: pathOf(large?.fileUrl),
     previewUrl: large?.fileUrl ?? null,
-    embedPath: `/videos/embed/${video.uuid}`,
+    embedPath: `/videos/embed/${toShortUuid(video.uuid)}`,
     embedUrl: video.embedUrl ?? `https://${ctx.domain.domain}/videos/embed/${video.uuid}`,
     createdAt: iso(post.createdAt),
     updatedAt: iso(post.updatedAt ?? post.createdAt),
@@ -183,19 +186,26 @@ export function videoView(ctx: RequestContext, post: Post, video: Video, author:
   };
 }
 
-function fileView(file: VideoFile, i: number, downloadable: boolean) {
+/**
+ * A playable file, with every field a PeerTube server sends. palm makes no
+ * torrents, but apps read these as strings, so they're empty rather than null.
+ */
+function fileView(ctx: RequestContext, video: Video, file: VideoFile, i: number, downloadable: boolean) {
+  const ratio = video.aspectRatio ?? 16 / 9;
+  const width = file.width ?? (file.height ? Math.round((file.height * (ratio >= 1 ? ratio : 1)) / 2) * 2 : 0);
   return {
     id: i + 1,
     resolution: { id: file.height, label: file.height ? `${file.height}p` : "Audio" },
     size: file.size,
-    width: file.width ?? undefined,
+    width,
     height: file.height,
-    torrentUrl: null,
-    torrentDownloadUrl: null,
+    torrentUrl: "",
+    torrentDownloadUrl: "",
     fileUrl: file.url,
-    fileDownloadUrl: downloadable ? file.url : null,
+    fileDownloadUrl: downloadable ? file.url : "",
     fps: file.fps,
-    magnetUri: null,
+    metadataUrl: `https://${ctx.domain.domain}/api/v1/videos/${video.uuid}/metadata/${i + 1}`,
+    magnetUri: "",
     hasAudio: true,
     hasVideo: file.height > 0,
     storage: 0,
@@ -215,7 +225,8 @@ export function videoDetails(
   return {
     ...base,
     description: post.contentSource ?? "",
-    support: video.support,
+    support: video.support ?? "",
+    liveSchedules: [],
     account: accountView(ctx, author),
     channel: channelView(ctx, channel, { owner: extras.owner ?? author }),
     tags: extras.tags ?? [],
@@ -227,7 +238,7 @@ export function videoDetails(
     embedPrivacyPolicy: { id: 1, label: "All allowed" },
     blacklisted: false,
     blacklistedReason: null,
-    files: video.files.map((f, i) => fileView(f, i, video.downloadEnabled)),
+    files: video.files.map((f, i) => fileView(ctx, video, f, i, video.downloadEnabled)),
     streamingPlaylists: playlist
       ? [
           {
@@ -236,7 +247,7 @@ export function videoDetails(
             playlistUrl: playlist.url,
             segmentsSha256Url: playlist.segmentsSha256Url,
             redundancies: [],
-            files: playlist.files.map((f, i) => ({ ...fileView(f, i + video.files.length, video.downloadEnabled), playlistUrl: f.playlistUrl ?? playlist.url })),
+            files: playlist.files.map((f, i) => ({ ...fileView(ctx, video, f, i + video.files.length, video.downloadEnabled), playlistUrl: f.playlistUrl ?? playlist.url })),
           },
         ]
       : [],

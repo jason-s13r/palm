@@ -889,6 +889,13 @@ app.put("/api/v1/videos/:id/chapters", async (c) => {
   return c.body(null, 204);
 });
 
+// A file's ffprobe metadata, which PeerTube links from each file. palm has no ffprobe: what it read from the MP4.
+app.get("/api/v1/videos/:id/metadata/:fileId", async (c) => {
+  const found = await findVideo(c, c.req.param("id"));
+  if (!found) return fail(c, 404, "Video not found");
+  return c.json({ streams: [], format: { duration: String(found.video.duration) } });
+});
+
 app.get("/api/v1/player-settings/videos/:id", (c) => c.json({ theme: "channel-default" }));
 app.get("/api/v1/player-settings/video-channels/:handle", (c) => c.json({ theme: "instance-default" }));
 

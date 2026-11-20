@@ -403,12 +403,12 @@ describe("PeerTube: hosting", () => {
     expect(details).toMatchObject({ duration: 5, files: [{ size: bytes.length }] });
   });
 
-  it("takes the PeerTube app's 1 MiB pieces, joining them into 5 MiB parts", async () => {
+  it("takes the PeerTube app's pieces, any size, cutting them into equal parts", async () => {
     const id = await createAccount("pt_small", "pw-long-enough");
     await giveKeys(id);
     const { auth, get } = await signIn("pt_small", "pw-long-enough");
     // As the app sent it: 3 MB, an octet-stream, in 1 MiB pieces. And a bigger one, over a part.
-    for (const extra of [3 * 1024 * 1024, 11 * 1024 * 1024 + 7]) {
+    for (const extra of [3 * 1024 * 1024, 11 * 1024 * 1024 + 7, 27 * 1024 * 1024 + 13]) {
       const bytes = mp4File(extra);
       const start = await worker.fetch(`${SITE}/api/v1/videos/upload-resumable`, {
         method: "POST",
@@ -417,9 +417,10 @@ describe("PeerTube: hosting", () => {
       });
       expect(start.status).toBe(201);
       const location = `https:${start.headers.get("location")}`;
-      const piece = 1024 * 1024;
+      // The app starts at 1 MiB and grows its pieces: 1, 2, 3 MiB...
+      let piece = 1024 * 1024;
       let res: Response | null = null;
-      for (let at = 0; at < bytes.length; at += piece) {
+      for (let at = 0; at < bytes.length; at += piece, piece += extra > 4 * 1024 * 1024 ? 1024 * 1024 : 0) {
         const end = Math.min(at + piece, bytes.length);
         res = await worker.fetch(location, { method: "PUT", headers: { ...auth, "content-type": "application/octet-stream", "content-range": `bytes ${at}-${end - 1}/${bytes.length}` }, body: bytes.slice(at, end) });
         expect(res.status, `piece at ${at}`).toBe(end === bytes.length ? 200 : 308);
