@@ -63,7 +63,7 @@ export interface Post {
 }
 
 /** The client APIs palm serves. */
-export type PostClient = "lemmy" | "mastodon" | "pixelfed";
+export type PostClient = "lemmy" | "mastodon" | "pixelfed" | "peertube";
 
 /** A remote post's image or other file, kept as a link to where it lives. */
 export interface RemoteAttachment {

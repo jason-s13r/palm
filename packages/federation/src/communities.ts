@@ -1,6 +1,6 @@
 import { Announce, Endpoints, Group, PUBLIC_COLLECTION } from "@fedify/fedify/vocab";
-import type { RequestContext } from "@palm/core";
-import { communityByName, communityFollowers, listThreadPosts, type Community } from "@palm/db";
+import { urls, type RequestContext } from "@palm/core";
+import { accountById, channelOwnerOf, communityByName, communityFollowers, listThreadPosts, type Community } from "@palm/db";
 import { registerInbox } from "./inbox.ts";
 import { createFor, postParts } from "./objects.ts";
 import { communitiesBuilder as builder, communityKeyPairs, recipient } from "./shared.ts";
@@ -28,7 +28,11 @@ builder
     const community = await communityFor(ctx.data, identifier);
     if (!community) return null;
     const keys = await ctx.getActorKeyPairs(identifier);
+    // A PeerTube channel names the person it belongs to: PeerTube won't take a channel without one.
+    const ownerId = await channelOwnerOf(ctx.data.bindings.DB, community.id);
+    const owner = ownerId !== null ? await accountById(ctx.data.bindings.DB, ownerId) : null;
     return new Group({
+      ...(owner ? { attribution: new URL(urls.user(owner.domain, owner.username)) } : {}),
       id: ctx.getActorUri(identifier),
       preferredUsername: community.name,
       name: community.title,

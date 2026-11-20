@@ -897,6 +897,106 @@ CREATE TABLE IF NOT EXISTS server_software (
 ) WITHOUT ROWID
 `,
   },
+  {
+    version: 32,
+    name: "videos",
+    // PeerTube's side of a post that is a video: one row per Video, local or
+    // remote, beside its row in posts. Files, thumbnails and the HLS playlist
+    // are kept as their server sent them (JSON). channel_id is the PeerTube
+    // channel (a Group, kept in communities). video_history is PeerTube's
+    // watch history, per person.
+    sql: `
+CREATE TABLE IF NOT EXISTS videos (
+  post_id INTEGER PRIMARY KEY REFERENCES posts (id),
+  uuid TEXT NOT NULL UNIQUE,
+  channel_id INTEGER REFERENCES communities (id),
+  duration INTEGER NOT NULL DEFAULT 0,
+  views INTEGER NOT NULL DEFAULT 0,
+  likes INTEGER NOT NULL DEFAULT 0,
+  dislikes INTEGER NOT NULL DEFAULT 0,
+  state INTEGER NOT NULL DEFAULT 1,
+  is_live INTEGER NOT NULL DEFAULT 0,
+  category INTEGER,
+  licence INTEGER,
+  video_language TEXT,
+  aspect_ratio REAL,
+  thumbnails TEXT,
+  files TEXT,
+  hls TEXT,
+  embed_url TEXT,
+  comments_enabled INTEGER NOT NULL DEFAULT 1,
+  download_enabled INTEGER NOT NULL DEFAULT 1,
+  support TEXT,
+  originally_published_at INTEGER,
+  fetched_at INTEGER
+)
+;
+CREATE INDEX IF NOT EXISTS videos_channel ON videos (channel_id, post_id)
+;
+CREATE TABLE IF NOT EXISTS video_history (
+  account_id INTEGER NOT NULL REFERENCES accounts (id),
+  post_id INTEGER NOT NULL REFERENCES posts (id),
+  watched_to INTEGER NOT NULL DEFAULT 0,
+  viewed_at INTEGER NOT NULL,
+  PRIMARY KEY (account_id, post_id)
+) WITHOUT ROWID
+;
+CREATE INDEX IF NOT EXISTS video_history_recent ON video_history (account_id, viewed_at)
+;
+ALTER TABLE videos ADD COLUMN media_id TEXT
+;
+ALTER TABLE videos ADD COLUMN thumbnail_media_id TEXT
+;
+ALTER TABLE videos ADD COLUMN transcode TEXT
+;
+CREATE INDEX IF NOT EXISTS videos_transcoding ON videos (post_id) WHERE transcode IS NOT NULL
+;
+ALTER TABLE communities ADD COLUMN channel_owner_id INTEGER
+;
+CREATE UNIQUE INDEX IF NOT EXISTS communities_channel_owner ON communities (channel_owner_id) WHERE channel_owner_id IS NOT NULL
+;
+CREATE TABLE IF NOT EXISTS video_uploads (
+  id TEXT PRIMARY KEY,
+  account_id INTEGER NOT NULL REFERENCES accounts (id),
+  media_id TEXT NOT NULL,
+  content_type TEXT NOT NULL,
+  r2_upload_id TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  received INTEGER NOT NULL DEFAULT 0,
+  part_size INTEGER,
+  parts TEXT NOT NULL DEFAULT '[]',
+  meta TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+)
+;
+CREATE TABLE IF NOT EXISTS runners (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  token_hash TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  description TEXT,
+  last_contact INTEGER,
+  created_at INTEGER NOT NULL
+)
+;
+CREATE TABLE IF NOT EXISTS runner_jobs (
+  uuid TEXT PRIMARY KEY,
+  post_id INTEGER NOT NULL REFERENCES posts (id),
+  type TEXT NOT NULL,
+  resolution INTEGER NOT NULL,
+  fps INTEGER NOT NULL,
+  state TEXT NOT NULL DEFAULT 'pending',
+  runner_id INTEGER,
+  job_token_hash TEXT,
+  progress INTEGER,
+  failures INTEGER NOT NULL DEFAULT 0,
+  error TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+)
+;
+CREATE INDEX IF NOT EXISTS runner_jobs_state ON runner_jobs (state, created_at)
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

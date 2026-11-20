@@ -16,6 +16,12 @@
   // An R2 bucket for uploaded images and video (optional; without it uploads
   // are refused). wrangler deploy creates it if it doesn't exist.
   "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "<bucket-name>" }],
+  // PeerTube video, optional extras palm notices when bound (see the README):
+  // a frame of each upload as its thumbnail (Media Transformations, 5,000 a
+  // month free), and Cloudflare Stream's renditions (paid). For renditions
+  // made on a machine of your own, set the PEERTUBE_RUNNER_TOKEN secret.
+  // "media": { "binding": "MEDIA_TRANSFORMS" },
+  // "stream": { "binding": "STREAM" },
   // Every 10 minutes: scheduled posts go out, and in the 03:00 UTC run old
   // remote posts nobody here touched are pruned, so D1 stays small.
   "triggers": { "crons": ["*/10 * * * *"] },

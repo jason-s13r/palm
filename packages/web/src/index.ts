@@ -99,7 +99,7 @@ const renderAttachments = (list: Attachment[]) =>
 
 /** A post's text, behind a summary when it carries a content warning. */
 /** The service names a post's client shows as. */
-const CLIENT_NAMES: Record<PostClient, string> = { lemmy: "Lemmy", mastodon: "Mastodon", pixelfed: "Pixelfed" };
+const CLIENT_NAMES: Record<PostClient, string> = { lemmy: "Lemmy", mastodon: "Mastodon", pixelfed: "Pixelfed", peertube: "PeerTube" };
 
 type Posted = Pick<Post, "client" | "clientApp" | "clientDevice" | "communityId" | "apId">;
 

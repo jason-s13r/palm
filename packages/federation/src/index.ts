@@ -33,6 +33,7 @@ export async function processQueueMessage(body: QueueBody, contextFor: (domain: 
 
 export { activitySink, runTask } from "./delivery.ts";
 export { serveStory } from "./stories.ts";
+export { serveVideoObject } from "./videos.ts";
 export { D1KvStore } from "./kv.ts";
 export { CloudflareMessageQueue } from "./queue.ts";
 export type { FederationName, QueueBody } from "./queue.ts";

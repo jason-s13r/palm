@@ -170,6 +170,8 @@ export async function prune(db: D1Database, days = 30, batch = 300): Promise<num
   if (ids.length) {
     const marks = ids.map(() => "?").join(", ");
     await db.batch([
+      db.prepare(`DELETE FROM videos WHERE post_id IN (${marks})`).bind(...ids),
+      db.prepare(`DELETE FROM video_history WHERE post_id IN (${marks})`).bind(...ids),
       db.prepare(`DELETE FROM votes WHERE post_id IN (${marks})`).bind(...ids),
       db.prepare(`DELETE FROM remote_votes WHERE post_id IN (${marks})`).bind(...ids),
       db.prepare(`DELETE FROM boosts WHERE post_id IN (${marks})`).bind(...ids),

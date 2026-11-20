@@ -17,6 +17,52 @@ export interface PalmBindings {
    * it, apps refresh on their own instead.
    */
   STREAMING?: DurableObjectNamespace;
+  /**
+   * Cloudflare Stream (a paid product), for hosting PeerTube video: when
+   * bound, uploads are also sent to Stream, which makes the HLS playlist and
+   * an H.264 MP4 that plays everywhere.
+   */
+  STREAM?: StreamBinding;
+  /**
+   * Media Transformations, for a video's thumbnail: a frame from its upload.
+   * Each frame is one operation; 5,000 a month are free.
+   */
+  MEDIA_TRANSFORMS?: MediaTransformsBinding;
+  /**
+   * The registration token for PeerTube's remote runners (`peertube-runner`
+   * on a machine of your own): with it set, runners can register and make a
+   * video's renditions with ffmpeg, for free. A secret.
+   */
+  PEERTUBE_RUNNER_TOKEN?: string;
+  /** Each person's video quota, in megabytes (2048 if unset). */
+  PALM_VIDEO_QUOTA_MB?: string;
+}
+
+/** The parts of Cloudflare Stream's Worker binding palm uses. */
+export interface StreamBinding {
+  upload(url: string, params?: { meta?: Record<string, string>; creator?: string }): Promise<{ uid?: string; id?: string }>;
+  video(id: string): {
+    details(): Promise<{ readyToStream?: boolean; status?: { state?: string }; playback?: { hls?: string }; thumbnail?: string; input?: { width?: number; height?: number }; duration?: number }>;
+    delete(): Promise<void>;
+    downloads: {
+      create(type?: string): Promise<unknown>;
+      get(): Promise<Record<string, { status?: string; url?: string; percentComplete?: number } | undefined> | { default?: { status?: string; url?: string } }>;
+    };
+  };
+}
+
+/** The parts of the Media Transformations binding palm uses. */
+export interface MediaTransformsBinding {
+  input(stream: ReadableStream<Uint8Array>): {
+    transform(params?: { width?: number; height?: number; fit?: string }): {
+      output(params: { mode: "frame" | "video" | "spritesheet" | "audio"; time?: string; format?: string; duration?: string }): {
+        response(): Promise<Response>;
+      };
+    };
+    output(params: { mode: "frame" | "video" | "spritesheet" | "audio"; time?: string; format?: string; duration?: string }): {
+      response(): Promise<Response>;
+    };
+  };
 }
 
 /** What every adapter gets for one request. */
@@ -102,6 +148,8 @@ export type FederationTask =
   | { kind: "backfill_post"; communityId: number; url: string }
   /** A local story, offered to followers on servers that show stories (Pixelfed's Add). */
   | { kind: "story_published"; storyId: number }
+  /** A local PeerTube video, published or changed: its Video goes to followers of its person and channel. */
+  | { kind: "video_published"; postId: number; update: boolean }
   /** A local story taken down before its day was up. */
   | { kind: "story_deleted"; storyId: number }
   /** Someone here saw another server's story: its author is told (a View). */

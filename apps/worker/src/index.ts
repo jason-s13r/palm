@@ -1,6 +1,7 @@
 import { handleLemmy } from "@palm/adapter-lemmy";
 import { handleMastodon, publishDueStatuses } from "@palm/adapter-mastodon";
-import { activitySink, handleFederation, processQueueMessage, serveStory, type QueueBody } from "@palm/federation";
+import { handlePeerTube, isPeerTubePath, runnerSocket, videoMaintenance } from "@palm/adapter-peertube";
+import { activitySink, handleFederation, processQueueMessage, serveStory, serveVideoObject, type QueueBody } from "@palm/federation";
 import { contextScope, defineConfig, enterContext, normaliseHost, resolveSurface, type DomainConfig, type PalmBindings, type PalmConfig, type RequestContext } from "@palm/core";
 import { claimFollowImports, deleteMedia, domainOf, mediaById, migrate, pendingDeletes, pendingMoves, prune, removeEndedStories } from "@palm/db";
 import { handleWeb } from "@palm/web";
@@ -86,6 +87,9 @@ async function scheduled(config: PalmConfig, controller: ScheduledController, en
     if (media) await deleteMedia(env.DB, env.MEDIA, media);
   }
   if (ended.removed) console.log(JSON.stringify({ palm: "stories_ended", stories: ended.removed }));
+  // PeerTube video: Stream's renditions as they finish, and abandoned uploads.
+  const first = contextFor("");
+  if (first) await videoMaintenance(first).catch((error: unknown) => console.warn(JSON.stringify({ palm: "video_maintenance_failed", error: String(error) })));
   const at = new Date(controller.scheduledTime);
   if (at.getUTCHours() !== 3 || at.getUTCMinutes() >= 10) return;
   let removed = 0;
@@ -207,7 +211,17 @@ export async function handle(
         // with federation, which answers nodeinfo as Lemmy.
         // Uploaded images live where Lemmy keeps them, for both kinds of app.
         if (url.pathname.startsWith("/api/v3/") || url.pathname.startsWith("/pictrs/")) return handleLemmy(request, ctx);
+        // PeerTube's API shares /api/v1 with Mastodon's without overlapping
+        // (its sections, and accounts by name rather than number).
+        if (isPeerTubePath(url.pathname) || isPeerTubeLink(url.pathname)) return handlePeerTube(request, ctx);
         if (isMastodonPath(url.pathname)) return handleMastodon(request, ctx);
+        // PeerTube's remote runners hear about new jobs over socket.io.
+        if (url.pathname === "/socket.io/") return runnerSocket(request, ctx);
+        // A local PeerTube video, fetched by another server: PeerTube's shape.
+        if (url.pathname.startsWith("/objects/")) {
+          const video = await serveVideoObject(request, ctx);
+          if (video) return video;
+        }
         // A story, fetched by a server holding its token (Pixelfed's bearcap).
         if (url.pathname.startsWith("/stories/")) {
           const story = await serveStory(request, ctx);
@@ -224,6 +238,9 @@ export async function handle(
     }
   }
 }
+
+/** PeerTube's watch links (/w/{shortUUID}, /videos/watch/{uuid}), as its apps share them. */
+const isPeerTubeLink = (path: string) => /^\/(w\/[^/]+|videos\/watch\/[^/]+|videos\/embed\/[^/]+)$/.test(path);
 
 /** Paths the Mastodon API owns on the bare domain. */
 function isMastodonPath(path: string): boolean {

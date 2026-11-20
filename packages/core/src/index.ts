@@ -3,7 +3,7 @@ export type { ApiKind, DomainConfig, InstanceConfig, PalmConfig, PostClientDispl
 export { normaliseHost, resolveSurface } from "./routing.ts";
 export type { Surface } from "./routing.ts";
 export { LEMMY_COMPAT_VERSION, nodeinfoVersion, urls } from "./context.ts";
-export type { ActivitySink, FederationTask, PalmBindings, RequestContext, Resolved } from "./context.ts";
+export type { ActivitySink, FederationTask, MediaTransformsBinding, PalmBindings, RequestContext, Resolved, StreamBinding } from "./context.ts";
 export { escapeHtml, hashtagsIn, htmlToText, markdownToHtml, mentionsIn, previewLink, sanitizeHtml, textToHtml } from "./text.ts";
 export { contextScope, currentContext, enterContext } from "./current.ts";
 export { uploadCacheKey } from "./cache-keys.ts";

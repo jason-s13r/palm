@@ -49,6 +49,7 @@ import { communitySenderKeys, contextsFor, federationsFor, localDomains, logProb
 import { personFor } from "./people.ts";
 import { importFollow } from "./imports.ts";
 import { isStoryTask, runStoryTask } from "./stories.ts";
+import { runVideoTask } from "./videos.ts";
 
 const isLocal = (a: { apId: string | null }) => a.apId === null;
 
@@ -143,6 +144,7 @@ const voteId = (voter: Account, postId: number, score: number) =>
 /** Runs one federation task. */
 export async function runTask(ctx: RequestContext, task: FederationTask): Promise<void> {
   if (isStoryTask(task)) return runStoryTask(ctx, task);
+  if (task.kind === "video_published") return runVideoTask(ctx, task);
   const db = ctx.bindings.DB;
   const { people } = await contextsFor(ctx);
   switch (task.kind) {

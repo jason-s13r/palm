@@ -47,6 +47,7 @@ import {
   notify,
   postByApId,
   postByUri,
+  saveVideo,
   upsertRemoteAccount,
   upsertRemoteCommunity,
   vote,
@@ -57,6 +58,7 @@ import {
   type Visibility,
 } from "@palm/db";
 import { cardWanted } from "./cards.ts";
+import { rawVideoJson, videoFromJson, watchPageOf } from "./videos.ts";
 import { localDomains, logProblem } from "./shared.ts";
 
 /** How long palm trusts what it fetched about a remote actor. */
@@ -252,7 +254,19 @@ export async function storeRemotePost(
   const existing = await postByUri(db, object.id.href, localDomains(ctx));
   if (existing) return existing;
 
-  const author = await ensureAccount(fctx, object.attributionId);
+  // A PeerTube video names its person and its channel (a Group): the person is
+  // the author, the channel its community.
+  let author: Account | null = null;
+  let channel: Community | null = null;
+  if (object instanceof Video && object.attributionIds.length > 1) {
+    for (const id of object.attributionIds.slice(0, 4)) {
+      const found = await ensureActor(fctx, id);
+      if (found && "account" in found) author ??= found.account;
+      else if (found && "community" in found) channel ??= found.community;
+    }
+  } else {
+    author = await ensureAccount(fctx, object.attributionId);
+  }
   if (!author) return null;
 
   // A reply: palm keeps it under its parent, fetching the parent if needed.
@@ -267,7 +281,7 @@ export async function storeRemotePost(
   }
 
   // The community: from Lemmy's audience, the thread it's in, or the one it came through.
-  let community = reason.community ?? null;
+  let community = reason.community ?? channel;
   if (!community && parent?.communityId) community = { id: parent.communityId } as Community;
   if (!community && object.audienceId) community = await ensureCommunity(fctx, object.audienceId);
   if (!community) {
@@ -320,6 +334,16 @@ export async function storeRemotePost(
       if (url) attachments.push({ url, mediaType: attachment.mediaType ?? guessImageType(attachment, url), description: text(attachment.name) });
     }
   }
+  // A PeerTube video: its watch page is the post's link, its thumbnail the picture.
+  let videoJson: Record<string, unknown> | null = null;
+  if (object instanceof Video) {
+    videoJson = await rawVideoJson(fctx, object);
+    if (videoJson) {
+      linkUrl ??= watchPageOf(videoJson);
+      const thumbnail = videoFromJson(videoJson, 0, null)?.thumbnails.at(-1);
+      if (thumbnail && !attachments.length) attachments.push({ url: thumbnail.url, mediaType: "image/jpeg", description: text(object.name) });
+    }
+  }
   const isThreadPost = community !== null && !parent;
   // A Lemmy image post: its image is the post's link.
   if (isThreadPost && !linkUrl && attachments[0]?.mediaType?.startsWith("image/")) linkUrl = attachments[0].url;
@@ -356,6 +380,10 @@ export async function storeRemotePost(
     throw error;
   });
 
+  if (videoJson) {
+    const video = videoFromJson(videoJson, post.id, channel?.id ?? (post.communityId !== null && !post.parentId ? post.communityId : null));
+    if (video) await saveVideo(db, video).catch((error: unknown) => logProblem("video_save_failed", { id: object.id?.href, error: String(error) }));
+  }
   // Lemmy counts an author's own post or comment as upvoted, without sending a vote for it.
   if (post.communityId) await vote(db, post.id, author.id, 1);
   if (object instanceof Question) await savePollFrom(db, post.id, object).catch(() => undefined);
@@ -572,6 +600,82 @@ interface LemmyCommentView {
   creator: { actor_id: string; name: string; display_name?: string; avatar?: string };
 }
 
+interface PeerTubeComment {
+  id: number;
+  url: string;
+  text: string;
+  threadId: number;
+  inReplyToCommentId: number | null;
+  createdAt: string;
+  updatedAt: string;
+  isDeleted: boolean;
+  totalReplies: number;
+  account: { name: string; url: string; displayName: string; avatars?: { fileUrl?: string; path?: string }[] } | null;
+}
+
+interface PeerTubeThreadTree {
+  comment: PeerTubeComment;
+  children: PeerTubeThreadTree[];
+}
+
+/** The most threads with replies palm opens for one video: each is a request. */
+const PEERTUBE_TREES = 8;
+
+/**
+ * A PeerTube video's comments, from its server's API: the threads, then the
+ * replies under the busiest few. PeerTube publishes comments over ActivityPub
+ * too, but walking them is a request per comment.
+ */
+async function fetchPeerTubeComments(fctx: Context<RequestContext>, root: Post & { apId: string }, host: string, uuid: string): Promise<void> {
+  const db = fctx.data.bindings.DB;
+  const base = `https://${host}/api/v1/videos/${uuid}`;
+  const threads = await fetchJson<{ data: PeerTubeComment[] }>(`${base}/comment-threads?start=0&count=${THREAD_LIMIT}&sort=createdAt`);
+  const top = threads?.data ?? [];
+  const comments: PeerTubeComment[] = [...top];
+  const busiest = top.filter((c) => c.totalReplies > 0).sort((a, b) => b.totalReplies - a.totalReplies).slice(0, PEERTUBE_TREES);
+  const trees = await Promise.all(busiest.map((c) => fetchJson<PeerTubeThreadTree>(`${base}/comment-threads/${c.threadId}`)));
+  const walk = (tree: PeerTubeThreadTree | null) => {
+    for (const child of tree?.children ?? []) {
+      comments.push(child.comment);
+      walk(child);
+    }
+  };
+  for (const tree of trees) walk(tree);
+  const urlByOriginId = new Map(comments.map((c) => [c.id, c.url]));
+  const known = await postIdsByApIds(db, [root.apId, ...comments.map((c) => c.url)]);
+  known.set(root.apId, root.id);
+  for (const c of comments.slice(0, THREAD_LIMIT)) {
+    if (c.isDeleted || !c.account || known.has(c.url)) continue;
+    const parentUrl = c.inReplyToCommentId ? urlByOriginId.get(c.inReplyToCommentId) : root.apId;
+    const parentId = parentUrl ? known.get(parentUrl) : undefined;
+    if (parentId === undefined) continue;
+    const avatar = c.account.avatars?.at(-1);
+    const author = await placeholderAccount(db, {
+      apId: c.account.url,
+      username: c.account.name,
+      displayName: c.account.displayName || null,
+      avatarUrl: avatar?.fileUrl ?? (avatar?.path ? `https://${host}${avatar.path}` : null),
+    });
+    const created = await createPost(db, {
+      accountId: author.id,
+      contentSource: c.text,
+      contentHtml: sanitizeHtml(markdownToHtml(c.text)),
+      spoilerText: "",
+      sensitive: false,
+      visibility: "public",
+      language: null,
+      inReplyTo: parentUrl!,
+      parentId,
+      ...(root.communityId ? { communityId: root.communityId, rootId: root.id } : {}),
+      apId: c.url,
+      url: c.url,
+      createdAt: seconds(c.createdAt),
+      ...(c.updatedAt && c.updatedAt !== c.createdAt ? { updatedAt: seconds(c.updatedAt) } : {}),
+    }).catch(() => null);
+    if (created) known.set(c.url, created.id);
+  }
+}
+
 interface MastodonStatus {
   id: string;
   uri: string;
@@ -617,6 +721,12 @@ async function fetchThread(fctx: Context<RequestContext>, root: Post & { apId: s
 
   const lemmyPost = origin.pathname.match(/^\/post\/(\d+)$/);
   const mastodonStatus = origin.pathname.match(/^\/users\/[^/]+\/statuses\/(\d+)$/);
+
+  const peertubeVideo = origin.pathname.match(/^\/videos\/watch\/([0-9a-f-]{36})$/i);
+  if (peertubeVideo) {
+    await fetchPeerTubeComments(fctx, root, origin.host, peertubeVideo[1]!);
+    return;
+  }
 
   if (lemmyPost) {
     const data = await fetchJson<{ comments: LemmyCommentView[] }>(

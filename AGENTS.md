@@ -23,6 +23,18 @@ outside this repo (the Palm project's `palm-decisions.md`).
   endpoints under `/api/v1.1`, `/api/v1.2`, `/api/v2.1` and `/api/pixelfed`. The app checks
   `/api/nodeinfo/2.0.json` for "pixelfed" (the App Store build reads
   `/api/v2.1/config`'s version); standard nodeinfo stays Lemmy.
+- `packages/adapter-peertube`: the PeerTube client API (PeerTube's apps),
+  on the bare domain beside Mastodon's: PeerTube's sections of `/api/v1`
+  (videos, users, video-channels, config...) aren't Mastodon's, and its
+  accounts are named where Mastodon's are numbered (`isPeerTubePath`).
+  Channels are communities; a video is a post with a row in `videos`. Uploads
+  (`upload.ts`) go to R2, and what happens next depends on the bindings
+  (`capabilities`): the MP4 as uploaded (read by `mp4.ts`), a frame as the
+  thumbnail (`MEDIA_TRANSFORMS`), Stream's renditions (`STREAM`, polled by
+  the cron in `maintenance.ts`), or PeerTube's remote runners
+  (`PEERTUBE_RUNNER_TOKEN`, `runner.ts`). Local videos federate as
+  PeerTube's Video, built and sent as JSON (`federation/src/videos.ts`):
+  Fedify would drop PeerTube's fields.
 - `packages/federation`: ActivityPub on Fedify: WebFinger, Person actors,
   followers, the inboxes and nodeinfo, with Fedify's key-value store on D1
   (`D1KvStore`) and its message queue on a Cloudflare Queue

@@ -41,6 +41,7 @@
     "@cloudflare/workers-types": "^5.20261116.1",
     "@palm/adapter-lemmy": "workspace:*",
     "@palm/adapter-mastodon": "workspace:*",
+    "@palm/adapter-peertube": "workspace:*",
     "@palm/auth": "workspace:*",
     "@palm/core": "workspace:*",
     "@palm/db": "workspace:*",

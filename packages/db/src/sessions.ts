@@ -79,6 +79,12 @@ export async function appByClientId(db: D1Database, clientId: string): Promise<O
   return row ? toApp(row) : null;
 }
 
+/** The first app registered under a name: PeerTube's one local client is found this way. */
+export async function appByName(db: D1Database, name: string): Promise<OAuthApp | null> {
+  const row = await db.prepare("SELECT * FROM oauth_apps WHERE name = ? ORDER BY id LIMIT 1").bind(name).first<AppRow>();
+  return row ? toApp(row) : null;
+}
+
 export async function appById(db: D1Database, id: number): Promise<OAuthApp | null> {
   const row = await db.prepare("SELECT * FROM oauth_apps WHERE id = ?").bind(id).first<AppRow>();
   return row ? toApp(row) : null;

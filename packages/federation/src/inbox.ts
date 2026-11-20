@@ -1,6 +1,7 @@
 import type { Context, FederationBuilder, InboxContext } from "@fedify/fedify";
 import {
   Question,
+  Video,
   Note,
   Flag,
   Accept,
@@ -58,11 +59,14 @@ import {
   vote,
   type Community,
   type Post,
+  saveVideo,
+  videoByPostId,
 } from "@palm/db";
 import { htmlToText, sanitizeHtml } from "@palm/core";
 import { announceToCommunity } from "./delivery.ts";
 import { quoteAuthorizationUri } from "./objects.ts";
 import { ensureAccount, ensureActor, ensureCommunity, savePollFrom, storeRemotePost } from "./remote.ts";
+import { rawVideoJson, videoFromJson } from "./videos.ts";
 import { communitySenderKeys, contextsFor, localDomains, logProblem, personKeys, send } from "./shared.ts";
 
 type Ctx = Context<RequestContext>;
@@ -237,6 +241,16 @@ async function onUpdate(ctx: Ctx, update: Update, via: Via): Promise<void> {
   if (!post?.apId) return;
   const author = await ensureAccount(ctx, update.actorId);
   if (author?.id !== post.accountId) return;
+  // A PeerTube video changes often (its state, files, views): its files and
+  // state are refreshed, and its text only kept as an edit when it changed.
+  if (object instanceof Video) {
+    const json = await rawVideoJson(ctx, object);
+    const before = json ? await videoByPostId(ctx.data.bindings.DB, post.id) : null;
+    const video = json ? videoFromJson(json, post.id, before?.channelId ?? null) : null;
+    if (video) await saveVideo(ctx.data.bindings.DB, { ...video, uuid: before?.uuid ?? video.uuid, likes: before?.likes ?? 0, dislikes: before?.dislikes ?? 0 });
+    const content = sanitizeHtml(String(object.content ?? ""));
+    if (content === post.contentHtml && String(object.name ?? post.title) === post.title) return;
+  }
   const html = sanitizeHtml(String((object as { content?: unknown }).content ?? ""));
   const source = (object as { source?: { content?: unknown; mediaType?: string | null } | null }).source;
   await updateRemotePost(ctx.data.bindings.DB, post.id, {
@@ -300,6 +314,8 @@ async function onAnnounce(ctx: Ctx, announce: Announce): Promise<void> {
     // A Lemmy community passing on something that happened in it.
     const inner = await announce.getObject({ crossOrigin: "trust" }).catch(() => null);
     if (inner instanceof Activity && !(await refused(ctx, inner))) await dispatch(ctx, inner, { community: actor.community });
+    // A PeerTube channel sharing one of its videos: the Video itself, not an activity.
+    else if (inner instanceof Video) await storeRemotePost(ctx, inner, { community: actor.community });
     return;
   }
   // A boost. Keep it if someone here follows the booster, or it's a local post.

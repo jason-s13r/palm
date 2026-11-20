@@ -28,6 +28,10 @@ The name is MLAP backwards: Mastodon, Lemmy, ActivityPub.
   profile edits. Stories, collections, Pixelfed's push (it goes through
   pixelfed.org) and its admin screens aren't there; the app hides stories
   when there are none.
+- **PeerTube apps**: sign-in, subscriptions (channels arrive as
+  communities), the subscriptions feed, watching (other servers' files and
+  HLS playlists), likes, comments, Watch later (a save), history, search
+  by link or handle, and uploads (see [PeerTube video](#peertube-video)).
 - **Both at once**: a Lemmy comment is a Mastodon reply, an upvote is a
   favourite, a save is a bookmark. In Lemmy apps each person is a
   community (`!name@their.server`), with their statuses as posts; subscribing
@@ -50,6 +54,7 @@ One Worker serves the domain and routes on the path:
 | `/api/v3`, `/pictrs` | The Lemmy API, for Lemmy apps |
 | `/api/v1`, `/api/v2`, `/oauth` | The Mastodon API, for Mastodon apps |
 | `/api/v1.1`, `/api/v1.2`, `/api/v2.1`, `/api/pixelfed`, `/api/nodeinfo/2.0.json` | Pixelfed's extras, for the Pixelfed app |
+| `/api/v1/videos`, `/api/v1/users`, `/api/v1/video-channels`, `/api/v1/config`... | The PeerTube API, for PeerTube apps (its sections of `/api/v1` aren't Mastodon's) |
 
 People sign in to both kinds of app with the domain itself (`your.domain`), so
 apps show their handle as `@name@your.domain`. Nodeinfo answers as Lemmy,
@@ -182,6 +187,49 @@ operations a day and 100,000 D1 row writes a day. palm is built around those:
 
 Subscribing to many busy Lemmy communities is what pushes against the limits
 first. The Workers dashboard shows CPU per request, queue use and D1 writes.
+
+## PeerTube video
+
+Watching needs nothing extra. Hosting video depends on what the deployment
+has bound, and palm works out which from its bindings:
+
+| Tier | Bindings | What uploads get |
+| --- | --- | --- |
+| Free | `MEDIA` (R2) | The MP4 as uploaded, read for its length, size and frame rate (no ffmpeg). Use H.264 MP4: other servers play the file as it is. |
+| Free (5,000 a month) | `MEDIA_TRANSFORMS` (Media Transformations) | A thumbnail from a frame of the video, for files under 100 MB. |
+| Self-hosted | `PEERTUBE_RUNNER_TOKEN` (a secret) | Renditions (240p up to 720p, H.264) made by [`peertube-runner`](https://docs.joinpeertube.org/maintain/tools#peertube-runner) on a machine of yours. MOV (an iPhone's HEVC, say) is taken too. |
+| Paid | `STREAM` (Cloudflare Stream) | Stream's HLS playlist and an H.264 MP4 of every upload; MOV, WebM and MKV are taken. |
+
+```jsonc
+// wrangler.jsonc, beside the bindings palm already has
+"media": { "binding": "MEDIA_TRANSFORMS" },
+"stream": { "binding": "STREAM" }
+```
+
+For a runner, set the secret (`wrangler secret put PEERTUBE_RUNNER_TOKEN`, at
+least 16 characters), then on your machine:
+
+```sh
+npx @peertube/peertube-runner server &
+npx @peertube/peertube-runner register --url https://your.domain --registration-token <token> --runner-name home
+```
+
+The runner calls out to palm, so it can sit behind NAT with no tunnel. palm
+answers its socket.io connection just enough to say there's work, and the
+runner reconnects about once a minute, which doubles as polling. Each
+rendition comes back in one request, so palm asks only for the ones likely to
+fit Cloudflare's 100 MB request limit. Uploads arrive in 10 MiB pieces
+(PeerTube's resumable upload, into an R2 multipart upload), so the original
+can be any size up to each person's quota (`PALM_VIDEO_QUOTA_MB`, 2048 by
+default; R2's free tier holds 10 GB in all).
+
+Each person's videos go in one channel, `!name_channel@your.domain`, made on
+their first upload. Lemmy apps see it as a community they moderate; PeerTube
+servers follow it as a channel.
+
+The App Store build of the official PeerTube app signs in only to the
+platforms on Framasoft's list; the Android builds (F-Droid, the APK) let you
+add any server.
 
 ## Releases
 
