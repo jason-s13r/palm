@@ -261,12 +261,17 @@ async function proxyMedia(request: Request, ctx: RequestContext): Promise<Respon
   const range = request.headers.get("range");
   const cached = await cache.match(range ? new Request(key, { headers: { range } }) : key);
   if (cached) return cached;
-  const host = source.host.toLowerCase();
+  // The media's host or a domain above it (media.example.com for example.com),
+  // looked up by the domain indexes rather than matched against every row.
+  const labels = source.hostname.toLowerCase().split(".");
+  const domains = labels.slice(0, -1).map((_, i) => labels.slice(i).join("."));
+  if (source.port || !domains.length) domains.unshift(source.host.toLowerCase());
+  const marks = domains.map((_, i) => `?${i + 1}`).join(", ");
   const known = await ctx.bindings.DB.prepare(
-    `SELECT 1 FROM accounts WHERE ap_id IS NOT NULL AND (domain = ?1 OR ?1 LIKE '%.' || domain)
-     UNION ALL SELECT 1 FROM communities WHERE ap_id IS NOT NULL AND (domain = ?1 OR ?1 LIKE '%.' || domain) LIMIT 1`,
+    `SELECT 1 FROM accounts WHERE domain IN (${marks}) AND ap_id IS NOT NULL
+     UNION ALL SELECT 1 FROM communities WHERE domain IN (${marks}) AND ap_id IS NOT NULL LIMIT 1`,
   )
-    .bind(host)
+    .bind(...domains)
     .first();
   if (!known) return Response.redirect(source.href, 302);
   const upstream = await fetch(source.href, { headers: { "user-agent": "palm (+https://github.com/jason-s13r/palm; media)" }, redirect: "follow" }).catch(() => null);

@@ -41,6 +41,9 @@ export type { FederationName, QueueBody } from "./queue.ts";
  * communities when no person has the name. Anything neither handles goes to
  * `fallback`, which redirects browsers or answers 404.
  */
+/** What the two federations answer: actors, objects, inboxes, WebFinger and nodeinfo. */
+const FEDIFY_PATH = /^\/(users\/|c\/|objects\/|inbox$|communities\/inbox$|nodeinfo\/|\.well-known\/(webfinger|nodeinfo)$)/;
+
 export async function handleFederation(
   request: Request,
   ctx: RequestContext,
@@ -60,6 +63,10 @@ export async function handleFederation(
     });
     if (outcome !== "fedify") return new Response(null, { status: 202 });
   }
+  // Paths Fedify doesn't serve (web pages, the bare domain, scanners trying
+  // /.env) go straight to the fallback: building the federations costs more
+  // CPU than the rest of such a request.
+  if (!FEDIFY_PATH.test(url.pathname)) return fallback(request);
   const { people, communities } = await federationsFor(ctx.bindings);
   const options = {
     contextData: ctx,
