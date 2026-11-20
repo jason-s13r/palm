@@ -1,5 +1,12 @@
 # Changelog
 
+## core@1.5.1 (2026-11-20)
+
+### Fixes
+
+- PeerTube videos and comments say "on PeerTube", and the app is named as such
+
+
 ## core@1.5.0 (2026-11-20)
 
 ### Features

@@ -1,5 +1,17 @@
 # Changelog
 
+## worker@0.12.2 (2026-11-20)
+
+### Fixes
+
+- PeerTube videos and comments say "on PeerTube", and the app is named as such
+
+### Dependencies
+
+- core: 1.5.0 -> 1.5.1
+- web: 0.3.0 -> 0.3.1
+
+
 ## worker@0.12.1 (2026-11-20)
 
 ### Fixes
