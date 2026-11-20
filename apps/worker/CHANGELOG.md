@@ -1,5 +1,16 @@
 # Changelog
 
+## worker@0.9.1 (2026-11-20)
+
+### Fixes
+
+- no "on" guess for statuses from before clients were kept, and no device twice for apps named for their platform
+
+### Dependencies
+
+- web: 0.2.0 -> 0.2.1
+
+
 ## worker@0.9.0 (2026-11-20)
 
 ### Features
