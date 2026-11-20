@@ -19,7 +19,7 @@ import {
   Undo,
   Update,
 } from "@fedify/fedify/vocab";
-import { urls, type RequestContext } from "@palm/core";
+import { localPostId, urls, type RequestContext } from "@palm/core";
 import {
   addRemotePollVote,
   authorizeQuote,
@@ -161,9 +161,9 @@ async function onReject(ctx: Ctx, reject: Reject): Promise<void> {
  */
 async function answerQuote(ctx: Ctx, requestId: URL, actorId: URL | null, approval: URL | null): Promise<boolean> {
   if (requestId.hash !== "#quote-request" || !localDomains(ctx.data).includes(requestId.host.toLowerCase())) return false;
-  const match = /^\/objects\/(\d+)$/.exec(requestId.pathname);
+  const localId = localPostId(requestId.pathname);
   const db = ctx.data.bindings.DB;
-  const post = match ? await postById(db, Number(match[1])) : null;
+  const post = localId !== null ? await postById(db, localId) : null;
   if (!post?.quoteOf || !actorId) return true;
   // Only the quoted post's server answers for it.
   if (new URL(post.quoteOf).host !== actorId.host) return true;

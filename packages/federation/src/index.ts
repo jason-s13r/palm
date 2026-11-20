@@ -88,6 +88,14 @@ export async function handleFederation(
       return target.fetch(trusted, options);
     }
   }
+  // A local post asked for by Lemmy's paths (/post/{id}, /comment/{id}), as
+  // newer posts are minted: Fedify serves it from /objects/{id}, whichever ID
+  // it was minted with. Browsers get the web page.
+  const alias = request.method === "GET" && /activity\+json|ld\+json/.test(request.headers.get("accept") ?? "") ? /^\/(?:post|comment)\/(\d+)$/.exec(url.pathname) : null;
+  if (alias) {
+    const objectUrl = new URL(`/objects/${alias[1]}`, url);
+    return handleFederation(new Request(objectUrl, { headers: request.headers }), ctx, fallback);
+  }
   // Paths Fedify doesn't serve (web pages, the bare domain, scanners trying
   // /.env) go straight to the fallback: building the federations costs more
   // CPU than the rest of such a request.

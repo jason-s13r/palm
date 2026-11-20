@@ -1,4 +1,4 @@
-import { appName, htmlToText, urls, type RequestContext } from "@palm/core";
+import { appName, htmlToText, postApId, urls, type RequestContext } from "@palm/core";
 import {
   accountByHandle,
   accountsByIds,
@@ -160,7 +160,7 @@ for (const path of ["/:handle{@[^/@]+}/:id{[0-9]+}", "/post/:id{[0-9]+}", "/comm
     if (!wantsActivityPub(c)) return next();
     const post = await postByIdAny(c.env.bindings.DB, Number(c.req.param("id")));
     if (!post || !isPublic(post)) return c.json({ error: "not_found" }, 404);
-    return c.redirect(post.apId ?? urls.object(c.env.domain.domain, String(post.id)), 302);
+    return c.redirect(postApId(c.env.domain.domain, post), 302);
   });
 }
 
@@ -349,7 +349,7 @@ async function postPage(c: C, id: number): Promise<Response> {
       largeImage: picture !== null,
       url: `${origin(c)}${postHref(post, author)}`,
       canonical: remote ? (post.url ?? post.apId) : null,
-      activityPub: post.apId ?? urls.object(domain, String(post.id)),
+      activityPub: postApId(domain, post),
       author: nameOf(author),
       published: post.createdAt,
       noindex: remote,

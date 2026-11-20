@@ -163,6 +163,8 @@ describe("Communities on the network", () => {
         body: JSON.stringify({ community_id: communityId, name: "A title", body: "Some **markdown**", url: "https://example.com/" }),
       })
     ).json<{ post_view: { post: { ap_id: string } } }>();
+    // Minted as Lemmy mints them, so Lemmy apps' links (Voyager's) read as Lemmy's.
+    expect(created.post_view.post.ap_id).toMatch(/^https:\/\/palm\.test\/post\/\d+$/);
     const page = await (await worker.fetch(created.post_view.post.ap_id, AP)).json<Record<string, unknown>>();
     expect(page).toMatchObject({
       type: "Page",

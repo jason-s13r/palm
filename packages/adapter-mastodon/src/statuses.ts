@@ -1,4 +1,4 @@
-import { escapeHtml, hashtagsIn, htmlToText, mentionsIn, previewLink, textToHtml, transcoderOf, urls, type RequestContext } from "@palm/core";
+import { escapeHtml, hashtagsIn, htmlToText, mentionsIn, localPostId, postApId, previewLink, textToHtml, transcoderOf, urls, type PostIdentity, type RequestContext } from "@palm/core";
 import {
   claimIdempotencyKey,
   idempotentPost,
@@ -95,9 +95,9 @@ const VISIBILITIES: Visibility[] = ["public", "unlisted", "private", "direct"];
 
 export { textToHtml };
 
-/** A post's ActivityPub ID: its own if remote, else /objects/{id} on its author's domain. */
-const postUriOf = (post: Pick<Post, "apId" | "id">, author: Pick<Account, "domain"> | null, ctx: RequestContext) =>
-  post.apId ?? urls.object(author?.domain ?? ctx.domain.domain, String(post.id));
+/** A post's ActivityPub ID: its own if remote, else as it was minted on its author's domain. */
+const postUriOf = (post: PostIdentity, author: Pick<Account, "domain"> | null, ctx: RequestContext) =>
+  postApId(author?.domain ?? ctx.domain.domain, post);
 
 /**
  * A post's HTML as a status. A Lemmy post leads with its title and link, as
@@ -410,8 +410,7 @@ async function quotedPostsFor(ctx: RequestContext, posts: Post[]): Promise<Map<s
     const found = byApId.get(uri);
     if (found !== undefined) return found;
     const url = new URL(uri);
-    const local = url.host === ctx.domain.domain ? /^\/objects\/(\d+)$/.exec(url.pathname) : null;
-    return local ? Number(local[1]) : undefined;
+    return (url.host === ctx.domain.domain ? localPostId(url.pathname) : null) ?? undefined;
   };
   const idByUri = new Map(uris.flatMap((u) => { const id = idOf(u); return id === undefined ? [] : [[u, id] as const]; }));
   const found = await postsByIds(db, [...idByUri.values()]);

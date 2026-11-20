@@ -1,7 +1,7 @@
 import type { Context } from "@fedify/fedify";
 import { signRequest } from "@fedify/fedify/sig";
 import type { Object as APObject } from "@fedify/fedify/vocab";
-import { urls, type FederationTask, type RequestContext } from "@palm/core";
+import { localPostId, postApId, urls, type FederationTask, type RequestContext } from "@palm/core";
 import {
   accountById,
   blockedDomains,
@@ -99,7 +99,7 @@ export async function localVideoObject(ctx: RequestContext, postId: number): Pro
   if (!video || !author) return null;
   const channel = video.channelId !== null ? await communityById(db, video.channelId) : null;
   const tags = (await tagsFor(db, [post.id])).get(post.id) ?? [];
-  const id = urls.object(author.domain, String(post.id));
+  const id = postApId(author.domain, post);
   const actor = urls.user(author.domain, author.username);
   const channelId = channel ? urls.community(channel.domain, channel.name) : null;
   const followers = `${actor}/followers`;
@@ -164,7 +164,7 @@ export async function localVideoObject(ctx: RequestContext, postId: number): Pro
 export async function serveVideoObject(request: Request, ctx: RequestContext): Promise<Response | null> {
   const accept = request.headers.get("accept") ?? "";
   if (!/activity\+json|ld\+json/.test(accept)) return null;
-  const id = /^\/objects\/(\d+)$/.exec(new URL(request.url).pathname)?.[1];
+  const id = localPostId(new URL(request.url).pathname);
   if (!id) return null;
   const found = await localVideoObject(ctx, Number(id));
   if (!found) return null;

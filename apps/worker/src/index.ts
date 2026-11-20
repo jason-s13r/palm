@@ -2,7 +2,7 @@ import { handleLemmy } from "@palm/adapter-lemmy";
 import { handleMastodon, publishDueStatuses } from "@palm/adapter-mastodon";
 import { backfillRunnerJobs, handlePeerTube, queueAttachmentTranscodes, isPeerTubePath, runnerSocket, videoMaintenance } from "@palm/adapter-peertube";
 import { activitySink, handleFederation, processQueueMessage, serveStory, serveVideoObject, type QueueBody } from "@palm/federation";
-import { contextScope, defineConfig, enterContext, normaliseHost, resolveSurface, type DomainConfig, type PalmBindings, type PalmConfig, type RequestContext } from "@palm/core";
+import { contextScope, defineConfig, enterContext, LOCAL_POST_PATH, normaliseHost, resolveSurface, type DomainConfig, type PalmBindings, type PalmConfig, type RequestContext } from "@palm/core";
 import { claimFollowImports, deleteMedia, domainOf, mediaById, migrate, pendingDeletes, pendingMoves, prune, removeEndedStories } from "@palm/db";
 import { handleWeb } from "@palm/web";
 import { avatarResponse } from "./assets.ts";
@@ -227,7 +227,7 @@ export async function handle(
         // PeerTube's remote runners hear about new jobs over socket.io.
         if (url.pathname === "/socket.io/") return runnerSocket(request, ctx);
         // A local PeerTube video, fetched by another server: PeerTube's shape.
-        if (url.pathname.startsWith("/objects/")) {
+        if (LOCAL_POST_PATH.test(url.pathname)) {
           const video = await serveVideoObject(request, ctx);
           if (video) return video;
         }

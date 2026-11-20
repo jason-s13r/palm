@@ -1,4 +1,4 @@
-import { urls, type RequestContext } from "@palm/core";
+import { postApId, urls, type RequestContext } from "@palm/core";
 import type { Account, Community, Post, Video, VideoFile } from "@palm/db";
 import { CATEGORIES, label, LANGUAGES, LICENCES, PRIVACIES, STATES } from "./labels.ts";
 import { toShortUuid } from "./short-uuid.ts";
@@ -265,7 +265,7 @@ export function commentView(
   const deleted = comment.deleted === true;
   return {
     id: comment.id,
-    url: comment.apId ?? urls.object(ctx.domain.domain, String(comment.id)),
+    url: postApId(ctx.domain.domain, comment),
     text: deleted ? "" : (comment.contentSource ?? ""),
     threadId,
     inReplyToCommentId: comment.parentId === videoPostId ? null : comment.parentId,

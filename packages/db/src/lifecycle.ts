@@ -120,7 +120,10 @@ export async function exportAccount(db: D1Database, accountId: number): Promise<
     ids("SELECT domain AS id FROM user_domain_blocks WHERE account_id = ?"),
     db
       .prepare(
-        `SELECT COALESCE(p.ap_id, 'https://' || a.domain || '/objects/' || p.id) AS id, p.parent_id IS NOT NULL AS comment
+        `SELECT COALESCE(p.ap_id, 'https://' || a.domain || CASE
+           WHEN p.lemmy_path = 0 THEN '/objects/'
+           WHEN p.root_id IS NOT NULL OR p.parent_id IS NOT NULL OR p.in_reply_to IS NOT NULL THEN '/comment/'
+           ELSE '/post/' END || p.id) AS id, p.parent_id IS NOT NULL AS comment
          FROM bookmarks b JOIN posts p ON p.id = b.post_id JOIN accounts a ON a.id = p.account_id WHERE b.account_id = ?`,
       )
       .bind(accountId)

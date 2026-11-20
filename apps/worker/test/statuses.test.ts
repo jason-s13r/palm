@@ -35,7 +35,7 @@ describe("Posting", () => {
     expect(status.content).toBe(
       '<p>Hello &lt;world&gt;</p><p>see <a href="https://example.com/a" rel="nofollow noopener" target="_blank">example.com/a</a>.</p>',
     );
-    expect(status.uri).toBe(`https://palm.test/objects/${status.id}`);
+    expect(status.uri).toBe(`https://palm.test/post/${status.id}`);
     // The Mastodon iOS app matches the account's url host to the server it signed in to.
     expect(status.account).toMatchObject({ url: "https://mastodon.palm.test/@kit", uri: "https://palm.test/users/kit" });
     expect((status as unknown as { url: string }).url).toBe(`https://mastodon.palm.test/@kit/${status.id}`);

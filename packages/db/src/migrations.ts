@@ -1028,6 +1028,15 @@ ALTER TABLE videos ADD COLUMN chapters TEXT
 ALTER TABLE video_uploads ADD COLUMN pieces TEXT NOT NULL DEFAULT '[]'
 `,
   },
+  {
+    version: 36,
+    name: "lemmy post paths",
+    // Local posts from here on are minted as /post/{id} or /comment/{id}, as
+    // Lemmy's are; older ones keep /objects/{id}, which other servers hold.
+    sql: `
+ALTER TABLE posts ADD COLUMN lemmy_path INTEGER NOT NULL DEFAULT 0
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

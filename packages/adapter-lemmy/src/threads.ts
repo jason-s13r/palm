@@ -1,4 +1,4 @@
-import { markdownToHtml, urls, type RequestContext } from "@palm/core";
+import { markdownToHtml, postApId, urls, type RequestContext } from "@palm/core";
 import { lemmyClient } from "./client.ts";
 import {
   accountByHandle,
@@ -813,7 +813,7 @@ threadRoutes.post("/api/v3/comment", async (c) => {
     sensitive: false,
     visibility: "public",
     language: null,
-    inReplyTo: inReplyTo.apId ?? urls.object(parentAuthor?.domain ?? c.env.domain.domain, String(inReplyTo.id)),
+    inReplyTo: postApId(parentAuthor?.domain ?? c.env.domain.domain, inReplyTo),
     communityId: onPost.communityId,
     // A reply to a status stays a status reply, so Mastodon apps see it as one.
     ...(onPost.communityId !== null ? { rootId: onPost.id } : {}),

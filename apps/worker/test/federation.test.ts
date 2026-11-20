@@ -57,6 +57,30 @@ describe("federation", () => {
     expect(page.audience).toBe("https://palm.test/c/ccs");
   });
 
+  it("mints new posts with Lemmy's paths and keeps older ones at /objects/", async () => {
+    const author = await createAccount("minter", "pw");
+    await giveKeys(author);
+    const now = Math.floor(Date.now() / 1000);
+    const insert = (lemmyPath: number, inReplyTo: string | null) =>
+      db
+        .prepare("INSERT INTO posts (account_id, content_source, content_html, visibility, created_at, in_reply_to, lemmy_path) VALUES (?, 'x', '<p>x</p>', 'public', ?, ?, ?) RETURNING id")
+        .bind(author, now, inReplyTo, lemmyPath)
+        .first<{ id: number }>()
+        .then((r) => r!.id);
+    const older = await insert(0, null);
+    const post = await insert(1, null);
+    const reply = await insert(1, "https://elsewhere.test/notes/1");
+    const fetchId = async (path: string) => (await (await worker.fetch(`${DOMAIN}${path}`, AP)).json<{ id: string }>()).id;
+    expect(await fetchId(`/objects/${post}`)).toBe(`${DOMAIN}/post/${post}`);
+    expect(await fetchId(`/post/${post}`)).toBe(`${DOMAIN}/post/${post}`);
+    expect(await fetchId(`/comment/${reply}`)).toBe(`${DOMAIN}/comment/${reply}`);
+    // Other servers know older posts by /objects/{id}; Lemmy's paths still find them.
+    expect(await fetchId(`/objects/${older}`)).toBe(`${DOMAIN}/objects/${older}`);
+    expect(await fetchId(`/post/${older}`)).toBe(`${DOMAIN}/objects/${older}`);
+    // Browsers still get the web page.
+    expect((await worker.fetch(`${DOMAIN}/post/${post}`)).headers.get("content-type")).toContain("text/html");
+  });
+
   it("returns 404 for an unknown actor", async () => {
     expect((await worker.fetch(`${DOMAIN}/users/nobody`, AP)).status).toBe(404);
     expect((await worker.fetch(`${DOMAIN}/.well-known/webfinger?resource=acct:nobody@palm.test`)).status).toBe(404);

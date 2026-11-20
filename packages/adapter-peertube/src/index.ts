@@ -1,5 +1,5 @@
 import { hashPassword, needsRehash, verifyPassword } from "@palm/auth";
-import { markdownToHtml, urls, userAgentClient, type RequestContext } from "@palm/core";
+import { markdownToHtml, postApId, urls, userAgentClient, type RequestContext } from "@palm/core";
 import {
   accountByHandle,
   accountById,
@@ -1036,7 +1036,7 @@ async function addComment(c: C, videoId: string, parentId: number | null) {
     sensitive: false,
     visibility: "public",
     language: null,
-    inReplyTo: inReplyTo.apId ?? urls.object(parentAuthor?.domain ?? c.env.domain.domain, String(inReplyTo.id)),
+    inReplyTo: postApId(parentAuthor?.domain ?? c.env.domain.domain, inReplyTo),
     communityId: found.post.communityId,
     // In a channel (a community), a comment is a Lemmy comment on the video's thread.
     ...(found.post.communityId !== null ? { rootId: found.post.id } : {}),

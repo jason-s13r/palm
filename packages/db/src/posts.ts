@@ -5,7 +5,7 @@ const now = () => Math.floor(Date.now() / 1000);
 
 export type Visibility = "public" | "unlisted" | "private" | "direct";
 
-/** A post written on this server. Its ActivityPub ID is urls.object(domain, String(id)). */
+/** A post. A local one's ActivityPub ID comes from postApId (@palm/core). */
 export interface Post {
   id: number;
   accountId: number;
@@ -30,8 +30,10 @@ export interface Post {
   path: string | null;
   createdAt: number;
   updatedAt: number | null;
-  /** Set for remote posts: their ActivityPub ID. A local post's is urls.object. */
+  /** Set for remote posts: their ActivityPub ID. A local post's comes from postApId. */
   apId: string | null;
+  /** A local post minted as /post/{id} or /comment/{id}; older ones are /objects/{id}. */
+  lemmyPath: boolean;
   /** A remote post's web page. */
   url: string | null;
   /** A remote post's attachments, as they were sent. Local posts use the media table. */
@@ -104,6 +106,7 @@ interface PostRow {
   client?: string | null;
   client_app?: string | null;
   client_device?: string | null;
+  lemmy_path?: number | null;
 }
 
 export const toPost = (r: PostRow): Post => ({
@@ -125,6 +128,7 @@ export const toPost = (r: PostRow): Post => ({
   createdAt: r.created_at,
   updatedAt: r.updated_at ?? null,
   apId: r.ap_id ?? null,
+  lemmyPath: r.lemmy_path === 1,
   url: r.url ?? null,
   attachments: r.attachments ? (JSON.parse(r.attachments) as RemoteAttachment[]) : [],
   reblogOf: r.reblog_of ?? null,
@@ -145,7 +149,7 @@ export type { PostRow };
 /** What a new post needs; the thread fields default to a plain status. */
 export type NewPost = Omit<
   Post,
-  "id" | "createdAt" | "updatedAt" | "communityId" | "title" | "linkUrl" | "rootId" | "parentId" | "path" | "apId" | "url" | "attachments" | "reblogOf" | "locked" | "featuredCommunity" | "featuredLocal" | "quoteOf" | "quotePolicy" | "quoteState" | "quoteAuthorization" | "client" | "clientApp" | "clientDevice"
+  "id" | "createdAt" | "updatedAt" | "communityId" | "title" | "linkUrl" | "rootId" | "parentId" | "path" | "apId" | "url" | "attachments" | "reblogOf" | "locked" | "featuredCommunity" | "featuredLocal" | "quoteOf" | "quotePolicy" | "quoteState" | "quoteAuthorization" | "client" | "clientApp" | "clientDevice" | "lemmyPath"
 > &
   Partial<Pick<Post, "communityId" | "title" | "linkUrl" | "rootId" | "parentId" | "apId" | "url" | "createdAt" | "updatedAt" | "attachments" | "client" | "clientApp" | "clientDevice">>;
 
@@ -166,8 +170,8 @@ export async function createPost(db: D1Database, post: NewPost): Promise<Post> {
   const row = await db
     .prepare(
       `INSERT INTO posts (account_id, content_source, content_html, spoiler_text, sensitive, visibility, language, in_reply_to,
-                          community_id, title, link_url, root_id, parent_id, created_at, ap_id, url, updated_at, attachments, client, client_app, client_device)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+                          community_id, title, link_url, root_id, parent_id, created_at, ap_id, url, updated_at, attachments, client, client_app, client_device, lemmy_path)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .bind(
       post.accountId,
@@ -191,6 +195,8 @@ export async function createPost(db: D1Database, post: NewPost): Promise<Post> {
       post.client ?? null,
       post.clientApp?.slice(0, 100) ?? null,
       post.clientDevice?.slice(0, 40) ?? null,
+      // Local posts are minted with Lemmy's paths.
+      post.apId ? 0 : 1,
     )
     .first<PostRow>();
   if (!row) throw new Error("Post was not created.");
@@ -230,14 +236,21 @@ export async function postByApId(db: D1Database, apId: string): Promise<Post | n
   return row ? toPost(row) : null;
 }
 
-/** Any post, local or remote, by its ActivityPub ID (local ones by their /objects/ URL). */
+/**
+ * Any post, local or remote, by its ActivityPub ID. A local post answers to
+ * /objects/{id}, /post/{id} and /comment/{id}, whichever it was minted with.
+ */
 export async function postByUri(db: D1Database, uri: string, localDomains: string[]): Promise<Post | null> {
-  for (const domain of localDomains) {
-    const prefix = `https://${domain}/objects/`;
-    if (uri.startsWith(prefix)) {
-      const id = uri.slice(prefix.length);
-      return /^\d+$/.test(id) ? postById(db, Number(id)) : null;
-    }
+  let url: URL;
+  try {
+    url = new URL(uri);
+  } catch {
+    return null;
+  }
+  if (url.protocol === "https:" && localDomains.includes(url.host.toLowerCase())) {
+    // As LOCAL_POST_PATH in @palm/core.
+    const match = /^\/(?:objects|post|comment)\/(\d+)$/.exec(url.pathname);
+    return match && !url.search ? postById(db, Number(match[1])) : null;
   }
   return postByApId(db, uri);
 }

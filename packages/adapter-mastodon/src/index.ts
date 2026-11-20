@@ -1,5 +1,5 @@
 import { base64url, hashPassword, needsRehash, utf8, verifyPassword } from "@palm/auth";
-import { escapeHtml, urls, type RequestContext } from "@palm/core";
+import { escapeHtml, postApId, urls, type RequestContext } from "@palm/core";
 import {
   takeDueStatuses,
   accountById,
@@ -16,6 +16,7 @@ import {
   setPasswordHash,
   tokenGrant,
   openInvite,
+  postById,
   redeemInvite,
   type Account,
   type OAuthApp,
@@ -105,7 +106,10 @@ app.get("/", (c) =>
 // Profile and post pages (the `url` of accounts and statuses). palm has no web
 // UI, so they lead to the ActivityPub IDs, which send browsers on as configured.
 app.get("/:handle{@[^/]+}", (c) => c.redirect(urls.user(c.env.domain.domain, c.req.param("handle").slice(1)), 302));
-app.get("/:handle{@[^/]+}/:id{[0-9]+}", (c) => c.redirect(urls.object(c.env.domain.domain, c.req.param("id")), 302));
+app.get("/:handle{@[^/]+}/:id{[0-9]+}", async (c) => {
+  const post = await postById(c.env.bindings.DB, Number(c.req.param("id")));
+  return c.redirect(post ? postApId(c.env.domain.domain, post) : urls.object(c.env.domain.domain, c.req.param("id")), 302);
+});
 
 // --- discovery -------------------------------------------------------------
 

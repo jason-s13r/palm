@@ -1,4 +1,4 @@
-import { markdownToHtml, urls, type RequestContext } from "@palm/core";
+import { markdownToHtml, postApId, urls, type RequestContext } from "@palm/core";
 import { lemmyClient } from "./client.ts";
 import {
   accountById,
@@ -56,7 +56,7 @@ async function views(c: C, me: Account, messages: DirectMessage[]): Promise<Priv
           read: m.read,
           published: iso(m.post.createdAt),
           ...(m.post.updatedAt ? { updated: iso(m.post.updatedAt) } : {}),
-          ap_id: m.post.apId ?? urls.object(creator.domain, String(m.post.id)),
+          ap_id: postApId(creator.domain, m.post),
           local: m.post.apId === null,
         },
         creator: person(c.env, creator),

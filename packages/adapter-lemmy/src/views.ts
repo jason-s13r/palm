@@ -1,5 +1,5 @@
 import type { RequestContext } from "@palm/core";
-import { htmlToText, urls } from "@palm/core";
+import { htmlToText, postApId, urls, type PostIdentity } from "@palm/core";
 import type { Account, Community as StoredCommunity, CommunityStats, ThreadComment, ThreadPost } from "@palm/db";
 import type {
   Comment,
@@ -278,7 +278,7 @@ export interface ThreadContext {
 }
 
 /** A post's or comment's ActivityPub ID. */
-const apIdOf = (p: { apId: string | null; id: number }, author: Account) => p.apId ?? urls.object(author.domain, String(p.id));
+const apIdOf = (p: PostIdentity, author: Account) => postApId(author.domain, p);
 
 export function post(ctx: RequestContext, p: ThreadPost, creator?: Account): Post {
   return {
@@ -298,7 +298,7 @@ export function post(ctx: RequestContext, p: ThreadPost, creator?: Account): Pos
     ...(p.updatedAt ? { updated: iso(p.updatedAt) } : {}),
     deleted: false,
     nsfw: p.sensitive,
-    ap_id: creator ? apIdOf(p, creator) : (p.apId ?? urls.object(ctx.domain.domain, String(p.id))),
+    ap_id: creator ? apIdOf(p, creator) : postApId(ctx.domain.domain, p),
     local: p.apId === null,
     language_id: 0,
     featured_community: p.featuredCommunity,
@@ -344,7 +344,7 @@ export function comment(ctx: RequestContext, c: ThreadComment, creator?: Account
     published: iso(c.createdAt),
     ...(c.updatedAt ? { updated: iso(c.updatedAt) } : {}),
     deleted: c.deleted,
-    ap_id: creator ? apIdOf(c, creator) : (c.apId ?? urls.object(ctx.domain.domain, String(c.id))),
+    ap_id: creator ? apIdOf(c, creator) : postApId(ctx.domain.domain, c),
     local: c.apId === null,
     path: c.path ?? `0.${c.id}`,
     distinguished: false,

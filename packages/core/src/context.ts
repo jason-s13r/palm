@@ -175,6 +175,10 @@ export type FederationTask =
 export const urls = {
   user: (domain: string, username: string) => `https://${domain}/users/${encodeURIComponent(username.toLowerCase())}`,
   object: (domain: string, id: string) => `https://${domain}/objects/${encodeURIComponent(id)}`,
+  /** A local post, as Lemmy names them (newer posts; older ones keep /objects/{id}). */
+  post: (domain: string, id: number) => `https://${domain}/post/${id}`,
+  /** A local reply, as Lemmy names comments (newer replies; older ones keep /objects/{id}). */
+  comment: (domain: string, id: number) => `https://${domain}/comment/${id}`,
   /** A hashtag's page, as Mastodon names it. */
   tag: (domain: string, tag: string) => `https://${domain}/tags/${encodeURIComponent(tag)}`,
   /** An uploaded file, at the path Lemmy's image host (pict-rs) uses. */
@@ -188,6 +192,39 @@ export const urls = {
   inbox: (domain: string) => `https://${domain}/inbox`,
   userInbox: (domain: string, username: string) => `${urls.user(domain, username)}/inbox`,
 };
+
+/** What a post's ActivityPub ID is made from. */
+export interface PostIdentity {
+  id: number;
+  /** A remote post's own ID; null for local posts. */
+  apId: string | null;
+  /** A local post minted with Lemmy's paths (/post/{id}, /comment/{id}) rather than /objects/{id}. */
+  lemmyPath?: boolean;
+  rootId?: number | null;
+  parentId?: number | null;
+  inReplyTo?: string | null;
+}
+
+/**
+ * A post's ActivityPub ID: a remote post's own, else the path it was minted
+ * with. Local posts made before Lemmy's paths keep /objects/{id}, since other
+ * servers know them by it; newer ones are /post/{id}, or /comment/{id} for a
+ * reply, so Lemmy apps (Voyager's links, for one) read them as Lemmy's.
+ */
+export function postApId(domain: string, post: PostIdentity): string {
+  if (post.apId) return post.apId;
+  if (!post.lemmyPath) return urls.object(domain, String(post.id));
+  const reply = post.rootId != null || post.parentId != null || post.inReplyTo != null;
+  return reply ? urls.comment(domain, post.id) : urls.post(domain, post.id);
+}
+
+/** The local post an ID or alias names: /objects/{id}, /post/{id} or /comment/{id} all resolve. */
+export const LOCAL_POST_PATH = /^\/(?:objects|post|comment)\/(\d+)$/;
+
+export function localPostId(pathname: string): number | null {
+  const match = LOCAL_POST_PATH.exec(pathname);
+  return match ? Number(match[1]) : null;
+}
 
 /**
  * The Lemmy version palm answers as. Lemmy apps check it (Voyager needs

@@ -1,5 +1,5 @@
 import { ChatMessage, Collection, Create, Document, Question, Hashtag, InteractionPolicy, InteractionRule, Link, Mention, Note, Page, PUBLIC_COLLECTION, Source, Tombstone, type Object as APObject } from "@fedify/fedify/vocab";
-import { urls } from "@palm/core";
+import { postApId, urls, type PostIdentity } from "@palm/core";
 import {
   pollsFor,
   type Poll,
@@ -28,7 +28,7 @@ export const followersUri = (account: Pick<Account, "apId" | "domain" | "usernam
 export const communityUri = (community: Pick<Community, "apId" | "domain" | "name">) =>
   new URL(community.apId ?? urls.community(community.domain, community.name));
 
-/** A post's ActivityPub ID: its own if remote, else /objects/{id} on its author's domain. */
+/** A post's ActivityPub ID: its own if remote, else as it was minted on its author's domain (postApId). */
 /** An approval for another post to quote one of this account's. */
 export const quoteAuthorizationUri = (account: Pick<Account, "apId" | "domain" | "username">, id: number) => new URL(`${actorUri(account).href}/quotes/${id}`);
 
@@ -46,8 +46,7 @@ export function quotePolicyFor(post: Post, author: Account): InteractionPolicy {
 /** The ID palm gives the QuoteRequest it sends for a post that quotes another server's. */
 export const quoteRequestId = (postId: URL) => new URL("#quote-request", postId);
 
-export const postUri = (post: Pick<Post, "apId" | "id">, author: Pick<Account, "domain">) =>
-  new URL(post.apId ?? urls.object(author.domain, String(post.id)));
+export const postUri = (post: PostIdentity, author: Pick<Account, "domain">) => new URL(postApId(author.domain, post));
 
 const instant = (seconds: number) => Temporal.Instant.fromEpochMilliseconds(seconds * 1000);
 
