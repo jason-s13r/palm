@@ -366,6 +366,11 @@ describe("PeerTube: hosting", () => {
     const group = await (await worker.fetch(`${SITE}/c/pt_maker_channel`, { headers: AP })).json<Record<string, unknown>>();
     expect(group).toMatchObject({ type: "Group", attributedTo: "https://palm.test/users/pt_maker" });
 
+    // Its page says where it came from.
+    const page = await (await worker.fetch(`${SITE}/@pt_maker/${video.id}`, { headers: { accept: "text/html" } })).text();
+    expect(page).toContain("on PeerTube");
+    expect(page).not.toContain("on Lemmy");
+
     const mine = await get<{ total: number }>("/api/v1/users/me/videos");
     expect(mine.total).toBe(1);
 

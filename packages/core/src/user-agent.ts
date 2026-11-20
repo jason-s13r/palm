@@ -13,11 +13,17 @@ export interface UserAgentClient {
 /** Leading product tokens that name a browser engine or HTTP library, not an app. */
 const NOT_APPS = /^(mozilla|dart|okhttp|cfnetwork|darwin|dalvik|curl|wget|python|node|undici|axios|go-http-client|java|ktor|alamofire|reactnative|expo)$/i;
 
+/** Apps whose user agent names them in a way people wouldn't. */
+const APP_NAMES: Record<string, string> = { "peertube-app-store": "PeerTube", "peertube-app": "PeerTube" };
+
+/** An app's name as people know it, from the name its user agent gives (kept as recorded). */
+export const appName = (name: string) => APP_NAMES[name.toLowerCase()] ?? name;
+
 export function userAgentClient(userAgent: string | null | undefined): UserAgentClient {
   const ua = (userAgent ?? "").slice(0, 500);
   if (!ua) return { app: null, device: null };
   const product = /^([A-Za-z][\w .-]{0,40}?)\/\d/.exec(ua)?.[1]?.trim() ?? null;
-  const app = product && !NOT_APPS.test(product) ? product : null;
+  const app = product && !NOT_APPS.test(product) ? (APP_NAMES[product.toLowerCase()] ?? product) : null;
   return { app, device: deviceOf(ua) };
 }
 

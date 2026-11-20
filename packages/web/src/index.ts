@@ -1,4 +1,4 @@
-import { htmlToText, urls, type RequestContext } from "@palm/core";
+import { appName, htmlToText, urls, type RequestContext } from "@palm/core";
 import {
   accountByHandle,
   accountsByIds,
@@ -106,7 +106,8 @@ type Posted = Pick<Post, "client" | "clientApp" | "clientDevice" | "communityId"
 /**
  * Where a post was written, as far as the instance's `postClients` setting
  * shows: " · on Pixelfed · via Ivory for iPhone". "On" is the kind of post:
- * anything in a community is Lemmy's; a local status is Pixelfed's when a
+ * a video or comment from a PeerTube app is PeerTube's; anything else in a
+ * community is Lemmy's; a local status is Pixelfed's when a
  * Pixelfed app wrote it, Mastodon's when another app did. Another server's status says
  * nothing, since palm doesn't know what that server runs.
  */
@@ -114,13 +115,19 @@ function postedOf(c: C, p: Posted): Html | string {
   const level = c.env.config.postClients ?? "app";
   if (level === "off") return "";
   // A local status from before palm kept its client says nothing: it could be either.
-  const on = p.communityId !== null ? "Lemmy" : p.apId !== null || !p.client ? null : p.client === "pixelfed" ? "Pixelfed" : "Mastodon";
+  const on =
+    p.apId !== null ? (p.communityId !== null ? "Lemmy" : null)
+    : p.client === "peertube" ? "PeerTube"
+    : p.communityId !== null ? "Lemmy"
+    : !p.client ? null
+    : p.client === "pixelfed" ? "Pixelfed"
+    : "Mastodon";
   if (!on) return "";
   const parts: (Html | string)[] = [html` · <span class="via">on ${on}</span>`];
   if (level === "app" || level === "device") {
     const kind = p.client ? CLIENT_NAMES[p.client] : null;
     // A nameless app is named by its kind when that differs from where the post is: "via a Mastodon app".
-    let app = p.clientApp ?? (kind && kind !== on ? `a ${kind} app` : null);
+    let app = (p.clientApp ? appName(p.clientApp) : null) ?? (kind && kind !== on ? `a ${kind} app` : null);
     const device = level === "device" ? p.clientDevice : null;
     // "on Pixelfed · via Pixelfed" says nothing new, unless a device follows.
     if (app && app.toLowerCase() === on.toLowerCase() && !device) app = null;

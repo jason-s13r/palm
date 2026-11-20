@@ -97,7 +97,7 @@ ${meta.noindex ? html`<meta name="robots" content="noindex">` : ""}
 <main>
 ${body}
 </main>
-<footer>Read and reply from any Lemmy, Mastodon or Pixelfed app. Powered by <a href="https://github.com/jason-s13r/palm">palm</a> ${site.version}.</footer>
+<footer>Read and reply from any Lemmy, Mastodon, Pixelfed or PeerTube app. Powered by <a href="https://github.com/jason-s13r/palm">palm</a> ${site.version}.</footer>
 </body>
 </html>`;
   return new Response(doc.value, {

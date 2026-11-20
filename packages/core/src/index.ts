@@ -7,5 +7,5 @@ export type { ActivitySink, FederationTask, MediaTransformsBinding, PalmBindings
 export { escapeHtml, hashtagsIn, htmlToText, markdownToHtml, mentionsIn, previewLink, sanitizeHtml, textToHtml } from "./text.ts";
 export { contextScope, currentContext, enterContext } from "./current.ts";
 export { uploadCacheKey } from "./cache-keys.ts";
-export { userAgentClient } from "./user-agent.ts";
+export { appName, userAgentClient } from "./user-agent.ts";
 export type { UserAgentClient } from "./user-agent.ts";
