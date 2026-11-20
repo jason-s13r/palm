@@ -1,5 +1,18 @@
 # Changelog
 
+## db@0.6.0 (2026-11-20)
+
+### Features
+
+- say what kind of post it is, and the app and device, per postClients
+  Post pages read "on Pixelfed · via Ivory for iPhone"; the new postClients
+  setting picks off, service, app (default) or device.
+
+- show which app a local post came from
+  Web pages say "via Ivory (Mastodon)", "via Pixelfed" or "via Lemmy"; Mastodon
+  apps get the status's application.
+
+
 ## db@0.5.1 (2026-11-20)
 
 ### Fixes

@@ -1,5 +1,14 @@
 # Changelog
 
+## core@1.3.0 (2026-11-20)
+
+### Features
+
+- say what kind of post it is, and the app and device, per postClients
+  Post pages read "on Pixelfed · via Ivory for iPhone"; the new postClients
+  setting picks off, service, app (default) or device.
+
+
 ## core@1.2.0 (2026-11-19)
 
 ### Features

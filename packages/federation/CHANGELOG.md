@@ -1,5 +1,19 @@
 # Changelog
 
+## federation@0.5.2 (2026-11-20)
+
+### Fixes
+
+- show pictures as image posts in Lemmy apps
+  Statuses' uploads and Lemmy's untyped Image attachments become the post's
+  link; statuses join the Lemmy profile; orphaned community comments are dropped.
+
+### Dependencies
+
+- core: 1.2.0 -> 1.3.0
+- db: 0.5.1 -> 0.6.0
+
+
 ## federation@0.5.1 (2026-11-20)
 
 ### Fixes

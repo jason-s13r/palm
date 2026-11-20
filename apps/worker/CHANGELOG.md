@@ -1,5 +1,35 @@
 # Changelog
 
+## worker@0.9.0 (2026-11-20)
+
+### Features
+
+- say what kind of post it is, and the app and device, per postClients
+  Post pages read "on Pixelfed · via Ivory for iPhone"; the new postClients
+  setting picks off, service, app (default) or device.
+
+- show which app a local post came from
+  Web pages say "via Ivory (Mastodon)", "via Pixelfed" or "via Lemmy"; Mastodon
+  apps get the status's application.
+
+### Fixes
+
+- keep "Display Name @handle" on posts, drop the handle's repeat when there's no display name
+  Lists and comments name people by handle (name@server for other servers),
+  with the display name on hover.
+
+- name people in bylines as Lemmy does, name@server for other servers
+
+### Dependencies
+
+- core: 1.2.0 -> 1.3.0
+- db: 0.5.1 -> 0.6.0
+- adapter-lemmy: 0.5.0 -> 0.6.0
+- adapter-mastodon: 0.6.2 -> 0.7.0
+- federation: 0.5.1 -> 0.5.2
+- web: 0.1.3 -> 0.2.0
+
+
 ## worker@0.8.3 (2026-11-20)
 
 ### Fixes
