@@ -1,5 +1,22 @@
 # Changelog
 
+## worker@0.14.0 (2026-11-20)
+
+### Features
+
+- mint new posts as /post/{id} and /comment/{id}
+  Older posts keep /objects/{id}; all three paths resolve.
+
+### Dependencies
+
+- core: 1.6.0 -> 1.7.0
+- db: 0.10.0 -> 0.11.0
+- adapter-lemmy: 0.7.0 -> 0.8.0
+- adapter-mastodon: 0.9.0 -> 0.10.0
+- federation: 0.8.2 -> 0.9.0
+- web: 0.3.1 -> 0.4.0
+
+
 ## worker@0.13.2 (2026-11-20)
 
 ### Fixes

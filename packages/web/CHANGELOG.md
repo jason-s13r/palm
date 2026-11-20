@@ -1,5 +1,18 @@
 # Changelog
 
+## web@0.4.0 (2026-11-20)
+
+### Features
+
+- mint new posts as /post/{id} and /comment/{id}
+  Older posts keep /objects/{id}; all three paths resolve.
+
+### Dependencies
+
+- core: 1.6.0 -> 1.7.0
+- db: 0.10.0 -> 0.11.0
+
+
 ## web@0.3.1 (2026-11-20)
 
 ### Fixes

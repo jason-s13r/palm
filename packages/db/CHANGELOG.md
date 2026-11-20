@@ -1,5 +1,13 @@
 # Changelog
 
+## db@0.11.0 (2026-11-20)
+
+### Features
+
+- mint new posts as /post/{id} and /comment/{id}
+  Older posts keep /objects/{id}; all three paths resolve.
+
+
 ## db@0.10.0 (2026-11-20)
 
 ### Features

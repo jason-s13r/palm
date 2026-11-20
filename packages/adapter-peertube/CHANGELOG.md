@@ -1,5 +1,13 @@
 # Changelog
 
+## adapter-peertube@0.4.0 (2026-11-20)
+
+### Features
+
+- mint new posts as /post/{id} and /comment/{id}
+  Older posts keep /objects/{id}; all three paths resolve.
+
+
 ## adapter-peertube@0.3.0 (2026-11-20)
 
 ### Features
