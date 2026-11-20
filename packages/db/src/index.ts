@@ -268,3 +268,24 @@ export {
   setQuoteState,
 } from "./quotes.ts";
 export type { QuoteAuthorizationRow, QuotePolicy, QuoteState } from "./quotes.ts";
+export {
+  createStory,
+  endStory,
+  followerIdsMatching,
+  followsAccount,
+  isLive,
+  knownSoftware,
+  liveStoriesOf,
+  liveStoryCount,
+  MAX_STORIES,
+  publishStory,
+  recordStoryView,
+  rememberSoftware,
+  removeEndedStories,
+  storiesFor,
+  storyByApId,
+  storyById,
+  STORY_SECONDS,
+  storyViewers,
+} from "./stories.ts";
+export type { NewStory, Story } from "./stories.ts";

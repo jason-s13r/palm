@@ -131,6 +131,64 @@ describe("federation", () => {
     expect((await score())?.s).toBe(0);
   });
 
+  it("takes Pixelfed's story views and replies from followers on other servers", async () => {
+    const authorId = await createAccount("storyteller", "pw");
+    await giveKeys(authorId);
+    const now = Math.floor(Date.now() / 1000);
+    const story = await db
+      .prepare("INSERT INTO stories (account_id, content_type, token, can_reply, created_at, expires_at) VALUES (?, 'image/png', 'tok', 1, ?, ?) RETURNING id")
+      .bind(authorId, now, now + 3600)
+      .first<{ id: number }>();
+    const storyUrl = `${DOMAIN}/stories/storyteller/${story!.id}`;
+
+    const pair = (await crypto.subtle.generateKey(
+      { name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
+      true,
+      ["sign", "verify"],
+    )) as CryptoKeyPair;
+    const spki = new Uint8Array((await crypto.subtle.exportKey("spki", pair.publicKey)) as ArrayBuffer);
+    const pem = `-----BEGIN PUBLIC KEY-----\n${btoa(String.fromCharCode(...spki))}\n-----END PUBLIC KEY-----`;
+    const fan = "https://pixel.test/users/fan";
+    await db.prepare("INSERT INTO remote_keys (key_id, owner, pem, fetched_at) VALUES (?, ?, ?, ?)").bind(`${fan}#main-key`, fan, pem, Date.now()).run();
+    const fanId = (await db
+      .prepare("INSERT INTO accounts (domain, username, created_at, ap_id, inbox, fetched_at) VALUES ('pixel.test', 'fan', ?, ?, ?, ?) RETURNING id")
+      .bind(now, fan, `${fan}/inbox`, now)
+      .first<{ id: number }>())!.id;
+
+    const deliver = async (activity: object) => {
+      const body = JSON.stringify(activity);
+      const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body)));
+      const digest = `SHA-256=${btoa(String.fromCharCode(...hash))}`;
+      const date = new Date().toUTCString();
+      const text = `(request-target): post /inbox\nhost: palm.test\ndate: ${date}\ndigest: ${digest}`;
+      const sig = new Uint8Array(await crypto.subtle.sign("RSASSA-PKCS1-v1_5", pair.privateKey, new TextEncoder().encode(text)));
+      const signature = `keyId="${fan}#main-key",algorithm="rsa-sha256",headers="(request-target) host date digest",signature="${btoa(String.fromCharCode(...sig))}"`;
+      return worker.fetch(`${DOMAIN}/inbox`, { method: "POST", headers: { "content-type": "application/activity+json", host: "palm.test", date, digest, signature }, body });
+    };
+    const view = { "@context": "https://www.w3.org/ns/activitystreams", id: `${fan}#stories/1/view`, type: "View", actor: fan, object: { type: "Story", object: storyUrl } };
+    const views = () => db.prepare("SELECT COUNT(*) AS n FROM story_views WHERE story_id = ?").bind(story!.id).first<{ n: number }>();
+
+    // Not a follower yet: ignored.
+    expect((await deliver(view)).status).toBe(202);
+    expect((await views())?.n).toBe(0);
+    await db.prepare("INSERT INTO followers (account_id, actor_id, inbox, created_at) VALUES (?, ?, ?, ?)").bind(authorId, fan, `${fan}/inbox`, now).run();
+    expect((await deliver(view)).status).toBe(202);
+    expect((await views())?.n).toBe(1);
+
+    const reply = { id: "https://pixel.test/p/fan/99", type: "Story:Reply", actor: fan, to: `${DOMAIN}/users/storyteller`, inReplyTo: storyUrl, content: "nice <b>one</b>" };
+    expect((await deliver(reply)).status).toBe(202);
+    const dm = await db.prepare("SELECT content_html, visibility FROM posts WHERE ap_id = ?").bind(reply.id).first<{ content_html: string; visibility: string }>();
+    expect(dm).toMatchObject({ visibility: "direct" });
+    expect(dm!.content_html).toContain("Replied to your story: nice one");
+    const told = await db.prepare("SELECT kind FROM notifications WHERE account_id = ? AND from_account_id = ?").bind(authorId, fanId).first<{ kind: string }>();
+    expect(told?.kind).toBe("mention");
+
+    // A story from someone nobody here follows isn't fetched or kept.
+    const add = { id: "https://pixel.test/stories/fan/5/activity", type: "Add", actor: fan, object: { id: "https://pixel.test/stories/fan/5", type: "Story", object: "bear:?t=abcdefghijkl&u=https://pixel.test/stories/fan/5" } };
+    expect((await deliver(add)).status).toBe(202);
+    expect(await db.prepare("SELECT 1 FROM stories WHERE ap_id = ?").bind(add.object.id).first()).toBeNull();
+  });
+
   it("serves both client APIs on the bare domain, and keeps nodeinfo as Lemmy", async () => {
     expect((await worker.fetch(`${DOMAIN}/api/v3/site`)).status).toBe(200);
     const instance = await (await worker.fetch(`${DOMAIN}/api/v2/instance`)).json<{ domain: string }>();

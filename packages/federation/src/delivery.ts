@@ -48,6 +48,7 @@ import { cardForPost } from "./cards.ts";
 import { communitySenderKeys, contextsFor, federationsFor, localDomains, logProblem, personKeys, recipient, recipientOf, send } from "./shared.ts";
 import { personFor } from "./people.ts";
 import { importFollow } from "./imports.ts";
+import { isStoryTask, runStoryTask } from "./stories.ts";
 
 const isLocal = (a: { apId: string | null }) => a.apId === null;
 
@@ -141,6 +142,7 @@ const voteId = (voter: Account, postId: number, score: number) =>
 
 /** Runs one federation task. */
 export async function runTask(ctx: RequestContext, task: FederationTask): Promise<void> {
+  if (isStoryTask(task)) return runStoryTask(ctx, task);
   const db = ctx.bindings.DB;
   const { people } = await contextsFor(ctx);
   switch (task.kind) {

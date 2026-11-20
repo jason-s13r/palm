@@ -99,7 +99,15 @@ export type FederationTask =
   /** Fetches a remote community's recent posts after the first local subscription. */
   | { kind: "backfill"; communityId: number }
   /** One post of a community's backfill, in a job of its own. */
-  | { kind: "backfill_post"; communityId: number; url: string };
+  | { kind: "backfill_post"; communityId: number; url: string }
+  /** A local story, offered to followers on servers that show stories (Pixelfed's Add). */
+  | { kind: "story_published"; storyId: number }
+  /** A local story taken down before its day was up. */
+  | { kind: "story_deleted"; storyId: number }
+  /** Someone here saw another server's story: its author is told (a View). */
+  | { kind: "story_viewed"; storyId: number; accountId: number }
+  /** Someone here answered another server's story (Story:Reply) or reacted to it (Story:Reaction). */
+  | { kind: "story_replied"; storyId: number; accountId: number; text: string; reaction: boolean };
 
 /**
  * ActivityPub IDs. These are permanent once another server has seen them, so
@@ -114,6 +122,8 @@ export const urls = {
   media: (domain: string, file: string) => `https://${domain}/pictrs/image/${encodeURIComponent(file)}`,
   /** A community, as Lemmy names them: `!name@domain` lives at /c/name. */
   community: (domain: string, name: string) => `https://${domain}/c/${encodeURIComponent(name.toLowerCase())}`,
+  /** A story, at the path Pixelfed uses: `/stories/{name}/{id}`. */
+  story: (domain: string, username: string, id: number) => `https://${domain}/stories/${encodeURIComponent(username.toLowerCase())}/${id}`,
   /** Another server's picture or video, fetched and cached through palm. */
   proxy: (domain: string, url: string) => `https://${domain}/proxy/media?url=${encodeURIComponent(url)}`,
   inbox: (domain: string) => `https://${domain}/inbox`,

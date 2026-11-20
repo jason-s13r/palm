@@ -853,6 +853,50 @@ ALTER TABLE posts ADD COLUMN client_app TEXT
 ALTER TABLE posts ADD COLUMN client_device TEXT
 `,
   },
+  {
+    version: 31,
+    name: "stories",
+    // Pixelfed's stories: a picture or clip shown to followers for a day.
+    // Local stories hold an upload (media_id) and the token other servers
+    // fetch them with; other servers' hold their media's URL.
+    sql: `
+CREATE TABLE IF NOT EXISTS stories (
+  id INTEGER PRIMARY KEY,
+  account_id INTEGER NOT NULL REFERENCES accounts (id),
+  ap_id TEXT UNIQUE,
+  media_id TEXT,
+  media_url TEXT,
+  content_type TEXT NOT NULL,
+  duration INTEGER NOT NULL DEFAULT 7,
+  overlays TEXT,
+  can_reply INTEGER NOT NULL DEFAULT 0,
+  can_react INTEGER NOT NULL DEFAULT 0,
+  token TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  view_count INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL
+)
+;
+CREATE INDEX IF NOT EXISTS stories_account ON stories (account_id, expires_at)
+;
+CREATE INDEX IF NOT EXISTS stories_expires ON stories (expires_at)
+;
+CREATE TABLE IF NOT EXISTS story_views (
+  story_id INTEGER NOT NULL REFERENCES stories (id),
+  account_id INTEGER NOT NULL REFERENCES accounts (id),
+  viewed_at INTEGER NOT NULL,
+  PRIMARY KEY (story_id, account_id)
+) WITHOUT ROWID
+;
+CREATE TABLE IF NOT EXISTS server_software (
+  domain TEXT PRIMARY KEY,
+  software TEXT,
+  version TEXT,
+  checked_at INTEGER NOT NULL
+) WITHOUT ROWID
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

@@ -158,6 +158,94 @@ describe("Pixelfed apps", () => {
     expect(home.status).toBe(200);
   });
 
+  it("posts stories, shows them to followers, and counts who saw them", async () => {
+    const amyId = await createAccount("pf_story_amy", "pw-pw-pw");
+    const benId = await createAccount("pf_story_ben", "pw-pw-pw");
+    await giveKeys(amyId);
+    await giveKeys(benId);
+    const amy = await signIn("pf_story_amy", "pw-pw-pw");
+    const ben = await signIn("pf_story_ben", "pw-pw-pw");
+    await ben.call("POST", `api/v1/accounts/${amyId}/follow`);
+
+    // The app's composer: one picture, its overlays as form fields.
+    const png = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="), (ch) => ch.charCodeAt(0));
+    const form = new FormData();
+    form.set("image", new File([png], "story.png", { type: "image/png" }));
+    form.set("overlays[0][type]", "text");
+    form.set("overlays[0][content]", "hello");
+    form.set("overlays[0][x]", "12.5");
+    form.set("overlays[1][type]", "url");
+    form.set("overlays[1][content]", "http://insecure.example");
+    const refused = await worker.fetch(`${SITE}/api/v1.2/stories/publish`, { method: "POST", headers: amy.auth, body: form });
+    expect(refused.status).toBe(422);
+    form.delete("overlays[1][type]");
+    form.delete("overlays[1][content]");
+    const published = await worker.fetch(`${SITE}/api/v1.2/stories/publish`, { method: "POST", headers: amy.auth, body: form });
+    expect(published.status).toBe(200);
+
+    type Node = { id: string; is_author: boolean; hasViewed: boolean; stories: { id: string; url: string; overlays: unknown[]; viewed: boolean; view_count?: number }[] };
+    const mine = (await amy.get<{ nodes: Node[] }>("api/v1.2/stories/carousel")).nodes;
+    expect(mine).toHaveLength(1);
+    expect(mine[0]).toMatchObject({ id: `self:${amyId}`, is_author: true });
+    expect(mine[0]!.stories[0]!.overlays).toEqual([{ type: "text", content: "hello", x: 12.5 }]);
+    const storyId = mine[0]!.stories[0]!.id;
+    // The picture is served like any upload.
+    expect((await worker.fetch(mine[0]!.stories[0]!.url)).status).toBe(200);
+
+    const theirs = (await ben.get<{ nodes: Node[] }>("api/v1.2/stories/carousel")).nodes;
+    expect(theirs).toMatchObject([{ id: `pfs:${amyId}`, is_author: false, hasViewed: false }]);
+    expect((await ben.call("POST", "api/v1.1/stories/seen", { id: storyId })).status).toBe(200);
+    expect((await ben.get<{ nodes: Node[] }>("api/v1.2/stories/carousel")).nodes[0]!.hasViewed).toBe(true);
+
+    const viewers = await amy.get<{ data: { id: string; viewed_at: string }[] }>(`api/v1.2/stories/viewers?sid=${storyId}`);
+    expect(viewers.data.map((v) => v.id)).toEqual([String(benId)]);
+    expect((await amy.get<{ nodes: Node[] }>("api/v1.2/stories/carousel")).nodes[0]!.stories[0]!.view_count).toBe(1);
+    // Tagging: people who follow you.
+    expect((await amy.get<{ id: string }[]>("api/v1.2/stories/mention-autocomplete?q=pf_story_b")).map((a) => a.id)).toEqual([String(benId)]);
+
+    // Someone who doesn't follow sees nothing, and can't mark it seen.
+    await createAccount("pf_story_cat", "pw-pw-pw");
+    const cat = await signIn("pf_story_cat", "pw-pw-pw");
+    expect((await cat.get<{ nodes: Node[] }>("api/v1.2/stories/carousel")).nodes).toEqual([]);
+    expect((await cat.call("POST", "api/v1.1/stories/seen", { id: storyId })).status).toBe(403);
+
+    // Other servers fetch it with its bearcap token, and nothing else.
+    const token = (await db.prepare("SELECT token FROM stories WHERE id = ?").bind(Number(storyId)).first<{ token: string }>())!.token;
+    const path = `${SITE}/stories/pf_story_amy/${storyId}`;
+    const fetched = await worker.fetch(path, { headers: { accept: "application/activity+json", authorization: `Bearer ${token}` } });
+    expect(fetched.status).toBe(200);
+    expect(await fetched.json()).toMatchObject({ type: "Story", id: path, attributedTo: `${SITE}/users/pf_story_amy`, attachment: { type: "Image", mediaType: "image/png" } });
+    expect((await worker.fetch(path, { headers: { accept: "application/activity+json", authorization: "Bearer nope" } })).status).toBe(404);
+
+    expect((await amy.call("POST", `api/v1.1/stories/self-expire/${storyId}`)).status).toBe(200);
+    expect((await ben.get<{ nodes: Node[] }>("api/v1.2/stories/carousel")).nodes).toEqual([]);
+  });
+
+  it("takes stories in two steps from older apps", async () => {
+    const id = await createAccount("pf_story_old", "pw-pw-pw");
+    await giveKeys(id);
+    const me = await signIn("pf_story_old", "pw-pw-pw");
+    const png = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="), (ch) => ch.charCodeAt(0));
+    const form = new FormData();
+    form.set("file", new File([png], "story.png", { type: "image/png" }));
+    const added = await (await worker.fetch(`${SITE}/api/v1.1/stories/add`, { method: "POST", headers: me.auth, body: form })).json<{ media_id: string; media_type: string }>();
+    expect(added.media_type).toBe("photo");
+    // Not shown until it's published.
+    expect((await me.get<{ self: unknown }>("api/v1.1/stories/carousel")).self).toEqual([]);
+    const published = await me.call("POST", "api/v1.1/stories/publish", { media_id: added.media_id, duration: 5, can_reply: true, can_react: false });
+    expect(published.status).toBe(200);
+    const carousel = await me.get<{ self: { nodes: { id: string; duration: number }[] } }>("api/v1.1/stories/carousel");
+    expect(carousel.self.nodes).toMatchObject([{ id: added.media_id, duration: 5 }]);
+  });
+
+  it("answers Pixelfed servers' nodeinfo as Pixelfed, so they send stories", async () => {
+    const wellKnown = await (
+      await worker.fetch(`${SITE}/.well-known/nodeinfo`, { headers: { accept: "application/json", "user-agent": "(Pixelfed/0.12.6; +https://pixelfed.example)" } })
+    ).json<{ links: { href: string }[] }>();
+    const nodeinfo = await (await worker.fetch(wellKnown.links[0]!.href, { headers: { accept: "application/json" } })).json<{ software: { name: string } }>();
+    expect(nodeinfo.software.name).toBe("pixelfed");
+  });
+
   it("edits the profile from the query string, and removes the avatar", async () => {
     const id = await createAccount("pf_edit", "pw-pw-pw");
     await giveKeys(id);

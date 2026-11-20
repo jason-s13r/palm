@@ -1,11 +1,27 @@
-import { nodeinfoVersion, type RequestContext } from "@palm/core";
+import { randomToken } from "@palm/auth";
+import { nodeinfoVersion, urls, type RequestContext } from "@palm/core";
 import {
   accountById,
   accountByHandle,
   accountsByIds,
   countAccounts,
+  createStory,
   directMessages,
+  endStory,
+  followerIdsMatching,
+  followsAccount,
+  isLive,
   latestLikers,
+  liveStoryCount,
+  MAX_STORIES,
+  MEDIA_TYPES,
+  publishStory,
+  recordStoryView,
+  storeMedia,
+  storiesFor,
+  storyById,
+  storyViewers,
+  type Story,
   mutualFollowIds,
   popularLocalAccountIds,
   postByIdAny,
@@ -231,7 +247,7 @@ pixelfedRoutes.get("/api/v2/config", (c) =>
     features: {
       timelines: { local: true, network: true },
       mobile_apis: true,
-      stories: false,
+      stories: true,
       video: true,
       import: { instagram: false, mastodon: false, pixelfed: false },
       label: { covid: { enabled: false, org: "", url: "" } },
@@ -248,7 +264,7 @@ pixelfedRoutes.get("/api/v2.1/config", (c) =>
     oauth: true,
     signup: { curated: false, mobile_registration: false },
     features: {
-      stories: false,
+      stories: true,
       video: true,
       timelines: { local: true, network: true },
       collections: { api_version: "1.2", add_others_posts: false },
@@ -400,13 +416,362 @@ pixelfedRoutes.get("/api/v1/tags/:tag{[^/]+}/related", (c) => c.json([]));
 // The app asks for a tag with a trailing slash.
 pixelfedRoutes.get("/api/v1/tags/:tag{[^/]+}/", (c) => internal(c, "GET", `/api/v1/tags/${c.req.param("tag")}`));
 
-// --- stories and collections: palm has neither ---------------------------------
+// --- stories ----------------------------------------------------------------------
 
-for (const path of ["/api/v1.1/stories/carousel", "/api/v1.2/stories/carousel"]) pixelfedRoutes.get(path, (c) => c.json({ nodes: [] }));
-pixelfedRoutes.get("/api/v1.2/stories/mention-autocomplete", (c) => c.json([]));
-pixelfedRoutes.get("/api/v1.2/stories/viewers", (c) => c.json([]));
-pixelfedRoutes.post("/api/v1.1/stories/seen", (c) => c.json({ code: 200 }));
-pixelfedRoutes.on(["POST"], ["/api/v1.1/stories/*", "/api/v1.2/stories/*"], (c) => fail(c, "Stories aren't available on this server.", 422));
+/** Pixelfed's story upload types. */
+const STORY_TYPES = new Set(["image/jpeg", "image/png", "video/mp4"]);
+
+const storyMediaUrl = (c: C, story: Story, author: Account) =>
+  story.mediaId
+    ? urls.media(author.domain, `${story.mediaId}.${MEDIA_TYPES[story.contentType] ?? "bin"}`)
+    : urls.proxy(c.env.domain.domain, story.mediaUrl ?? "");
+
+const profilePage = (c: C, a: Account) => (a.apId ? (a.profileUrl ?? a.apId) : `https://${a.domain}/@${a.username}`);
+
+/** The stories someone can see, grouped by author: theirs first, then unseen, then the most recent. */
+async function storyGroups(c: C, me: Account) {
+  const db = c.env.bindings.DB;
+  const found = await storiesFor(db, me.id);
+  const byAuthor = new Map<number, { story: Story; seen: boolean }[]>();
+  for (const item of found) {
+    const list = byAuthor.get(item.story.accountId) ?? [];
+    list.push(item);
+    byAuthor.set(item.story.accountId, list);
+  }
+  const authors = await accountsByIds(db, [...byAuthor.keys()]);
+  const groups = [...byAuthor].flatMap(([id, items]) => {
+    const author = authors.get(id);
+    return author && !author.banned && !author.deleted ? [{ author, items, isAuthor: id === me.id }] : [];
+  });
+  const latest = (g: (typeof groups)[number]) => Math.max(...g.items.map((i) => i.story.createdAt));
+  const allSeen = (g: (typeof groups)[number]) => g.items.every((i) => i.seen);
+  groups.sort((a, b) => Number(b.isAuthor) - Number(a.isAuthor) || Number(allSeen(a)) - Number(allSeen(b)) || latest(b) - latest(a));
+  return groups;
+}
+
+/** Pixelfed's carousel (v1.2): one node per author, each with their stories. */
+async function carouselNext(c: C, me: Account) {
+  return (await storyGroups(c, me)).map(({ author, items, isAuthor }) => {
+    const view = account(c.env, author);
+    const stories = items.map(({ story, seen }) => ({
+      id: String(story.id),
+      type: story.type,
+      url: storyMediaUrl(c, story, author),
+      overlays: story.overlays,
+      // Pixelfed shows each for at least ten seconds.
+      duration: Math.max(story.duration * 1000, 10_000),
+      viewed: isAuthor || seen,
+      created_at: new Date(story.createdAt * 1000).toISOString(),
+      ...(isAuthor ? { view_count: story.viewCount } : {}),
+    }));
+    return {
+      id: `${isAuthor ? "self" : "pfs"}:${author.id}`,
+      username: view.username,
+      username_acct: view.acct,
+      profile_id: view.id,
+      avatar: view.avatar,
+      is_author: isAuthor,
+      stories,
+      url: profilePage(c, author),
+      hasViewed: stories.every((s) => s.viewed),
+    };
+  });
+}
+
+/** Pixelfed's older carousel (v1.1): your own stories apart, everyone else's as nodes. */
+async function carouselOld(c: C, me: Account, alwaysSelf: boolean) {
+  const groups = await storyGroups(c, me);
+  const node = (story: Story, author: Account, seen: boolean) => ({
+    id: String(story.id),
+    pid: String(author.id),
+    type: story.type,
+    src: storyMediaUrl(c, story, author),
+    duration: story.duration,
+    seen,
+    created_at: new Date(story.createdAt * 1000).toISOString(),
+  });
+  const mine = groups.find((g) => g.isAuthor);
+  const selfView = account(c.env, me);
+  const self =
+    mine || alwaysSelf
+      ? {
+          user: { id: selfView.id, username: selfView.acct, avatar: selfView.avatar, local: true, is_author: true },
+          nodes: (mine?.items ?? []).map(({ story }) => node(story, me, true)),
+        }
+      : [];
+  const nodes = groups
+    .filter((g) => !g.isAuthor)
+    .map(({ author, items }) => {
+      const view = account(c.env, author);
+      return {
+        id: `pfs:${author.id}`,
+        user: { id: view.id, username: view.username, username_acct: view.acct, avatar: view.avatar, local: author.apId === null, is_author: false },
+        nodes: items.map(({ story, seen }) => node(story, author, seen)),
+        url: profilePage(c, author),
+        seen: items.every((i) => i.seen),
+      };
+    });
+  return { self, nodes };
+}
+
+const signedIn = (c: C) => c.get("account");
+
+pixelfedRoutes.get("/api/v1.2/stories/carousel", async (c) => {
+  const me = signedIn(c);
+  if (!me) return fail(c, "The access token is invalid", 401);
+  return c.json({ nodes: await carouselNext(c, me) });
+});
+
+for (const path of ["/api/v1.1/stories/carousel", "/api/pixelfed/v1/stories/carousel"]) {
+  pixelfedRoutes.get(path, async (c) => {
+    const me = signedIn(c);
+    if (!me) return fail(c, "The access token is invalid", 401);
+    return c.json(await carouselOld(c, me, false));
+  });
+}
+
+pixelfedRoutes.get("/api/pixelfed/v1/stories/self-carousel", async (c) => {
+  const me = signedIn(c);
+  if (!me) return fail(c, "The access token is invalid", 401);
+  return c.json(await carouselOld(c, me, true));
+});
+
+type Form = Record<string, string | File | (string | File)[]>;
+
+async function formOf(c: C): Promise<Form> {
+  const type = c.req.header("content-type") ?? "";
+  if (type.includes("application/json")) return (await c.req.json<Form>().catch(() => ({}))) as Form;
+  return (await c.req.parseBody({ all: true }).catch(() => ({}))) as Form;
+}
+
+const fieldOf = (form: Form, key: string): string | File | undefined => {
+  const value = form[key];
+  return Array.isArray(value) ? value[0] : value;
+};
+const textOf = (form: Form, key: string) => {
+  const value = fieldOf(form, key);
+  return typeof value === "string" ? value : typeof value === "number" || typeof value === "boolean" ? String(value) : undefined;
+};
+const boolOf = (form: Form, key: string) => ["1", "true", "on"].includes((textOf(form, key) ?? "").toLowerCase());
+
+const OVERLAY_NUMBERS = ["absoluteScale", "absoluteX", "absoluteY", "fontSize", "rotation", "scale", "x", "y"] as const;
+const OVERLAY_TYPES = new Set(["text", "mention", "url", "hashtag"]);
+
+/**
+ * A story's overlays (text, @mentions, links and hashtags the app draws over
+ * the picture), from `overlays[0][content]`-style form fields or a JSON list.
+ * Kept as Pixelfed keeps them: up to four, with its own fields only.
+ */
+export function overlaysOf(form: Form): Json[] | string {
+  let raw: unknown[] = [];
+  const json = fieldOf(form, "overlays");
+  if (typeof json === "string" && json.trim().startsWith("[")) {
+    try {
+      raw = JSON.parse(json) as unknown[];
+    } catch {
+      return "Invalid overlays.";
+    }
+  } else if (Array.isArray(form.overlays)) {
+    raw = form.overlays;
+  } else {
+    const byIndex = new Map<number, Json>();
+    for (const [key, value] of Object.entries(form)) {
+      const m = /^overlays\[(\d+)\]\[(\w+)\]$/.exec(key);
+      if (!m) continue;
+      const item = byIndex.get(Number(m[1])) ?? {};
+      item[m[2]!] = Array.isArray(value) ? value[0] : value;
+      byIndex.set(Number(m[1]), item);
+    }
+    raw = [...byIndex.entries()].sort(([a], [b]) => a - b).map(([, v]) => v);
+  }
+  if (raw.length > 4) return "A story can have up to four overlays.";
+  const out: Json[] = [];
+  for (const item of raw) {
+    if (!isObject(item)) return "Invalid overlays.";
+    const overlay: Json = {};
+    for (const key of OVERLAY_NUMBERS) {
+      if (item[key] === undefined || item[key] === "") continue;
+      const n = Number(item[key]);
+      if (!Number.isFinite(n)) return `Invalid overlay ${key}.`;
+      overlay[key] = n;
+    }
+    if (typeof item.color === "string" && /^#[0-9a-f]{3,8}$/i.test(item.color)) overlay.color = item.color;
+    const type = typeof item.type === "string" ? item.type : "text";
+    const content = typeof item.content === "string" ? item.content.trim() : "";
+    if (!OVERLAY_TYPES.has(type) || !content || content.length > 250) return "Invalid overlay.";
+    if (type === "hashtag" && !/^#[A-Za-z0-9_]{1,29}$/.test(content)) return "Invalid hashtag overlay.";
+    if (type === "url") {
+      let ok = false;
+      try {
+        ok = new URL(content).protocol === "https:";
+      } catch {
+        ok = false;
+      }
+      if (!ok) return "Only HTTPS links are allowed.";
+    }
+    overlay.type = type;
+    overlay.content = type === "mention" ? content.replace(/^@/, "") : content;
+    out.push(overlay);
+  }
+  return out;
+}
+
+/** Stores a story's picture or clip and makes the story; published unless `draft`. */
+async function newStory(c: C, me: Account, file: unknown, options: { duration: number; overlays?: Json[]; draft?: boolean }) {
+  if (!(file instanceof File)) return fail(c, "The image field is required.", 422);
+  if (!STORY_TYPES.has(file.type)) return fail(c, "Stories can be JPEG or PNG pictures, or MP4 clips.", 422);
+  const db = c.env.bindings.DB;
+  if ((await liveStoryCount(db, me.id)) >= MAX_STORIES) {
+    return c.json({ code: 418, error: `You’ve reached your daily limit of ${MAX_STORIES} Stories.` }, 418 as 400);
+  }
+  const stored = await storeMedia(db, c.env.bindings.MEDIA, me.id, file, null);
+  if (typeof stored === "string") {
+    return fail(c, stored === "too_large" ? "That file is too large." : stored === "no_storage" ? "Uploads aren't available on this server." : "Unsupported file type.", 422);
+  }
+  const story = await createStory(db, {
+    accountId: me.id,
+    mediaId: stored.id,
+    contentType: stored.contentType,
+    duration: options.duration,
+    overlays: options.overlays ?? [],
+    token: randomToken(32),
+    active: !options.draft,
+  });
+  if (!options.draft) c.env.activities.enqueue({ kind: "story_published", storyId: story.id });
+  return { story, media: stored };
+}
+
+// The current app: one step, a 1080×1920 picture with its overlays.
+pixelfedRoutes.post("/api/v1.2/stories/publish", async (c) => {
+  const me = signedIn(c);
+  if (!me) return fail(c, "The access token is invalid", 401);
+  if (me.movedTo) return fail(c, "This account has moved", 403);
+  const form = await formOf(c);
+  const overlays = overlaysOf(form);
+  if (typeof overlays === "string") return fail(c, overlays, 422);
+  const made = await newStory(c, me, fieldOf(form, "image") ?? fieldOf(form, "file"), { duration: 7, overlays });
+  if (made instanceof Response) return made;
+  return c.json({ code: 200, msg: "Successfully added" });
+});
+
+// Older apps: add the file, then publish it.
+for (const prefix of ["/api/v1.1/stories", "/api/pixelfed/v1/stories"]) {
+  pixelfedRoutes.post(`${prefix}/add`, async (c) => {
+    const me = signedIn(c);
+    if (!me) return fail(c, "The access token is invalid", 401);
+    if (me.movedTo) return fail(c, "This account has moved", 403);
+    const form = await formOf(c);
+    const duration = Math.min(Math.max(Number(textOf(form, "duration") ?? 3) || 3, 1), 30);
+    const made = await newStory(c, me, fieldOf(form, "file"), { duration, draft: true });
+    if (made instanceof Response) return made;
+    return c.json({
+      code: 200,
+      msg: "Successfully added",
+      media_id: String(made.story.id),
+      media_url: storyMediaUrl(c, made.story, me),
+      media_type: made.story.type,
+    });
+  });
+
+  pixelfedRoutes.post(`${prefix}/publish`, async (c) => {
+    const me = signedIn(c);
+    if (!me) return fail(c, "The access token is invalid", 401);
+    const form = await formOf(c);
+    const id = Number(textOf(form, "media_id"));
+    const duration = Math.min(Math.max(Number(textOf(form, "duration") ?? 10) || 10, 1), 30);
+    const story = id ? await publishStory(c.env.bindings.DB, id, me.id, { duration, canReply: boolOf(form, "can_reply"), canReact: boolOf(form, "can_react") }) : null;
+    if (!story) return fail(c, "Record not found", 404);
+    c.env.activities.enqueue({ kind: "story_published", storyId: story.id });
+    return c.json({ code: 200, msg: "Successfully published" });
+  });
+
+  pixelfedRoutes.post(`${prefix}/seen`, async (c) => {
+    const me = signedIn(c);
+    if (!me) return fail(c, "The access token is invalid", 401);
+    const db = c.env.bindings.DB;
+    const story = await storyById(db, Number(textOf(await formOf(c), "id")));
+    if (!story || !isLive(story)) return fail(c, "Record not found", 404);
+    if (story.accountId === me.id) return c.json([]);
+    if (!(await followsAccount(db, me.id, story.accountId))) return fail(c, "Invalid permission", 403);
+    // Another server's story: its author hears who saw it, as Pixelfed tells them.
+    if ((await recordStoryView(db, story.id, me.id)) && story.apId) {
+      c.env.activities.enqueue({ kind: "story_viewed", storyId: story.id, accountId: me.id });
+    }
+    return c.json({ code: 200 });
+  });
+
+  pixelfedRoutes.post(`${prefix}/self-expire/:id{[0-9]+}`, async (c) => {
+    const me = signedIn(c);
+    if (!me) return fail(c, "The access token is invalid", 401);
+    const db = c.env.bindings.DB;
+    const story = await storyById(db, Number(c.req.param("id")));
+    if (!story || story.accountId !== me.id) return fail(c, "Record not found", 404);
+    // The Delete goes out before the cron removes the row.
+    if (story.active) c.env.activities.enqueue({ kind: "story_deleted", storyId: story.id });
+    await endStory(db, story.id);
+    return c.json({ code: 200, msg: "Successfully deleted" });
+  });
+
+  pixelfedRoutes.post(`${prefix}/comment`, async (c) => {
+    const me = signedIn(c);
+    if (!me) return fail(c, "The access token is invalid", 401);
+    const form = await formOf(c);
+    const caption = (textOf(form, "caption") ?? "").trim();
+    if (!caption) return fail(c, "The caption field is required.", 422);
+    const db = c.env.bindings.DB;
+    const story = await storyById(db, Number(textOf(form, "sid")));
+    if (!story || !isLive(story)) return fail(c, "Record not found", 404);
+    if (!(await followsAccount(db, me.id, story.accountId))) return fail(c, "Invalid permission", 403);
+    if (!story.canReply) return fail(c, "Replies are off for this story", 422);
+    const author = await accountById(db, story.accountId);
+    if (!author) return fail(c, "Record not found", 404);
+    if (story.apId) {
+      c.env.activities.enqueue({ kind: "story_replied", storyId: story.id, accountId: me.id, text: caption, reaction: false });
+    } else {
+      // Someone here: a direct message, which their chats show.
+      const res = await internal(c, "POST", "/api/v1/statuses", { status: `@${author.username} Replied to your story: ${caption}`, visibility: "direct" });
+      if (!res.ok) return res;
+    }
+    return c.json({ code: 200, msg: "Sent!" });
+  });
+}
+
+for (const path of ["/api/v1.2/stories/viewers", "/api/v1.1/stories/viewers", "/api/pixelfed/v1/stories/viewers"]) {
+  pixelfedRoutes.get(path, async (c) => {
+    const me = signedIn(c);
+    if (!me) return fail(c, "The access token is invalid", 401);
+    const db = c.env.bindings.DB;
+    const story = await storyById(db, Number(c.req.query("sid")));
+    if (!story || story.accountId !== me.id) return fail(c, "Record not found", 404);
+    const PAGE = 10;
+    const before = Number(c.req.query("cursor")) || undefined;
+    const viewers = await storyViewers(db, story.id, { limit: PAGE + 1, before });
+    const page = viewers.slice(0, PAGE);
+    const people = await accountsByIds(db, page.map((v) => v.accountId));
+    const data = page.flatMap((v) => {
+      const who = people.get(v.accountId);
+      return who ? [{ ...account(c.env, who), viewed_at: new Date(v.viewedAt * 1000).toISOString() }] : [];
+    });
+    const url = new URL(c.req.url);
+    let next: string | null = null;
+    if (viewers.length > PAGE) {
+      url.searchParams.set("cursor", String(page.at(-1)!.viewedAt));
+      next = url.toString();
+    }
+    return c.json({ data, links: { first: null, last: null, prev: null, next }, meta: { path: `${url.origin}${url.pathname}`, per_page: PAGE, next_cursor: next ? url.searchParams.get("cursor") : null, prev_cursor: null } });
+  });
+}
+
+pixelfedRoutes.get("/api/v1.2/stories/mention-autocomplete", async (c) => {
+  const me = signedIn(c);
+  if (!me) return fail(c, "The access token is invalid", 401);
+  const q = (c.req.query("q") ?? "").replace(/^@/, "").slice(0, 120);
+  if (!q) return c.json([]);
+  return c.json(await accountViews(c, await accountsInOrder(c, await followerIdsMatching(c.env.bindings.DB, me.id, q))));
+});
+
+// --- collections: palm has none yet -----------------------------------------------
+
 for (const path of ["/api/v1.1/collections/self", "/api/v1.2/collections/self", "/api/v1.1/collections/accounts/:id"]) {
   pixelfedRoutes.get(path, (c) => c.json([]));
 }

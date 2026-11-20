@@ -1,8 +1,8 @@
 import { handleLemmy } from "@palm/adapter-lemmy";
 import { handleMastodon, publishDueStatuses } from "@palm/adapter-mastodon";
-import { activitySink, handleFederation, processQueueMessage, type QueueBody } from "@palm/federation";
+import { activitySink, handleFederation, processQueueMessage, serveStory, type QueueBody } from "@palm/federation";
 import { contextScope, defineConfig, enterContext, normaliseHost, resolveSurface, type DomainConfig, type PalmBindings, type PalmConfig, type RequestContext } from "@palm/core";
-import { claimFollowImports, domainOf, migrate, pendingDeletes, pendingMoves, prune } from "@palm/db";
+import { claimFollowImports, deleteMedia, domainOf, mediaById, migrate, pendingDeletes, pendingMoves, prune, removeEndedStories } from "@palm/db";
 import { handleWeb } from "@palm/web";
 import { avatarResponse } from "./assets.ts";
 import { servePublic, serveUpload } from "./public-cache.ts";
@@ -79,6 +79,13 @@ async function scheduled(config: PalmConfig, controller: ScheduledController, en
     const domain = await domainOf(env.DB, claimed.accountId);
     contextFor(domain ?? "")?.activities.enqueue({ kind: "import_follow", importId: claimed.id });
   }
+  // Stories past their day, and their uploads.
+  const ended = await removeEndedStories(env.DB);
+  for (const id of ended.mediaIds) {
+    const media = await mediaById(env.DB, id);
+    if (media) await deleteMedia(env.DB, env.MEDIA, media);
+  }
+  if (ended.removed) console.log(JSON.stringify({ palm: "stories_ended", stories: ended.removed }));
   const at = new Date(controller.scheduledTime);
   if (at.getUTCHours() !== 3 || at.getUTCMinutes() >= 10) return;
   let removed = 0;
@@ -201,6 +208,17 @@ export async function handle(
         // Uploaded images live where Lemmy keeps them, for both kinds of app.
         if (url.pathname.startsWith("/api/v3/") || url.pathname.startsWith("/pictrs/")) return handleLemmy(request, ctx);
         if (isMastodonPath(url.pathname)) return handleMastodon(request, ctx);
+        // A story, fetched by a server holding its token (Pixelfed's bearcap).
+        if (url.pathname.startsWith("/stories/")) {
+          const story = await serveStory(request, ctx);
+          if (story) return story;
+        }
+        // Pixelfed sends stories only to servers whose nodeinfo says Pixelfed,
+        // so its own fetches are pointed at the Pixelfed nodeinfo the app reads.
+        // Everyone else still sees Lemmy (Voyager needs it).
+        if (url.pathname === "/.well-known/nodeinfo" && /\bPixelfed\//.test(request.headers.get("user-agent") ?? "")) {
+          return json({ links: [{ rel: "http://nodeinfo.diaspora.software/ns/schema/2.0", href: `https://${served.domain.domain}/api/nodeinfo/2.0.json` }] });
+        }
         // Actors, collections, WebFinger and nodeinfo come from cache when they can.
         return servePublic(request, ctx, () => handleFederation(request, ctx, (req) => federationFallback(config, req, new URL(req.url), ctx)));
     }
