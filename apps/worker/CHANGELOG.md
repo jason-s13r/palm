@@ -1,5 +1,16 @@
 # Changelog
 
+## worker@0.11.2 (2026-11-20)
+
+### Fixes
+
+- keep a video's chapters, which the PeerTube app sets after an upload
+
+### Dependencies
+
+- db: 0.8.1 -> 0.8.2
+
+
 ## worker@0.11.1 (2026-11-20)
 
 ### Fixes

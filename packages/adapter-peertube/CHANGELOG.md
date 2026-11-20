@@ -1,5 +1,12 @@
 # Changelog
 
+## adapter-peertube@0.1.2 (2026-11-20)
+
+### Fixes
+
+- keep a video's chapters, which the PeerTube app sets after an upload
+
+
 ## adapter-peertube@0.1.1 (2026-11-20)
 
 ### Fixes
