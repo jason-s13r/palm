@@ -236,7 +236,7 @@ export function videoDetails(
             playlistUrl: playlist.url,
             segmentsSha256Url: playlist.segmentsSha256Url,
             redundancies: [],
-            files: playlist.files.map((f, i) => ({ ...fileView(f, i + video.files.length, video.downloadEnabled), playlistUrl: playlist.url })),
+            files: playlist.files.map((f, i) => ({ ...fileView(f, i + video.files.length, video.downloadEnabled), playlistUrl: f.playlistUrl ?? playlist.url })),
           },
         ]
       : [],

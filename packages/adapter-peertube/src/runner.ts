@@ -18,7 +18,10 @@ import {
   videoByPostId,
   videoMediaIds,
   postById,
+  videosWithoutHls,
   type RunnerJob,
+  type RunnerJobType,
+  type Video,
 } from "@palm/db";
 import { Hono } from "hono";
 import { fail, type C, type Env } from "./http.ts";
@@ -31,33 +34,56 @@ import type { Probe } from "./mp4.ts";
  * for transcoding. The runner calls out to palm, so nothing on that machine
  * needs to be reachable.
  *
- * palm asks for web-video renditions (one H.264 MP4 per resolution), the
- * simplest of PeerTube's job types. Each comes back in one request, so it has
- * to fit Cloudflare's 100 MB request limit: resolutions likely to be larger
- * aren't asked for.
+ * palm asks for HLS renditions (a fragmented MP4 and its playlist per
+ * resolution), which the PeerTube app needs to play a video, and a web-video
+ * MP4 when the upload's codec doesn't play everywhere. palm writes the master
+ * playlist itself. Each result comes back in one request, so it has to fit
+ * Cloudflare's 100 MB request limit: resolutions likely to be larger aren't
+ * asked for.
  */
 
 /** PeerTube's usual bitrates (bits a second, at 30 fps), to guess a rendition's size. */
 const BITRATES: Record<number, number> = { 240: 250_000, 360: 500_000, 480: 900_000, 720: 1_750_000, 1080: 3_300_000 };
 const MAX_OUTPUT = 90 * 1024 * 1024;
 
-/** The renditions worth making for an upload: each standard height up to its own, that fits a request. */
-export function renditionsFor(probe: Probe | null, playsEverywhere: boolean): { resolution: number; fps: number }[] {
+const fits = (duration: number, resolution: number, fps: number) => (duration * BITRATES[resolution]! * (fps > 30 ? 1.5 : 1) * 1.1) / 8 < MAX_OUTPUT;
+const fpsFor = (resolution: number, fps: number) => (resolution >= 720 ? fps : Math.min(fps, 30));
+
+/**
+ * The renditions worth making for an upload: HLS at each standard
+ * resolution up to its own (PeerTube's resolution is the picture's shorter
+ * side), and a web-video MP4 at its own when its codec doesn't play
+ * everywhere. Only those that fit a request.
+ */
+export function renditionsFor(probe: Pick<Probe, "width" | "height" | "fps" | "duration"> | null, playsEverywhere: boolean): { type: RunnerJobType; resolution: number; fps: number }[] {
   if (!probe || !probe.height) return [];
-  const sourceHeight = Math.min(probe.width, probe.height) || probe.height;
+  const source = Math.min(probe.width || probe.height, probe.height);
   const fps = probe.fps > 0 ? Math.min(probe.fps, 60) : 30;
-  return Object.keys(BITRATES)
-    .map(Number)
-    .filter((r) => r < sourceHeight || (!playsEverywhere && r <= sourceHeight))
-    .filter((r) => (probe.duration * BITRATES[r]! * (fps > 30 ? 1.5 : 1) * 1.1) / 8 < MAX_OUTPUT)
-    .map((resolution) => ({ resolution, fps: resolution >= 720 ? fps : Math.min(fps, 30) }));
+  const standard = Object.keys(BITRATES).map(Number);
+  const top = standard.filter((r) => r <= source).at(-1) ?? standard[0]!;
+  const hls = standard.filter((r) => r <= top && fits(probe.duration, r, fpsFor(r, fps)));
+  const jobs: { type: RunnerJobType; resolution: number; fps: number }[] = hls.map((resolution) => ({ type: "vod-hls-transcoding", resolution, fps: fpsFor(resolution, fps) }));
+  if (!playsEverywhere && fits(probe.duration, top, fpsFor(top, fps))) jobs.push({ type: "vod-web-video-transcoding", resolution: top, fps: fpsFor(top, fps) });
+  return jobs;
 }
 
-export async function queueRunnerJobs(db: D1Database, postId: number, probe: Probe | null, playsEverywhere: boolean): Promise<void> {
+export async function queueRunnerJobs(db: D1Database, postId: number, probe: Pick<Probe, "width" | "height" | "fps" | "duration"> | null, playsEverywhere: boolean): Promise<void> {
   const jobs = renditionsFor(probe, playsEverywhere);
   if (!jobs.length) return;
   await addRunnerJobs(db, postId, jobs);
   await setTranscode(db, postId, { provider: "runner", startedAt: Math.floor(Date.now() / 1000) });
+}
+
+/** Queues HLS for local videos that have none: those uploaded before a runner was set up. The cron calls this. */
+export async function backfillRunnerJobs(ctx: RequestContext): Promise<void> {
+  if (!enabled(ctx)) return;
+  const db = ctx.bindings.DB;
+  for (const postId of await videosWithoutHls(db)) {
+    const video = await videoByPostId(db, postId);
+    const original = video?.files[video.files.length - 1];
+    if (!video || !original) continue;
+    await queueRunnerJobs(db, postId, { width: original.width ?? 0, height: original.height, fps: original.fps, duration: video.duration }, true);
+  }
 }
 
 const enabled = (ctx: RequestContext) => typeof ctx.bindings.PEERTUBE_RUNNER_TOKEN === "string" && ctx.bindings.PEERTUBE_RUNNER_TOKEN.length >= 16;
@@ -65,7 +91,7 @@ const enabled = (ctx: RequestContext) => typeof ctx.bindings.PEERTUBE_RUNNER_TOK
 function payloadFor(ctx: RequestContext, job: RunnerJob) {
   return {
     input: { videoFileUrl: `https://${ctx.domain.domain}/api/v1/runners/jobs/${job.uuid}/files/videos/${job.postId}/max-quality`, separatedAudioFileUrl: [] },
-    output: { resolution: job.resolution, fps: job.fps },
+    output: { resolution: job.resolution, fps: job.fps, ...(job.type === "vod-hls-transcoding" ? { separatedAudio: false } : {}) },
   };
 }
 
@@ -130,7 +156,7 @@ runnerRoutes.post("/api/v1/runners/jobs/request", async (c) => {
   const runner = await runnerByToken(db, String(fields.runnerToken ?? ""));
   if (!runner) return fail(c, 404, "Unknown runner token");
   const types = Array.isArray(fields.jobTypes) ? fields.jobTypes.map(String) : null;
-  const jobs = types && !types.includes("vod-web-video-transcoding") ? [] : await availableRunnerJobs(db);
+  const jobs = await availableRunnerJobs(db, 5, types ?? undefined);
   return c.json({ availableJobs: jobs.map((j) => ({ uuid: j.uuid, type: j.type, payload: payloadFor(c.env, j) })) });
 });
 
@@ -190,36 +216,76 @@ runnerRoutes.post("/api/v1/runners/jobs/:uuid/error", async (c) => {
   return c.body(null, 204);
 });
 
-/** A finished rendition: kept in R2 and added to the video's files, and other servers told. */
+/** Keeps a runner's file in R2, as one of the person's uploads. */
+async function keep(c: C, accountId: number, body: ReadableStream | ArrayBuffer | string, contentType: string, size: number): Promise<string> {
+  const id = [...crypto.getRandomValues(new Uint8Array(12))].map((b) => b.toString(16).padStart(2, "0")).join("");
+  await c.env.bindings.MEDIA!.put(`media/${id}`, body, { httpMetadata: { contentType } });
+  await registerMedia(c.env.bindings.DB, { id, accountId, contentType, size, postId: null, token: randomToken(16) });
+  return id;
+}
+
+/** A finished rendition: kept in R2, added to the video's files or its HLS playlist, and other servers told. */
 runnerRoutes.post("/api/v1/runners/jobs/:uuid/success", async (c) => {
   const { fields, files } = await body(c.req.raw);
   const found = await held(c, fields);
   if (!found) return fail(c, 404, "Unknown job");
-  const file = files.get("payload[videoFile]") ?? files.get("videoFile") ?? [...files.values()][0];
+  const file = files.get("payload[videoFile]") ?? files.get("videoFile");
   const db = c.env.bindings.DB;
-  const bucket = c.env.bindings.MEDIA;
   const post = await postById(db, found.job.postId);
   const video = await videoByPostId(db, found.job.postId);
-  if (!file || !bucket || !post || !video) {
-    await finishRunnerJob(db, found.job.uuid, "errored", "No video file in the result");
+  const hls = found.job.type === "vod-hls-transcoding";
+  const playlist = hls ? (files.get("payload[resolutionPlaylistFile]") ?? files.get("resolutionPlaylistFile")) : undefined;
+  if (!file || !c.env.bindings.MEDIA || !post || !video || (hls && !playlist)) {
+    await finishRunnerJob(db, found.job.uuid, "errored", "The result was missing a file");
     return fail(c, 400, "A video file is needed");
   }
-  const id = [...crypto.getRandomValues(new Uint8Array(12))].map((b) => b.toString(16).padStart(2, "0")).join("");
-  await bucket.put(`media/${id}`, file.stream(), { httpMetadata: { contentType: "video/mp4" } });
-  await registerMedia(db, { id, accountId: post.accountId, contentType: "video/mp4", size: file.size, postId: null, token: randomToken(16) });
   // PeerTube's resolution is the picture's shorter side.
   const ratio = video.aspectRatio ?? 16 / 9;
   const even = (n: number) => Math.round(n / 2) * 2;
   const [width, height] = ratio >= 1 ? [even(found.job.resolution * ratio), found.job.resolution] : [found.job.resolution, even(found.job.resolution / ratio)];
-  // The original upload stays; an earlier rendition at this height is replaced.
-  const { mediaId } = await videoMediaIds(db, post.id);
-  const kept = video.files.filter((f) => f.height !== height || (mediaId !== null && f.url.includes(`/${mediaId}.`)));
-  const files2 = [...kept, { url: urls.media(c.env.domain.domain, `${id}.mp4`), mediaType: "video/mp4", height, width, size: file.size, fps: found.job.fps }];
-  await updateVideo(db, post.id, { files: files2.sort((a, b) => b.height - a.height) });
+  const fileId = await keep(c, post.accountId, file.stream(), "video/mp4", file.size);
+  const fileUrl = urls.media(c.env.domain.domain, `${fileId}.mp4`);
+  if (hls) {
+    // The rendition's playlist names its file by the runner's own name; palm serves it from R2.
+    const text = (await playlist!.text()).replaceAll(file.name, fileUrl);
+    const playlistId = await keep(c, post.accountId, text, "application/vnd.apple.mpegurl", text.length);
+    const playlistUrl = urls.media(c.env.domain.domain, `${playlistId}.m3u8`);
+    const before = (await videoByPostId(db, post.id))?.hls?.files ?? [];
+    // Listed by resolution, as PeerTube lists HLS files.
+    const renditions = [...before.filter((f) => f.height !== found.job.resolution), { url: fileUrl, mediaType: "video/mp4", height: found.job.resolution, width: null, size: file.size, fps: found.job.fps, playlistUrl }];
+    await updateVideo(db, post.id, {
+      hls: { url: masterUrl(c.env, video.uuid), segmentsSha256Url: null, files: renditions.sort((a, b) => b.height - a.height) },
+    });
+  } else {
+    // The original upload stays; an earlier rendition at this height is replaced.
+    const { mediaId } = await videoMediaIds(db, post.id);
+    const kept = video.files.filter((f) => f.height !== height || (mediaId !== null && f.url.includes(`/${mediaId}.`)));
+    const files2 = [...kept, { url: fileUrl, mediaType: "video/mp4", height, width, size: file.size, fps: found.job.fps }];
+    await updateVideo(db, post.id, { files: files2.sort((a, b) => b.height - a.height) });
+  }
   await finishRunnerJob(db, found.job.uuid, "completed");
   await settle(c.env, post.id);
   return c.body(null, 204);
 });
+
+/** Where a local video's master playlist is served: palm writes it from the renditions it has. */
+export const masterUrl = (ctx: RequestContext, uuid: string) => `https://${ctx.domain.domain}/static/streaming-playlists/hls/${uuid}/master.m3u8`;
+
+/** A local video's HLS master playlist, listing each rendition the runners made. */
+export function masterPlaylist(video: Video): string | null {
+  const renditions = video.hls?.files.filter((f) => f.playlistUrl) ?? [];
+  if (!renditions.length) return null;
+  const lines = ["#EXTM3U", "#EXT-X-VERSION:6", "#EXT-X-INDEPENDENT-SEGMENTS"];
+  const ratio = video.aspectRatio ?? 16 / 9;
+  const even = (n: number) => Math.round(n / 2) * 2;
+  for (const f of [...renditions].sort((a, b) => a.height - b.height)) {
+    const bandwidth = video.duration > 0 ? Math.round(((f.size * 8) / video.duration) * 1.2) : 1_000_000;
+    // f.height is PeerTube's resolution, the shorter side.
+    const [w, h] = ratio >= 1 ? [even(f.height * ratio), f.height] : [f.height, even(f.height / ratio)];
+    lines.push(`#EXT-X-STREAM-INF:BANDWIDTH=${bandwidth},RESOLUTION=${w}x${h}${f.fps > 0 ? `,FRAME-RATE=${f.fps.toFixed(3)}` : ""}`, f.playlistUrl!);
+  }
+  return `${lines.join("\n")}\n`;
+}
 
 /** Once a video's last job is done, other servers hear about its new files. */
 async function settle(ctx: RequestContext, postId: number): Promise<void> {
@@ -244,6 +310,9 @@ export async function runnerSocket(request: Request, ctx: RequestContext): Promi
   server.addEventListener("message", (event) => {
     const data = typeof event.data === "string" ? event.data : "";
     if (data === "2") return server.send("3");
+    // Other namespaces (the app's /user-notifications) are refused, so its client stops trying.
+    const other = /^40(\/[^,]*)?,?/.exec(data);
+    if (other && other[1] !== "/runners") return server.send(`44${other[1] ?? ""},${JSON.stringify({ message: "Not supported" })}`);
     const connect = /^40\/runners,(.*)$/.exec(data);
     if (!connect) return;
     ctx.waitUntil(

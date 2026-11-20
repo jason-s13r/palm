@@ -64,7 +64,7 @@ import {
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { fail, params, type C, type Env } from "./http.ts";
-import { runnerRoutes } from "./runner.ts";
+import { masterPlaylist, runnerRoutes } from "./runner.ts";
 import { capabilities, uploadRoutes } from "./upload.ts";
 import { CATEGORIES, LANGUAGES, LICENCES, PLAYLIST_PRIVACIES, PRIVACIES } from "./labels.ts";
 import { fromShortUuid, isUuid, toShortUuid } from "./short-uuid.ts";
@@ -84,7 +84,7 @@ import {
 
 export { PEERTUBE_VERSION } from "./views.ts";
 export { capabilities } from "./upload.ts";
-export { runnerSocket } from "./runner.ts";
+export { backfillRunnerJobs, runnerSocket } from "./runner.ts";
 export { videoMaintenance } from "./maintenance.ts";
 export type { C, Env } from "./http.ts";
 
@@ -1207,6 +1207,14 @@ const watchRedirect = async (c: C, id: string) => {
     : `https://${c.env.domain.domain}/@${encodeURIComponent(author?.username ?? "")}/${found.post.id}`;
   return c.redirect(target, 302);
 };
+// A local video's HLS master playlist, written from the renditions runners made.
+app.get("/static/streaming-playlists/hls/:uuid/master.m3u8", async (c) => {
+  const video = isUuid(c.req.param("uuid")) ? await videoByUuid(c.env.bindings.DB, c.req.param("uuid")) : null;
+  const text = video ? masterPlaylist(video) : null;
+  if (!text) return c.text("Not found", 404);
+  return c.body(text, 200, { "content-type": "application/vnd.apple.mpegurl", "cache-control": "public, max-age=60", "access-control-allow-origin": "*" });
+});
+
 // The app loads PeerTube's server-string translations; palm's labels are English already.
 app.get("/client/locales/:lang/server.json", (c) => c.json({}, 200, { "cache-control": "public, max-age=86400" }));
 app.get("/w/:id", (c) => watchRedirect(c, c.req.param("id")));

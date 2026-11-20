@@ -12,6 +12,8 @@ export interface VideoFile {
   width: number | null;
   size: number;
   fps: number;
+  /** An HLS rendition's own playlist. */
+  playlistUrl?: string | undefined;
 }
 
 /** An HLS playlist and its renditions. */

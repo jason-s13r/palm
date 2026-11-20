@@ -196,13 +196,16 @@ describe("PeerTube: pieces", () => {
     expect(parseMoov(moov({ rotate: true }).subarray(8))).toMatchObject({ width: 720, height: 1280 });
   });
 
-  it("asks runners only for renditions that fit a request", () => {
-    expect(renditionsFor({ duration: 60, width: 1920, height: 1080, fps: 30, videoCodec: "avc1", audioCodec: null }, true).map((r) => r.resolution)).toEqual([240, 360, 480, 720]);
-    // HEVC from a phone: its own height too, so there's one that plays everywhere.
-    expect(renditionsFor({ duration: 60, width: 1280, height: 720, fps: 30, videoCodec: "hvc1", audioCodec: null }, false).map((r) => r.resolution)).toContain(720);
+  it("asks runners for HLS up to the upload's own resolution, only what fits a request", () => {
+    const jobs = (p: { duration: number; width: number; height: number; fps: number }, everywhere = true) => renditionsFor(p, everywhere).map((r) => `${r.type === "vod-hls-transcoding" ? "hls" : "mp4"}${r.resolution}`);
+    expect(jobs({ duration: 60, width: 1920, height: 1080, fps: 30 })).toEqual(["hls240", "hls360", "hls480", "hls720", "hls1080"]);
+    // A portrait phone clip: its resolution is its shorter side.
+    expect(jobs({ duration: 8, width: 720, height: 1280, fps: 30 })).toEqual(["hls240", "hls360", "hls480", "hls720"]);
+    // HEVC from a phone: an MP4 that plays everywhere too.
+    expect(jobs({ duration: 60, width: 1280, height: 720, fps: 30 }, false)).toContain("mp4720");
     // Twenty minutes: only what fits in 100 MB. An hour: nothing does.
-    expect(renditionsFor({ duration: 1200, width: 1280, height: 720, fps: 30, videoCodec: "avc1", audioCodec: null }, true).map((r) => r.resolution)).toEqual([240, 360]);
-    expect(renditionsFor({ duration: 3600, width: 1280, height: 720, fps: 30, videoCodec: "avc1", audioCodec: null }, true)).toEqual([]);
+    expect(jobs({ duration: 1200, width: 1280, height: 720, fps: 30 })).toEqual(["hls240", "hls360"]);
+    expect(jobs({ duration: 3600, width: 1280, height: 720, fps: 30 })).toEqual([]);
   });
 });
 
@@ -428,6 +431,49 @@ describe("PeerTube: hosting", () => {
       const file = await worker.fetch(details.files[0]!.fileUrl);
       expect(new Uint8Array(await file.arrayBuffer())).toEqual(bytes);
     }
+  });
+
+  it("hands HLS jobs to a runner and serves the playlists it makes", async () => {
+    const id = await createAccount("pt_runner", "pw-long-enough");
+    await giveKeys(id);
+    const { auth, get } = await signIn("pt_runner", "pw-long-enough");
+    const form = new FormData();
+    form.set("name", "For the runner");
+    form.set("videofile", new File([mp4File(1000)], "clip.mp4", { type: "video/mp4" }));
+    const { video } = await (await worker.fetch(`${SITE}/api/v1/videos/upload`, { method: "POST", headers: auth, body: form })).json<{ video: { id: number; uuid: string } }>();
+
+    const call = (path: string, body: Record<string, unknown>) =>
+      worker.fetch(`${SITE}/api/v1/runners${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    expect((await call("/register", { registrationToken: "wrong", name: "x" })).status).toBe(404);
+    const { runnerToken } = await (await call("/register", { registrationToken: "test-runner-registration-token", name: "homelab" })).json<{ runnerToken: string }>();
+    const { availableJobs } = await (await call("/jobs/request", { runnerToken, jobTypes: ["vod-hls-transcoding"] })).json<{ availableJobs: { uuid: string }[] }>();
+    expect(availableJobs.length).toBeGreaterThan(0);
+    // Other tests' uploads queue jobs too: this video's 720p one.
+    const job720 = (await db.prepare("SELECT uuid FROM runner_jobs WHERE post_id = ? AND resolution = 720 AND type = 'vod-hls-transcoding'").bind(video.id).first<{ uuid: string }>())!;
+    const { job } = await (await call(`/jobs/${job720.uuid}/accept`, { runnerToken })).json<{ job: { jobToken: string; payload: { input: { videoFileUrl: string } } } }>();
+    // The runner fetches the upload with its tokens.
+    const input = await worker.fetch(job.payload.input.videoFileUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ runnerToken, jobToken: job.jobToken }) });
+    expect(input.status).toBe(200);
+    await input.arrayBuffer();
+
+    // As peertube-runner sends it: the fragmented MP4 and its playlist, which names it.
+    const done = new FormData();
+    done.set("runnerToken", runnerToken);
+    done.set("jobToken", job.jobToken);
+    done.set("payload[videoFile]", new File([new Uint8Array(4096)], "abc-720-fragmented.mp4", { type: "video/mp4" }));
+    done.set("payload[resolutionPlaylistFile]", new File(['#EXTM3U\n#EXT-X-MAP:URI="abc-720-fragmented.mp4",BYTERANGE="800@0"\n#EXTINF:5,\n#EXT-X-BYTERANGE:3296@800\nabc-720-fragmented.mp4\n#EXT-X-ENDLIST\n'], "abc-720.m3u8"));
+    expect((await worker.fetch(`${SITE}/api/v1/runners/jobs/${job720.uuid}/success`, { method: "POST", body: done })).status).toBe(204);
+
+    const details = await get<{ streamingPlaylists: { playlistUrl: string; files: { resolution: { id: number }; playlistUrl: string }[] }[] }>(`/api/v1/videos/${video.uuid}`);
+    const hls = details.streamingPlaylists[0]!;
+    expect(hls.playlistUrl).toBe(`https://palm.test/static/streaming-playlists/hls/${video.uuid}/master.m3u8`);
+    expect(hls.files[0]!.resolution.id).toBe(720);
+    const master = await (await worker.fetch(hls.playlistUrl)).text();
+    expect(master).toContain("RESOLUTION=1280x720");
+    expect(master).toContain(hls.files[0]!.playlistUrl);
+    const rendition = await (await worker.fetch(hls.files[0]!.playlistUrl)).text();
+    expect(rendition).not.toContain("abc-720-fragmented.mp4");
+    expect(rendition).toContain('#EXT-X-MAP:URI="https://palm.test/pictrs/image/');
   });
 
   it("refuses files it can't play without a transcoder", async () => {

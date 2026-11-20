@@ -338,5 +338,6 @@ export {
   runnerJobProgress,
   runnerJobsLeft,
   unregisterRunner,
+  videosWithoutHls,
 } from "./runners.ts";
-export type { Runner, RunnerJob } from "./runners.ts";
+export type { Runner, RunnerJob, RunnerJobType } from "./runners.ts";

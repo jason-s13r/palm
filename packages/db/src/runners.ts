@@ -76,26 +76,29 @@ const toJob = (r: JobRow): RunnerJob => ({
   createdAt: r.created_at,
 });
 
-export async function addRunnerJobs(db: D1Database, postId: number, jobs: { resolution: number; fps: number }[]): Promise<void> {
+export type RunnerJobType = "vod-web-video-transcoding" | "vod-hls-transcoding";
+
+export async function addRunnerJobs(db: D1Database, postId: number, jobs: { type: RunnerJobType; resolution: number; fps: number }[]): Promise<void> {
   if (!jobs.length) return;
   const at = now();
   await db.batch(
     jobs.map((j) =>
       db
-        .prepare("INSERT INTO runner_jobs (uuid, post_id, type, resolution, fps, created_at, updated_at) VALUES (?, ?, 'vod-web-video-transcoding', ?, ?, ?, ?)")
-        .bind(crypto.randomUUID(), postId, j.resolution, j.fps, at, at),
+        .prepare("INSERT INTO runner_jobs (uuid, post_id, type, resolution, fps, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .bind(crypto.randomUUID(), postId, j.type, j.resolution, j.fps, at, at),
     ),
   );
 }
 
-/** Jobs waiting for a runner, and any a runner took and went quiet on for an hour. */
-export async function availableRunnerJobs(db: D1Database, limit = 5): Promise<RunnerJob[]> {
+/** Jobs waiting for a runner (of the types it takes), and any a runner took and went quiet on for an hour. */
+export async function availableRunnerJobs(db: D1Database, limit = 5, types?: string[]): Promise<RunnerJob[]> {
+  const only = types?.length ? `AND type IN (${types.map(() => "?").join(", ")})` : "";
   const { results } = await db
     .prepare(
-      `SELECT * FROM runner_jobs WHERE state = 'pending' OR (state = 'processing' AND updated_at < ?)
+      `SELECT * FROM runner_jobs WHERE (state = 'pending' OR (state = 'processing' AND updated_at < ?)) ${only}
        ORDER BY created_at LIMIT ?`,
     )
-    .bind(now() - 3600, limit)
+    .bind(now() - 3600, ...(types?.length ? types : []), limit)
     .all<JobRow>();
   return results.map(toJob);
 }
@@ -154,4 +157,21 @@ export async function runnerJobsLeft(db: D1Database, postId: number): Promise<nu
     .bind(postId)
     .first<{ n: number }>();
   return row?.n ?? 0;
+}
+
+/**
+ * Local videos with no HLS playlist and nothing being made for them: uploads
+ * from before a runner was set up. A few at a time.
+ */
+export async function videosWithoutHls(db: D1Database, limit = 3): Promise<number[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT v.post_id FROM videos v JOIN posts p ON p.id = v.post_id
+       WHERE p.ap_id IS NULL AND p.deleted_at IS NULL AND v.hls IS NULL AND v.transcode IS NULL AND v.media_id IS NOT NULL
+         AND NOT EXISTS (SELECT 1 FROM runner_jobs j WHERE j.post_id = v.post_id AND j.type = 'vod-hls-transcoding')
+       ORDER BY v.post_id DESC LIMIT ?`,
+    )
+    .bind(limit)
+    .all<{ post_id: number }>();
+  return results.map((r) => r.post_id);
 }

@@ -16,6 +16,8 @@ export default defineConfig({
           STAGING_LEMMY_HOST: "lemmy.palm.test",
           STAGING_MASTODON_HOST: "mastodon.palm.test",
           STAGING_BROWSER_REDIRECT: "https://site.example",
+          // PeerTube's remote runners, on for the runner tests.
+          PEERTUBE_RUNNER_TOKEN: "test-runner-registration-token",
         },
       },
     }),
