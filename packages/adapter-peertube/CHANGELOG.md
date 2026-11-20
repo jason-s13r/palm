@@ -1,5 +1,12 @@
 # Changelog
 
+## adapter-peertube@0.1.3 (2026-11-20)
+
+### Fixes
+
+- PeerTube routes with a trailing slash, and the app's server.json
+
+
 ## adapter-peertube@0.1.2 (2026-11-20)
 
 ### Fixes

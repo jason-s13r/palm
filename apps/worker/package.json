@@ -1,6 +1,6 @@
 {
   "name": "@jason-s13r/palm-worker",
-  "version": "0.11.2",
+  "version": "0.11.3",
   "description": "palm: one ActivityPub identity, used from Lemmy and Mastodon apps, on Cloudflare Workers.",
   "license": "Unlicense",
   "type": "module",

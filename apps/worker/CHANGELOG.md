@@ -1,5 +1,12 @@
 # Changelog
 
+## worker@0.11.3 (2026-11-20)
+
+### Fixes
+
+- PeerTube routes with a trailing slash, and the app's server.json
+
+
 ## worker@0.11.2 (2026-11-20)
 
 ### Fixes
