@@ -62,13 +62,20 @@ describe("Pixelfed apps", () => {
   it("tells Pixelfed apps it's Pixelfed, and everyone else it's Lemmy", async () => {
     const pixelfed = await (await worker.fetch(`${SITE}/api/nodeinfo/2.0.json`)).json<{ software: { name: string; version: string } }>();
     expect(pixelfed.software.name).toBe("pixelfed");
-    // The app needs 0.12.3 or later, read from the leading x.y.z.
+    // The App Store app needs 0.14.4 or later, read from the leading x.y.z.
     const [major, minor, patch] = pixelfed.software.version.match(/^(\d+)\.(\d+)\.(\d+)/)!.slice(1).map(Number);
-    expect(major! * 1e6 + minor! * 1e3 + patch!).toBeGreaterThanOrEqual(12_003);
+    expect(major! * 1e6 + minor! * 1e3 + patch!).toBeGreaterThanOrEqual(14_004);
 
     const wellKnown = await (await worker.fetch(`${SITE}/.well-known/nodeinfo`, { headers: { accept: "application/json" } })).json<{ links: { href: string }[] }>();
     const nodeinfo = await (await worker.fetch(wellKnown.links[0]!.href, { headers: { accept: "application/json" } })).json<{ software: { name: string } }>();
     expect(nodeinfo.software.name).toBe("lemmy");
+  });
+
+  it("serves the terms, privacy and help pages the app links to", async () => {
+    const page = (path: string) => worker.fetch(`${SITE}${path}`, { headers: { accept: "text/html" }, redirect: "manual" });
+    for (const path of ["/site/terms", "/e/terms", "/site/privacy", "/e/privacy", "/site/help"]) {
+      expect((await page(path)).status, path).toBe(200);
+    }
   });
 
   it("signs in and shows a profile grid, a post and its comments", async () => {

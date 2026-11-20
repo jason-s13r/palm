@@ -30,8 +30,11 @@ import { account, credentialAccount } from "./views.ts";
 type Env = { Bindings: RequestContext; Variables: { account: Account | null; app: OAuthApp | null } };
 type C = Context<Env>;
 
-/** The Pixelfed version palm answers as: the app needs 0.12.3 or later. */
-export const PIXELFED_COMPAT_VERSION = "0.12.6";
+/**
+ * The Pixelfed version palm answers as. The App Store app (1.8, Nov 2026)
+ * needs 0.14.4 or later; this is pixelfed.social's version at the time.
+ */
+export const PIXELFED_COMPAT_VERSION = "0.15.2";
 
 /** Max bio length, as Pixelfed's config reports it. */
 const MAX_BIO = 500;

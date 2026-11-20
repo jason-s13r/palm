@@ -134,6 +134,20 @@ ${communities.length ? html`<h2>Communities</h2><ul>${communities.map((x) => htm
   );
 });
 
+// --- terms, privacy and help -------------------------------------------------
+// The Pixelfed app links to these (newer builds to /e/terms and /e/privacy).
+// A page here keeps them from falling through to `browserRedirect`.
+
+for (const [paths, title] of [
+  [["/site/terms", "/e/terms"], "Terms of use"],
+  [["/site/privacy", "/e/privacy"], "Privacy policy"],
+  [["/site/help", "/site/about"], "Help"],
+] as const) {
+  for (const path of paths) {
+    app.get(path, (c) => page(site(c), { title, url: here(c) }, html`<h1>${title}</h1>`));
+  }
+}
+
 // --- interactions from other servers ------------------------------------------
 
 /**
