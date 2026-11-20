@@ -1,5 +1,23 @@
 # Changelog
 
+## worker@0.8.3 (2026-11-20)
+
+### Fixes
+
+- keep signing actors a day, so key checks skip the fetch
+
+- skip Fedify for paths it doesn't serve, and look up media hosts by index
+
+- fewer D1 rows read and written
+  Remote votes on remote posts kept by actor ID without accounts; WITHOUT ROWID votes, post_tags and fedify_kv; an index for local accounts; site counts and known servers memoised; score sorts consider the newest 200 posts; remote documents cached in memory.
+
+### Dependencies
+
+- db: 0.5.0 -> 0.5.1
+- federation: 0.5.0 -> 0.5.1
+- web: 0.1.2 -> 0.1.3
+
+
 ## worker@0.8.2 (2026-11-20)
 
 ### Fixes

@@ -1,6 +1,6 @@
 {
   "name": "@palm/db",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "type": "module",
   "description": "palm's D1 schema, its self-applying migrations, and the queries over it.",
