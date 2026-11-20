@@ -1,5 +1,12 @@
 # Changelog
 
+## db@0.9.0 (2026-11-20)
+
+### Features
+
+- HLS renditions from PeerTube runners, with palm's master playlist
+
+
 ## db@0.8.2 (2026-11-20)
 
 ### Fixes

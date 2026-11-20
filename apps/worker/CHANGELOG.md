@@ -1,5 +1,16 @@
 # Changelog
 
+## worker@0.12.0 (2026-11-20)
+
+### Features
+
+- HLS renditions from PeerTube runners, with palm's master playlist
+
+### Dependencies
+
+- db: 0.8.2 -> 0.9.0
+
+
 ## worker@0.11.3 (2026-11-20)
 
 ### Fixes
