@@ -58,6 +58,8 @@ export interface Post {
   client: PostClient | null;
   /** The app's own name, when it gave one (a Mastodon app's OAuth name, such as "Ivory"). */
   clientApp: string | null;
+  /** The kind of device it was posted from (iPhone, Android, Mac...), from the app's User-Agent. */
+  clientDevice: string | null;
 }
 
 /** The client APIs palm serves. */
@@ -101,6 +103,7 @@ interface PostRow {
   featured_local?: number | null;
   client?: string | null;
   client_app?: string | null;
+  client_device?: string | null;
 }
 
 export const toPost = (r: PostRow): Post => ({
@@ -134,6 +137,7 @@ export const toPost = (r: PostRow): Post => ({
   featuredLocal: r.featured_local === 1,
   client: (r.client as PostClient | null | undefined) ?? null,
   clientApp: r.client_app ?? null,
+  clientDevice: r.client_device ?? null,
 });
 
 export type { PostRow };
@@ -141,9 +145,9 @@ export type { PostRow };
 /** What a new post needs; the thread fields default to a plain status. */
 export type NewPost = Omit<
   Post,
-  "id" | "createdAt" | "updatedAt" | "communityId" | "title" | "linkUrl" | "rootId" | "parentId" | "path" | "apId" | "url" | "attachments" | "reblogOf" | "locked" | "featuredCommunity" | "featuredLocal" | "quoteOf" | "quotePolicy" | "quoteState" | "quoteAuthorization" | "client" | "clientApp"
+  "id" | "createdAt" | "updatedAt" | "communityId" | "title" | "linkUrl" | "rootId" | "parentId" | "path" | "apId" | "url" | "attachments" | "reblogOf" | "locked" | "featuredCommunity" | "featuredLocal" | "quoteOf" | "quotePolicy" | "quoteState" | "quoteAuthorization" | "client" | "clientApp" | "clientDevice"
 > &
-  Partial<Pick<Post, "communityId" | "title" | "linkUrl" | "rootId" | "parentId" | "apId" | "url" | "createdAt" | "updatedAt" | "attachments" | "client" | "clientApp">>;
+  Partial<Pick<Post, "communityId" | "title" | "linkUrl" | "rootId" | "parentId" | "apId" | "url" | "createdAt" | "updatedAt" | "attachments" | "client" | "clientApp" | "clientDevice">>;
 
 type PostHook = (db: D1Database, post: Post) => Promise<void>;
 const postHooks: PostHook[] = [];
@@ -162,8 +166,8 @@ export async function createPost(db: D1Database, post: NewPost): Promise<Post> {
   const row = await db
     .prepare(
       `INSERT INTO posts (account_id, content_source, content_html, spoiler_text, sensitive, visibility, language, in_reply_to,
-                          community_id, title, link_url, root_id, parent_id, created_at, ap_id, url, updated_at, attachments, client, client_app)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+                          community_id, title, link_url, root_id, parent_id, created_at, ap_id, url, updated_at, attachments, client, client_app, client_device)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .bind(
       post.accountId,
@@ -186,6 +190,7 @@ export async function createPost(db: D1Database, post: NewPost): Promise<Post> {
       post.attachments?.length ? JSON.stringify(post.attachments) : null,
       post.client ?? null,
       post.clientApp?.slice(0, 100) ?? null,
+      post.clientDevice?.slice(0, 40) ?? null,
     )
     .first<PostRow>();
   if (!row) throw new Error("Post was not created.");

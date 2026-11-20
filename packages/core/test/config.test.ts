@@ -15,6 +15,11 @@ describe("defineConfig", () => {
     expect(() => defineConfig({ ...base, domains: [] })).toThrow(ConfigError);
   });
 
+  it("takes only known postClients settings", () => {
+    expect(defineConfig({ ...base, postClients: "device" }).postClients).toBe("device");
+    expect(() => defineConfig({ ...base, postClients: "everything" as never })).toThrow(/postClients/);
+  });
+
   it("needs an instance name", () => {
     expect(() => defineConfig({ ...base, instance: { name: " " } })).toThrow(/instance.name/);
   });

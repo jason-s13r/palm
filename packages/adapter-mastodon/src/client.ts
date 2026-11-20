@@ -1,4 +1,4 @@
-import type { RequestContext } from "@palm/core";
+import { userAgentClient, type RequestContext } from "@palm/core";
 import type { Account, OAuthApp, PostClient } from "@palm/db";
 import type { Context } from "hono";
 
@@ -10,7 +10,12 @@ export function isPixelfed(c: C): boolean {
   return c.req.query("_pe") !== undefined || c.req.header("x-pixelfed-app") !== undefined || /pixelfed/i.test(c.get("app")?.name ?? "");
 }
 
-/** Which kind of app made a post, and the app's own name, for the post to keep. */
-export function clientOf(c: C): { client: PostClient; clientApp: string | null } {
-  return { client: isPixelfed(c) ? "pixelfed" : "mastodon", clientApp: c.get("app")?.name?.trim() || null };
+/** Which kind of app made a post, the app's own name, and the device it ran on, for the post to keep. */
+export function clientOf(c: C): { client: PostClient; clientApp: string | null; clientDevice: string | null } {
+  const agent = userAgentClient(c.req.header("user-agent"));
+  return {
+    client: isPixelfed(c) ? "pixelfed" : "mastodon",
+    clientApp: c.get("app")?.name?.trim() || agent.app,
+    clientDevice: agent.device,
+  };
 }

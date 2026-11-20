@@ -25,16 +25,19 @@ async function lemmyLogin(username: string) {
 const meta = (page: string, property: string) => page.match(new RegExp(`<meta (?:property|name)="${property}" content="([^"]*)"`))?.[1];
 
 describe("Web pages", () => {
-  it("says which app a local post was made from", async () => {
-    const finch = await mastodonUser("kestrel");
-    const status = await (await finch.post("/api/v1/statuses", { status: "from a Mastodon app" })).json<{ id: string; application: { name: string } | null }>();
+  it("says what kind of post it is and which app and device it came from", async () => {
+    const id = await createAccount("kestrel", "pw-pw-pw");
+    const headers = { authorization: `Bearer ${await mastodonToken(id)}`, "content-type": "application/json", "user-agent": "Test/1.0 (iPhone; iOS 18.1)" };
+    const made = await worker.fetch(`${MASTODON}/api/v1/statuses`, { method: "POST", headers, body: JSON.stringify({ status: "from a Mastodon app" }) });
+    const status = await made.json<{ id: string; application: { name: string } | null }>();
     expect(status.application?.name).toBe("Test");
+    // A Lemmy app with a webview's User-Agent names no app.
     const reply = await lemmyLogin("kestrel");
     await reply("/comment", { post_id: Number(status.id), content: "from a Lemmy app" });
 
     const page = await (await worker.fetch(`${SITE}/@kestrel/${status.id}`, BROWSER)).text();
-    expect(page).toContain("via Test (Mastodon)");
-    expect(page).toContain("via Lemmy");
+    expect(page).toContain("on Mastodon</span> · <span class=\"via\">via Test for iPhone");
+    expect(page).toContain("via a Lemmy app");
   });
 
   it("shows a profile and a status with its replies, with link-preview tags and no scripts", async () => {

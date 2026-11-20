@@ -93,12 +93,32 @@ const renderAttachments = (list: Attachment[]) =>
 /** The service names a post's client shows as. */
 const CLIENT_NAMES: Record<PostClient, string> = { lemmy: "Lemmy", mastodon: "Mastodon", pixelfed: "Pixelfed" };
 
-/** " · via Ivory (Mastodon)", " · via Pixelfed", or nothing for posts that don't say. */
-function viaOf(p: Pick<Post, "client" | "clientApp">): Html | string {
-  if (!p.client) return "";
-  const service = CLIENT_NAMES[p.client];
-  const app = p.clientApp && p.clientApp.toLowerCase() !== service.toLowerCase() ? p.clientApp : null;
-  return html` · <span class="via">via ${app ? html`${app} (${service})` : service}</span>`;
+type Posted = Pick<Post, "client" | "clientApp" | "clientDevice" | "communityId" | "apId">;
+
+/**
+ * Where a post was written, as far as the instance's `postClients` setting
+ * shows: " · on Pixelfed · via Ivory for iPhone". "On" is the kind of post:
+ * anything in a community is Lemmy's; a local status is Pixelfed's when a
+ * Pixelfed app wrote it, Mastodon's otherwise. Another server's status says
+ * nothing, since palm doesn't know what that server runs.
+ */
+function postedOf(c: C, p: Posted): Html | string {
+  const level = c.env.config.postClients ?? "app";
+  if (level === "off") return "";
+  const on = p.communityId !== null ? "Lemmy" : p.apId !== null ? null : p.client === "pixelfed" ? "Pixelfed" : "Mastodon";
+  if (!on) return "";
+  const parts: (Html | string)[] = [html` · <span class="via">on ${on}</span>`];
+  if (level === "app" || level === "device") {
+    const kind = p.client ? CLIENT_NAMES[p.client] : null;
+    // A nameless app is named by its kind when that differs from where the post is: "via a Mastodon app".
+    let app = p.clientApp ?? (kind && kind !== on ? `a ${kind} app` : null);
+    const device = level === "device" ? p.clientDevice : null;
+    // "on Pixelfed · via Pixelfed" says nothing new, unless a device follows.
+    if (app && app.toLowerCase() === on.toLowerCase() && !device) app = null;
+    const via = app && device ? `${app} for ${device}` : (app ?? device);
+    if (via) parts.push(html` · <span class="via">via ${via}</span>`);
+  }
+  return html`${parts}`;
 }
 
 function renderBody(p: Post, attachments: Attachment[]): Html {
@@ -206,13 +226,13 @@ async function profile(c: C, name: string): Promise<Response> {
   const before = Number(c.req.query("before")) || Number.MAX_SAFE_INTEGER;
   const { results } = await db
     .prepare(
-      `SELECT id, title, content_html, community_id, created_at, client, client_app FROM posts
+      `SELECT id, title, content_html, community_id, created_at, client, client_app, client_device FROM posts
        WHERE account_id = ? AND deleted_at IS NULL AND visibility = 'public' AND reblog_of IS NULL
          AND root_id IS NULL AND parent_id IS NULL AND in_reply_to IS NULL AND id < ?
        ORDER BY id DESC LIMIT 20`,
     )
     .bind(account.id, before)
-    .all<{ id: number; title: string | null; content_html: string; community_id: number | null; created_at: number; client: PostClient | null; client_app: string | null }>();
+    .all<{ id: number; title: string | null; content_html: string; community_id: number | null; created_at: number; client: PostClient | null; client_app: string | null; client_device: string | null }>();
   const url = `${origin(c)}/@${account.username}`;
   const bio = account.bio ?? "";
   return page(
@@ -233,7 +253,7 @@ ${results.length ? "" : html`<p>Nothing public yet.</p>`}
 <ol class="posts">${results.map(
       (p) =>
         html`<li><a href="${p.community_id !== null ? `/post/${p.id}` : `/@${account.username}/${p.id}`}">${p.title ?? (excerpt(p.content_html, 140) || "(no text)")}</a>
-<div class="meta">${time(p.created_at)}${viaOf({ client: p.client, clientApp: p.client_app })}</div></li>`,
+<div class="meta">${time(p.created_at)}${postedOf(c, { client: p.client, clientApp: p.client_app, clientDevice: p.client_device, communityId: p.community_id, apId: null })}</div></li>`,
     )}</ol>
 ${results.length === 20 ? html`<p><a href="?before=${results.at(-1)!.id}">Older</a></p>` : ""}`,
   );
@@ -254,7 +274,7 @@ function renderThread(c: C, comments: ThreadComment[], authors: Map<number, Acco
   const one = (x: ThreadComment): Html => {
     const author = authors.get(x.accountId);
     const body = x.deleted || !author ? html`<p class="meta">[deleted]</p>` : renderBody(x, attachmentsOf(c, x, media));
-    return html`<li id="c${x.id}"><div class="meta">${author ? html`<a href="${profileHref(author)}">${nameOf(author)}</a>` : "someone"} · ${points(x.upvotes - x.downvotes)} · ${time(x.createdAt)}${viaOf(x)} · <a href="/comment/${x.id}">link</a></div>${body}${
+    return html`<li id="c${x.id}"><div class="meta">${author ? html`<a href="${profileHref(author)}">${nameOf(author)}</a>` : "someone"} · ${points(x.upvotes - x.downvotes)} · ${time(x.createdAt)}${postedOf(c, x)} · <a href="/comment/${x.id}">link</a></div>${body}${
       children(x).length ? html`<ul class="thread">${children(x).map(one)}</ul>` : ""
     }</li>`;
   };
@@ -320,7 +340,7 @@ async function postPage(c: C, id: number): Promise<Response> {
     html`<article>
 ${context}
 ${post.title ? html`<h1>${post.title}</h1>` : ""}
-<p class="meta"><a href="${profileHref(author)}">${nameOf(author)}</a> ${handleOf(author)} · ${time(post.createdAt)}${viaOf(post)}${
+<p class="meta"><a href="${profileHref(author)}">${nameOf(author)}</a> ${handleOf(author)} · ${time(post.createdAt)}${postedOf(c, post)}${
       community ? html` · in <a href="${communityHref(community)}">!${community.name}${community.apId ? `@${community.domain}` : ""}</a>` : ""
     } · ${points(votes)}</p>
 ${post.linkUrl ? html`<p><a href="${post.linkUrl}">${post.linkUrl}</a></p>` : ""}
@@ -377,7 +397,7 @@ ${posts.length ? "" : html`<p>No posts yet.</p>`}
       const author = authors.get(p.accountId);
       const href = postHref(p);
       return html`<li><a href="${p.linkUrl ?? href}">${p.title ?? "(untitled)"}</a>${p.linkUrl ? html` <span class="meta">(${hostOf(p.linkUrl)})</span>` : ""}
-<div class="meta">${points(p.upvotes - p.downvotes)} · ${author ? html`<a href="${profileHref(author)}">${nameOf(author)}</a>` : ""} · ${time(p.createdAt)}${viaOf(p)} · <a href="${href}">${p.comments} comments</a></div></li>`;
+<div class="meta">${points(p.upvotes - p.downvotes)} · ${author ? html`<a href="${profileHref(author)}">${nameOf(author)}</a>` : ""} · ${time(p.createdAt)}${postedOf(c, p)} · <a href="${href}">${p.comments} comments</a></div></li>`;
     })}</ol>
 ${posts.length === 25 ? html`<p><a href="?page=${pageNo + 1}">More</a></p>` : ""}`,
   );

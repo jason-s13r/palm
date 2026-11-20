@@ -1,4 +1,5 @@
 import { markdownToHtml, urls, type RequestContext } from "@palm/core";
+import { lemmyClient } from "./client.ts";
 import {
   accountByHandle,
   accountById,
@@ -636,7 +637,7 @@ threadRoutes.post("/api/v3/post", async (c) => {
   const db = c.env.bindings.DB;
   const created = await createPost(db, {
     accountId: auth.account.id,
-    client: "lemmy",
+    ...lemmyClient(c),
     contentSource: text,
     contentHtml: markdownToHtml(text),
     spoilerText: "",
@@ -805,7 +806,7 @@ threadRoutes.post("/api/v3/comment", async (c) => {
   const parentAuthor = await accountById(db, inReplyTo.accountId);
   const created = await createPost(db, {
     accountId: auth.account.id,
-    client: "lemmy",
+    ...lemmyClient(c),
     contentSource: text,
     contentHtml: markdownToHtml(text),
     spoilerText: "",

@@ -301,6 +301,8 @@ export async function statuses(ctx: RequestContext, rows: Post[], viewer: Accoun
 
 /** Statuses for posts (not boosts). */
 async function renderStatuses(ctx: RequestContext, posts: Post[], viewer: Account | null, nested = false) {
+  // The instance's postClients setting decides whether apps' names show.
+  const showsApps = ["app", "device"].includes(ctx.config.postClients ?? "app");
   const db = ctx.bindings.DB;
   const parentIds = posts.map((p) => p.parentId).filter((id): id is number => id !== null);
   const ids = posts.map((p) => p.id);
@@ -372,7 +374,7 @@ async function renderStatuses(ctx: RequestContext, posts: Post[], viewer: Accoun
         ),
         filtered: [],
         reblog: null as unknown,
-        application: post.apId === null && post.clientApp ? { name: post.clientApp, website: null } : null,
+        application: post.apId === null && post.clientApp && showsApps ? { name: post.clientApp, website: null } : null,
         account: authorView,
         media_attachments: [
           ...(media.get(post.id) ?? []).map((m) => mediaAttachment(ctx, m, author.domain)),

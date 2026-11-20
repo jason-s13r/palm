@@ -45,7 +45,19 @@ export interface PalmConfig {
   browserRedirect?: string;
   /** How new accounts are created. Only invites for now. */
   registration?: "invite";
+  /**
+   * How much a post's page says about where it was written:
+   * - "off": nothing;
+   * - "service": the kind of post ("on Lemmy", "on Pixelfed", "on Mastodon");
+   * - "app" (the default): and the app ("via Ivory");
+   * - "device": and the device ("via Ivory for iPhone").
+   * Mastodon apps get the app's name as a status's `application` at "app" and "device".
+   */
+  postClients?: PostClientDisplay;
 }
+
+export type PostClientDisplay = "off" | "service" | "app" | "device";
+export const POST_CLIENT_DISPLAYS: readonly PostClientDisplay[] = ["off", "service", "app", "device"];
 
 export class ConfigError extends Error {
   override name = "ConfigError";
@@ -95,6 +107,10 @@ export function defineConfig(config: PalmConfig): PalmConfig {
     if (url.protocol !== "https:") {
       throw new ConfigError("browserRedirect must be an https URL.");
     }
+  }
+
+  if (config.postClients !== undefined && !POST_CLIENT_DISPLAYS.includes(config.postClients)) {
+    throw new ConfigError(`postClients must be one of ${POST_CLIENT_DISPLAYS.join(", ")}.`);
   }
 
   return config;

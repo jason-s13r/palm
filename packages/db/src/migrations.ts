@@ -845,6 +845,14 @@ ALTER TABLE posts ADD COLUMN client TEXT
 ALTER TABLE posts ADD COLUMN client_app TEXT
 `,
   },
+  {
+    version: 30,
+    name: "post client devices",
+    // The kind of device a local post came from, read from the app's User-Agent.
+    sql: `
+ALTER TABLE posts ADD COLUMN client_device TEXT
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

@@ -81,6 +81,10 @@ Node 22+ and pnpm.
      registration: "invite",
      // Where browsers landing on pages palm doesn't serve are sent (optional).
      browserRedirect: "https://your.website",
+     // What post pages say about where a post was written (optional):
+     // "off", "service" ("on Pixelfed"), "app" (default, "via Ivory")
+     // or "device" ("via Ivory for iPhone").
+     postClients: "app",
    });
    ```
 

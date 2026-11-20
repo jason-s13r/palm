@@ -1,4 +1,5 @@
 import { markdownToHtml, urls, type RequestContext } from "@palm/core";
+import { lemmyClient } from "./client.ts";
 import {
   accountById,
   accountsByIds,
@@ -101,7 +102,7 @@ messageRoutes.post("/api/v3/private_message", async (c) => {
   if (await blocks(db, recipient.id, auth.account.id)) return fail(c, "person_is_blocked");
   const created = await createPost(db, {
     accountId: auth.account.id,
-    client: "lemmy",
+    ...lemmyClient(c),
     contentSource: text,
     contentHtml: markdownToHtml(text),
     spoilerText: "",
