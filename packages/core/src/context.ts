@@ -247,8 +247,9 @@ export function localPostId(pathname: string): number | null {
 export const LEMMY_COMPAT_VERSION = "0.19.9";
 
 /**
- * The version palm reports in nodeinfo: the Lemmy version it's compatible
- * with, plus palm's own as semver build metadata, e.g. "0.19.9+palm.0.2.0".
+ * The version palm reports in nodeinfo to Lemmy apps (see presentation.ts):
+ * the Lemmy version it's compatible with, plus palm's own as semver build
+ * metadata, e.g. "0.19.9+palm.0.2.0".
  * Comparisons ignore build metadata, so app version checks still pass; anyone
  * reading it can see it's palm. (The software name has to be plain "lemmy":
  * the schema allows one lowercase word.)

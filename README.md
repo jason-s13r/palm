@@ -57,8 +57,10 @@ One Worker serves the domain and routes on the path:
 | `/api/v1/videos`, `/api/v1/users`, `/api/v1/video-channels`, `/api/v1/config`... | The PeerTube API, for PeerTube apps (its sections of `/api/v1` aren't Mastodon's) |
 
 People sign in to both kinds of app with the domain itself (`your.domain`), so
-apps show their handle as `@name@your.domain`. Nodeinfo answers as Lemmy,
-which Lemmy apps check before they sign in. The Pixelfed app checks
+apps show their handle as `@name@your.domain`. Nodeinfo answers as palm,
+except to apps that need another name: Lemmy apps (Voyager) check for Lemmy
+before they sign in, so they're told Lemmy. The list of who sees what is
+`PRESENTATIONS` in `packages/core/src/presentation.ts`. The Pixelfed app checks
 Pixelfed's own path, `/api/nodeinfo/2.0.json`, which answers as Pixelfed.
 
 Data lives in one D1 database, uploads in an R2 bucket, and outgoing

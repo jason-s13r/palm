@@ -86,11 +86,26 @@ describe("federation", () => {
     expect((await worker.fetch(`${DOMAIN}/.well-known/webfinger?resource=acct:nobody@palm.test`)).status).toBe(404);
   });
 
-  it("answers nodeinfo as Lemmy, with palm's version as build metadata", async () => {
-    const links = await (await worker.fetch(`${DOMAIN}/.well-known/nodeinfo`)).json<{ links: { href: string }[] }>();
-    const info = await (await worker.fetch(links.links[0]!.href)).json<{ software: { name: string; version: string } }>();
-    expect(info.software.name).toBe("lemmy");
-    expect(info.software.version).toMatch(/^0\.19\.9\+palm\.\d+\.\d+\.\d+$/);
+  it("answers nodeinfo as palm, and as Lemmy (with palm's version as build metadata) to Lemmy apps", async () => {
+    type Info = { software: { name: string; version: string } };
+    const nodeinfo = async (headers: Record<string, string>) => {
+      const links = await (await worker.fetch(`${DOMAIN}/.well-known/nodeinfo`, { headers })).json<{ links: { href: string }[] }>();
+      return (await worker.fetch(links.links[0]!.href, { headers })).json<Info>();
+    };
+    const palm = await nodeinfo({ "user-agent": "Lemmy/0.19.21; +https://lemmy.example" });
+    expect(palm.software.name).toBe("palm");
+    expect(palm.software.version).toMatch(/^\d+\.\d+\.\d+/);
+    // Asked again as Voyager straight after: not palm's copy from the cache.
+    for (const headers of [
+      { "user-agent": "VoyagerApp/1.0" },
+      { "user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 VoyagerApp/1.0" },
+      { "user-agent": "Mozilla/5.0 (Macintosh) Safari/605.1.15", origin: "https://vger.app" },
+    ]) {
+      const lemmy = await nodeinfo(headers);
+      expect(lemmy.software.name).toBe("lemmy");
+      expect(lemmy.software.version).toMatch(/^0\.19\.9\+palm\.\d+\.\d+\.\d+$/);
+    }
+    expect((await nodeinfo({})).software.name).toBe("palm");
   });
 
   it("refuses unsigned inbox deliveries", async () => {
@@ -231,14 +246,14 @@ describe("federation", () => {
     expect(await db.prepare("SELECT 1 FROM stories WHERE ap_id = ?").bind(add.object.id).first()).toBeNull();
   });
 
-  it("serves both client APIs on the bare domain, and keeps nodeinfo as Lemmy", async () => {
+  it("serves both client APIs on the bare domain, with nodeinfo saying palm", async () => {
     expect((await worker.fetch(`${DOMAIN}/api/v3/site`)).status).toBe(200);
     const instance = await (await worker.fetch(`${DOMAIN}/api/v2/instance`)).json<{ domain: string }>();
     expect(instance.domain).toBe("palm.test");
     expect((await worker.fetch(`${DOMAIN}/.well-known/oauth-authorization-server`)).status).toBe(200);
     const links = await (await worker.fetch(`${DOMAIN}/.well-known/nodeinfo`)).json<{ links: { href: string }[] }>();
     const nodeinfo = await (await worker.fetch(links.links[0]!.href)).json<{ software: { name: string } }>();
-    expect(nodeinfo.software.name).toBe("lemmy");
+    expect(nodeinfo.software.name).toBe("palm");
   });
 
   it("gives accounts signed in on the bare domain a url there, so apps show @name@domain", async () => {

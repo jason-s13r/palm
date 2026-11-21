@@ -2,7 +2,7 @@ import { handleLemmy } from "@palm/adapter-lemmy";
 import { handleMastodon, publishDueStatuses } from "@palm/adapter-mastodon";
 import { backfillRunnerJobs, handlePeerTube, queueAttachmentTranscodes, isPeerTubePath, runnerSocket, videoMaintenance } from "@palm/adapter-peertube";
 import { activitySink, handleFederation, processQueueMessage, serveStory, serveVideoObject, type QueueBody } from "@palm/federation";
-import { contextScope, defineConfig, enterContext, LOCAL_POST_PATH, normaliseHost, resolveSurface, type DomainConfig, type PalmBindings, type PalmConfig, type RequestContext } from "@palm/core";
+import { contextScope, defineConfig, enterContext, LOCAL_POST_PATH, normaliseHost, presentationFor, resolveSurface, type DomainConfig, type PalmBindings, type PalmConfig, type RequestContext } from "@palm/core";
 import { claimFollowImports, deleteMedia, domainOf, mediaById, migrate, pendingDeletes, pendingMoves, prune, removeEndedStories } from "@palm/db";
 import { handleWeb } from "@palm/web";
 import { avatarResponse, headerResponse, identiconResponse } from "./assets.ts";
@@ -189,12 +189,12 @@ export async function handle(
   }
 
   const served = surface;
-  // Nodeinfo's links are the same for every request, and crawlers ask for
-  // them often: answered before any database or Fedify work. Pixelfed's own
-  // fetches are pointed at the Pixelfed nodeinfo, so it sends stories;
-  // everyone else gets Lemmy's (Voyager needs it).
+  // Nodeinfo's links, answered before any database or Fedify work: crawlers
+  // ask for them often. Pixelfed servers are pointed at the Pixelfed nodeinfo,
+  // so they send stories; everyone else at /nodeinfo/2.1, which says palm (or
+  // Lemmy, to Lemmy apps). Who sees what: PRESENTATIONS in @palm/core.
   if (surface.kind === "federation" && url.pathname === "/.well-known/nodeinfo" && request.method === "GET") {
-    return nodeinfoLinks(surface.domain.domain, /\bPixelfed\//.test(request.headers.get("user-agent") ?? ""));
+    return nodeinfoLinks(surface.domain.domain, presentationFor(request.headers) === "pixelfed");
   }
   // Uploads come from cache when they can, before any database work.
   if (url.pathname.startsWith("/pictrs/image/") && !url.pathname.startsWith("/pictrs/image/delete/")) {
@@ -221,7 +221,7 @@ export async function handle(
         // Mastodon app both do), so signing in with the bare domain gives
         // @name@domain. Their paths don't overlap: Lemmy's API is /api/v3,
         // Mastodon's /api/v1 and /api/v2 (and Pixelfed's extras). Discovery (WebFinger, nodeinfo) stays
-        // with federation, which answers nodeinfo as Lemmy.
+        // with federation.
         // Uploaded images live where Lemmy keeps them, for both kinds of app.
         if (url.pathname.startsWith("/api/v3/") || url.pathname.startsWith("/pictrs/")) return handleLemmy(request, ctx);
         // PeerTube's API shares /api/v1 with Mastodon's without overlapping

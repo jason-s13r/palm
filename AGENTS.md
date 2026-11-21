@@ -22,7 +22,7 @@ outside this repo (the Palm project's `palm-decisions.md`).
   apps (`_pe=1`, `X-PIXELFED-APP` or an app named for Pixelfed), and its own
   endpoints under `/api/v1.1`, `/api/v1.2`, `/api/v2.1` and `/api/pixelfed`. The app checks
   `/api/nodeinfo/2.0.json` for "pixelfed" (the App Store build reads
-  `/api/v2.1/config`'s version); standard nodeinfo stays Lemmy.
+  `/api/v2.1/config`'s version); standard nodeinfo says palm (see below).
 - `packages/adapter-peertube`: the PeerTube client API (PeerTube's apps),
   on the bare domain beside Mastodon's: PeerTube's sections of `/api/v1`
   (videos, users, video-channels, config...) aren't Mastodon's, and its
@@ -89,10 +89,13 @@ All of the above are internal and never published.
 (Fedify's own Temporal, which palm uses for ActivityPub dates); they're the
 published package's dependencies.
 
-Nodeinfo answers as Lemmy everywhere, with palm's version as semver build
-metadata (`0.19.9+palm.X.Y.Z`): Voyager saves an account under the handle's
-domain and then only talks to that domain, after checking its nodeinfo for
-Lemmy >=0.19.
+Nodeinfo answers as palm, except to the clients listed in `PRESENTATIONS`
+(`packages/core/src/presentation.ts`), matched by User-Agent or Origin. Lemmy
+apps are told Lemmy, with palm's version as semver build metadata
+(`0.19.9+palm.X.Y.Z`): Voyager saves an account under the handle's domain and
+then only talks to that domain, after checking its nodeinfo for Lemmy >=0.19.
+Pixelfed servers are pointed at the Pixelfed nodeinfo, so they send stories.
+A client that needs another software's name gets a row there.
 
 Both client APIs answer on the bare domain as well as on their own hosts, so
 people sign in with the domain in their handle. Apps build the handle from the

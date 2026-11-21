@@ -156,7 +156,7 @@ export async function showsStories(db: D1Database, host: string): Promise<boolea
     known = await fetchSoftware(host);
     await rememberSoftware(db, host, known.software, known.version);
   }
-  return known.software === "pixelfed" || (known.version ?? "").includes("+palm.");
+  return known.software === "pixelfed" || known.software === "palm" || (known.version ?? "").includes("+palm.");
 }
 
 async function fetchSoftware(host: string): Promise<{ software: string | null; version: string | null }> {

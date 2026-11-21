@@ -8,4 +8,6 @@ export { escapeHtml, hashtagsIn, htmlToText, markdownToHtml, mentionsIn, preview
 export { contextScope, currentContext, enterContext } from "./current.ts";
 export { uploadCacheKey } from "./cache-keys.ts";
 export { appName, userAgentClient } from "./user-agent.ts";
+export { PRESENTATIONS, presentationFor } from "./presentation.ts";
+export type { Presentation, PresentationRule } from "./presentation.ts";
 export type { UserAgentClient } from "./user-agent.ts";

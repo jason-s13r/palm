@@ -59,7 +59,7 @@ async function pngUpload(token: string) {
 }
 
 describe("Pixelfed apps", () => {
-  it("tells Pixelfed apps it's Pixelfed, and everyone else it's Lemmy", async () => {
+  it("tells Pixelfed apps it's Pixelfed, and everyone else it's palm", async () => {
     const pixelfed = await (await worker.fetch(`${SITE}/api/nodeinfo/2.0.json`)).json<{ software: { name: string; version: string } }>();
     expect(pixelfed.software.name).toBe("pixelfed");
     // The App Store app needs 0.14.4 or later, read from the leading x.y.z.
@@ -74,7 +74,7 @@ describe("Pixelfed apps", () => {
 
     const wellKnown = await (await worker.fetch(`${SITE}/.well-known/nodeinfo`, { headers: { accept: "application/json" } })).json<{ links: { href: string }[] }>();
     const nodeinfo = await (await worker.fetch(wellKnown.links[0]!.href, { headers: { accept: "application/json" } })).json<{ software: { name: string } }>();
-    expect(nodeinfo.software.name).toBe("lemmy");
+    expect(nodeinfo.software.name).toBe("palm");
   });
 
   it("serves the terms, privacy and help pages the app links to", async () => {

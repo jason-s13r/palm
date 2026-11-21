@@ -1,6 +1,6 @@
 import { importJwk, type Context } from "@fedify/fedify";
 import { Endpoints, Hashtag, Image, Object as APObject, Person, QuoteAuthorization, Tombstone } from "@fedify/fedify/vocab";
-import { nodeinfoVersion, urls, type RequestContext } from "@palm/core";
+import { nodeinfoVersion, presentationFor, urls, type RequestContext } from "@palm/core";
 import {
   quoteAuthorization,
   featuredTags,
@@ -179,13 +179,15 @@ builder
 
 registerInbox(builder, "/users/{identifier}/inbox", "/inbox");
 
-// palm answers as Lemmy, because Lemmy apps (Voyager) check the handle's
-// domain for a Lemmy server before they'll use it. The version carries palm's
-// own as build metadata ("0.19.9+palm.0.2.0"); see nodeinfoVersion.
+// palm answers as itself, except to the clients in @palm/core's PRESENTATIONS
+// that need another software's name: Lemmy apps (Voyager) check the handle's
+// domain for a Lemmy server before they'll use it, so they're told Lemmy, with
+// palm's version as build metadata ("0.19.9+palm.0.2.0"; see nodeinfoVersion).
 builder.setNodeInfoDispatcher("/nodeinfo/2.1", async (ctx) => ({
   software: {
-    name: "lemmy",
-    version: nodeinfoVersion(ctx.data.version),
+    ...(presentationFor(ctx.request.headers) === "lemmy"
+      ? { name: "lemmy", version: nodeinfoVersion(ctx.data.version) }
+      : { name: "palm", version: ctx.data.version }),
     repository: new URL("https://github.com/jason-s13r/palm"),
     homepage: new URL("https://github.com/jason-s13r/palm"),
   },

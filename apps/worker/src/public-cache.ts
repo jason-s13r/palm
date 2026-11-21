@@ -1,4 +1,4 @@
-import { uploadCacheKey, type RequestContext } from "@palm/core";
+import { presentationFor, uploadCacheKey, type RequestContext } from "@palm/core";
 import { profileVersion } from "@palm/db";
 
 /**
@@ -84,9 +84,11 @@ export async function servePublic(request: Request, ctx: RequestContext, serve: 
     version = found;
   }
   // The key marks the copy as palm's, for ActivityPub or JSON, at a version.
+  // Nodeinfo differs by who asks (Lemmy apps are told Lemmy), so its copies
+  // are kept apart by that too.
   const key = new URL(url.href);
   key.hash = "";
-  key.searchParams.set("_palm", `ap.${version}`);
+  key.searchParams.set("_palm", NODEINFO.test(url.pathname) ? `ap.${version}.${presentationFor(request.headers)}` : `ap.${version}`);
   const hit = await store.match(key.href);
   if (hit) {
     const marked = new Response(hit.body, hit);
