@@ -169,6 +169,7 @@ export {
   knownDomains,
   openInvite,
   prune,
+  PRUNE_BATCH,
   redeemInvite,
   setBanned,
   setBlockedDomains,

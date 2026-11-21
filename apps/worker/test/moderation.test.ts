@@ -109,4 +109,31 @@ describe("Pruning", () => {
     const left = await db.prepare("SELECT id FROM posts WHERE id IN (?, ?)").bind(untouched!.id, voted!.id).all<{ id: number }>();
     expect(left.results.map((r) => r.id)).toEqual([voted!.id]);
   });
+
+  it("prunes more posts than D1 binds in one statement, with their votes, edits and polls", async () => {
+    const { prune, migrate, PRUNE_BATCH } = await import("@palm/db");
+    await migrate(db);
+    const remote = await db
+      .prepare("INSERT INTO accounts (domain, username, role, created_at, ap_id, inbox) VALUES ('many.example', 'many', 'user', 1, 'https://many.example/u/many', 'https://many.example/inbox') RETURNING id")
+      .first<{ id: number }>();
+    const count = PRUNE_BATCH * 2 + 5;
+    const ids: number[] = [];
+    for (let i = 0; i < count; i++) {
+      const row = await db
+        .prepare("INSERT INTO posts (account_id, content_source, content_html, visibility, created_at, ap_id) VALUES (?, 'x', '<p>x</p>', 'public', 1000, ?) RETURNING id")
+        .bind(remote!.id, `https://many.example/p/${i}`)
+        .first<{ id: number }>();
+      ids.push(row!.id);
+    }
+    await db.batch([
+      db.prepare("INSERT INTO remote_votes (post_id, actor, score, created_at) VALUES (?, 'https://x.example/u/a', 1, 1)").bind(ids[0]),
+      db.prepare("INSERT INTO post_edits (post_id, content_html, content_source, created_at) VALUES (?, '<p>y</p>', 'y', 1)").bind(ids[1]),
+      db.prepare("INSERT INTO polls (post_id, options) VALUES (?, '[]')").bind(ids[2]),
+    ]);
+    let removed = 0;
+    for (let n = await prune(db, 30, count); n > 0; n = await prune(db, 30, count)) removed += n;
+    expect(removed).toBeGreaterThanOrEqual(count);
+    const left = await db.prepare("SELECT COUNT(*) AS n FROM posts WHERE account_id = ?").bind(remote!.id).first<{ n: number }>();
+    expect(left!.n).toBe(0);
+  });
 });

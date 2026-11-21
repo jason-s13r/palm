@@ -137,13 +137,17 @@ export async function redeemInvite(
 
 // --- pruning ---------------------------------------------------------------------
 
+/** Posts named in one prune statement: D1 allows 100 bound parameters. */
+export const PRUNE_BATCH = 100;
+
 /**
  * Keeps the database inside D1's free 500 MB: deletes remote posts older than
  * `days` that nobody here touched (no local vote, bookmark, boost, mention or
- * reply), old read notifications, and Fedify's expired cache. Runs from the
- * Worker's daily cron, a batch at a time. Returns how many posts went.
+ * reply, poll vote, pin or report), old read notifications, and Fedify's
+ * expired cache. Runs from the Worker's cron in the 03:00 UTC hour, a batch at
+ * a time. Returns how many posts went.
  */
-export async function prune(db: D1Database, days = 30, batch = 300): Promise<number> {
+export async function prune(db: D1Database, days = 30, batch = PRUNE_BATCH): Promise<number> {
   const cutoff = now() - days * 24 * 60 * 60;
   // Old boosts by people elsewhere go first: they only point at posts.
   await db
@@ -160,26 +164,38 @@ export async function prune(db: D1Database, days = 30, batch = 300): Promise<num
          AND NOT EXISTS (SELECT 1 FROM bookmarks k WHERE k.post_id = p.id)
          AND NOT EXISTS (SELECT 1 FROM boosts b JOIN accounts ba ON ba.id = b.account_id WHERE b.post_id = p.id AND ba.ap_id IS NULL)
          AND NOT EXISTS (SELECT 1 FROM mentions m JOIN accounts ma ON ma.id = m.account_id WHERE m.post_id = p.id AND ma.ap_id IS NULL)
-         AND NOT EXISTS (SELECT 1 FROM posts c WHERE c.parent_id = p.id OR c.root_id = p.id OR c.reblog_of = p.id)
+         AND NOT EXISTS (SELECT 1 FROM posts c WHERE c.parent_id = p.id)
+         AND NOT EXISTS (SELECT 1 FROM posts c WHERE c.root_id = p.id)
+         AND NOT EXISTS (SELECT 1 FROM posts c WHERE c.reblog_of = p.id)
          AND NOT EXISTS (SELECT 1 FROM media d WHERE d.post_id = p.id)
+         AND NOT EXISTS (SELECT 1 FROM poll_votes pv WHERE pv.post_id = p.id)
+         AND NOT EXISTS (SELECT 1 FROM pinned_posts pp WHERE pp.post_id = p.id)
+         AND NOT EXISTS (SELECT 1 FROM reports r WHERE r.post_id = p.id)
        LIMIT ?`,
     )
     .bind(cutoff, batch)
     .all<{ id: number }>();
   const ids = results.map((r) => r.id);
-  if (ids.length) {
-    const marks = ids.map(() => "?").join(", ");
+  // D1 takes at most 100 bound parameters a statement, so a batch never
+  // names more posts than that.
+  for (let i = 0; i < ids.length; i += PRUNE_BATCH) {
+    const chunk = ids.slice(i, i + PRUNE_BATCH);
+    const marks = chunk.map(() => "?").join(", ");
     await db.batch([
-      db.prepare(`DELETE FROM videos WHERE post_id IN (${marks})`).bind(...ids),
-      db.prepare(`DELETE FROM video_history WHERE post_id IN (${marks})`).bind(...ids),
-      db.prepare(`DELETE FROM votes WHERE post_id IN (${marks})`).bind(...ids),
-      db.prepare(`DELETE FROM remote_votes WHERE post_id IN (${marks})`).bind(...ids),
-      db.prepare(`DELETE FROM boosts WHERE post_id IN (${marks})`).bind(...ids),
-      db.prepare(`DELETE FROM bookmarks WHERE post_id IN (${marks})`).bind(...ids),
-      db.prepare(`DELETE FROM mentions WHERE post_id IN (${marks})`).bind(...ids),
-      db.prepare(`DELETE FROM post_tags WHERE post_id IN (${marks})`).bind(...ids),
-      db.prepare(`DELETE FROM notifications WHERE post_id IN (${marks})`).bind(...ids),
-      db.prepare(`DELETE FROM posts WHERE id IN (${marks})`).bind(...ids),
+      db.prepare(`DELETE FROM videos WHERE post_id IN (${marks})`).bind(...chunk),
+      db.prepare(`DELETE FROM video_history WHERE post_id IN (${marks})`).bind(...chunk),
+      db.prepare(`DELETE FROM votes WHERE post_id IN (${marks})`).bind(...chunk),
+      db.prepare(`DELETE FROM remote_votes WHERE post_id IN (${marks})`).bind(...chunk),
+      db.prepare(`DELETE FROM boosts WHERE post_id IN (${marks})`).bind(...chunk),
+      db.prepare(`DELETE FROM bookmarks WHERE post_id IN (${marks})`).bind(...chunk),
+      db.prepare(`DELETE FROM mentions WHERE post_id IN (${marks})`).bind(...chunk),
+      db.prepare(`DELETE FROM post_tags WHERE post_id IN (${marks})`).bind(...chunk),
+      db.prepare(`DELETE FROM notifications WHERE post_id IN (${marks})`).bind(...chunk),
+      db.prepare(`DELETE FROM polls WHERE post_id IN (${marks})`).bind(...chunk),
+      db.prepare(`DELETE FROM post_edits WHERE post_id IN (${marks})`).bind(...chunk),
+      db.prepare(`DELETE FROM post_reads WHERE post_id IN (${marks})`).bind(...chunk),
+      db.prepare(`DELETE FROM post_hides WHERE post_id IN (${marks})`).bind(...chunk),
+      db.prepare(`DELETE FROM posts WHERE id IN (${marks})`).bind(...chunk),
     ]);
   }
   await db.batch([

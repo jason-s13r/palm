@@ -49,7 +49,7 @@ export function createPalm<Env extends PalmEnv = PalmEnv>(source: ConfigSource<E
       await contextScope(() => consume(configFor(env), batch as MessageBatch<QueueBody>, env, ctx));
     },
     // The cron runs every 10 minutes: scheduled posts go out when due, and
-    // once a day (in the 03:00 UTC run) old remote posts are pruned.
+    // through the 03:00 UTC hour old remote posts are pruned.
     scheduled(controller, env, ctx) {
       return contextScope(() => scheduled(configFor(env), controller, env, ctx));
     },
@@ -92,16 +92,17 @@ async function scheduled(config: PalmConfig, controller: ScheduledController, en
   if (first) await queueAttachmentTranscodes(first).catch((error: unknown) => console.warn(JSON.stringify({ palm: "attachment_transcodes_failed", error: String(error) })));
   if (first) await backfillRunnerJobs(first).catch((error: unknown) => console.warn(JSON.stringify({ palm: "runner_backfill_failed", error: String(error) })));
   if (first) await videoMaintenance(first).catch((error: unknown) => console.warn(JSON.stringify({ palm: "video_maintenance_failed", error: String(error) })));
+  // Every run in the 03:00 UTC hour prunes: a few batches each keeps every run
+  // short, and six runs clear up to 3,000 posts a night.
   const at = new Date(controller.scheduledTime);
-  if (at.getUTCHours() !== 3 || at.getUTCMinutes() >= 10) return;
+  if (at.getUTCHours() !== 3) return;
   let removed = 0;
-  // A few batches per run keeps each run short; the next day picks up the rest.
   for (let i = 0; i < 5; i++) {
     const n = await prune(env.DB);
     removed += n;
     if (n === 0) break;
   }
-  console.log(JSON.stringify({ palm: "pruned", posts: removed }));
+  if (removed) console.log(JSON.stringify({ palm: "pruned", posts: removed }));
 }
 
 /** Follow imports sent per cron run: 720 a day. */
