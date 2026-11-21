@@ -63,7 +63,10 @@ the actor behind every signing key to check it owns the key.
   posts at `/@name/id`, `/post/id` and `/comment/id`, communities at `/c/name`),
   with Open Graph tags, a few lines of CSS and no JavaScript. Browsers on an
   actor's or object's ID land on these; ActivityPub clients asking for these
-  URLs are sent to the object. Only public and unlisted posts show.
+  URLs are sent to the object. Only public and unlisted posts show. Other
+  servers' people and communities redirect to their own pages, and so do their
+  posts unless someone here posted or commented in the thread (or it's in a
+  local community).
 - `packages/cli`: admin commands run locally (`pnpm palm user create ...`,
   `pnpm palm user keys|alias|move|delete|export|import ...`, `pnpm palm community create ...`,
   `pnpm palm invite create ...`). Signing keys are generated here, not in the

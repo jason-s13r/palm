@@ -121,6 +121,46 @@ describe("Web pages", () => {
     expect(comment).toContain("nested");
   });
 
+  it("shows other servers' posts only when someone here is in the thread", async () => {
+    const remote = await db
+      .prepare("INSERT INTO accounts (domain, username, role, created_at, ap_id, inbox) VALUES ('away.example', 'tern', 'user', 1, 'https://away.example/u/tern', 'https://away.example/inbox') RETURNING id")
+      .first<{ id: number }>();
+    const group = await db
+      .prepare("INSERT INTO communities (domain, name, title, created_at, ap_id, inbox) VALUES ('away.example', 'birds', 'Birds', 1, 'https://away.example/c/birds', 'https://away.example/inbox') RETURNING id")
+      .first<{ id: number }>();
+    const insert = (apId: string, extra: { communityId?: number; parentId?: number; title?: string }) =>
+      db
+        .prepare("INSERT INTO posts (account_id, community_id, parent_id, title, content_source, content_html, spoiler_text, sensitive, visibility, created_at, ap_id) VALUES (?, ?, ?, ?, 'x', '<p>x</p>', '', 0, 'public', 1, ?) RETURNING id")
+        .bind(remote!.id, extra.communityId ?? null, extra.parentId ?? null, extra.title ?? null, apId)
+        .first<{ id: number }>();
+
+    // A remote community redirects, as remote people do.
+    const community = await worker.fetch(`${SITE}/c/birds@away.example`, BROWSER);
+    expect(community.status).toBe(302);
+    expect(community.headers.get("location")).toBe("https://away.example/c/birds");
+
+    // A remote Lemmy post nobody here commented on redirects; one with a local comment shows.
+    const quiet = await insert("https://away.example/post/1", { communityId: group!.id, title: "Quiet" });
+    const lonely = await worker.fetch(`${SITE}/post/${quiet!.id}`, BROWSER);
+    expect(lonely.status).toBe(302);
+    expect(lonely.headers.get("location")).toBe("https://away.example/post/1");
+    await createAccount("heron", "pw-pw-pw");
+    await (await lemmyLogin("heron"))("/comment", { post_id: quiet!.id, content: "hello" });
+    expect((await worker.fetch(`${SITE}/post/${quiet!.id}`, BROWSER)).status).toBe(200);
+
+    // The same for a remote status: a local reply anywhere in its thread gives it a page.
+    const status = await insert("https://away.example/n/1", {});
+    expect((await worker.fetch(`${SITE}/post/${status!.id}`, BROWSER)).status).toBe(302);
+    const reply = await insert("https://away.example/n/2", { parentId: status!.id });
+    const heron = await createAccount("heron2", "pw-pw-pw");
+    await worker.fetch(`${MASTODON}/api/v1/statuses`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${await mastodonToken(heron)}`, "content-type": "application/json" },
+      body: JSON.stringify({ status: "deep reply", in_reply_to_id: String(reply!.id) }),
+    });
+    expect((await worker.fetch(`${SITE}/post/${status!.id}`, BROWSER)).status).toBe(200);
+  });
+
   it("sends apps and other servers to the right place", async () => {
     await createAccount("lark", "pw-pw-pw");
     // A server resolving a profile link gets the actor.

@@ -28,9 +28,11 @@ import { html, type Html, notFound, page, raw, time } from "./html.ts";
  * properly is for the apps. Each page carries Open Graph tags so links
  * preview well, and points at its ActivityPub object.
  *
- * Only public and unlisted posts are shown. Other servers' posts and
- * communities are shown when palm keeps them, marked noindex and with the
- * original as canonical.
+ * Only public and unlisted posts are shown. Another server's post has a page
+ * here only when someone here took part in its thread (a local post or
+ * comment in it) or it sits in one of palm's own communities; it's marked
+ * noindex, with the original as canonical. Anything else of another server's
+ * (people, communities, posts nobody here touched) redirects to the original.
  */
 
 type Env = { Bindings: RequestContext };
@@ -64,7 +66,8 @@ const authorLine = (a: Account) =>
 
 /** Where palm shows a person: their own page here, or their server's. */
 const profileHref = (a: Account) => (a.apId ? (a.profileUrl ?? a.apId) : `/@${encodeURIComponent(a.username)}`);
-const communityHref = (x: Community) => (x.apId ? `/c/${encodeURIComponent(x.name)}@${x.domain}` : `/c/${encodeURIComponent(x.name)}`);
+/** Where palm shows a community: its own page here, or its server's. */
+const communityHref = (x: Community) => (x.apId ? (x.profileUrl ?? x.apId) : `/c/${encodeURIComponent(x.name)}`);
 /** A post's page here: Lemmy posts and comments by their Lemmy paths, statuses under their author. */
 const postHref = (p: Post, author?: Account) =>
   p.rootId !== null ? `/comment/${p.id}` : p.communityId !== null ? `/post/${p.id}` : author && !author.apId ? `/@${author.username}/${p.id}` : `/post/${p.id}`;
@@ -151,6 +154,24 @@ const score = async (db: D1Database, postId: number) =>
       .bind(postId)
       .first<{ s: number }>()
   )?.s ?? 0;
+
+/**
+ * Whether someone here took part in a thread: a public or unlisted post or
+ * comment of theirs in it, the root included. Lemmy threads hang off
+ * `root_id`; status threads are followed down `parent_id`.
+ */
+async function hasLocalEngagement(db: D1Database, rootId: number, lemmy: boolean): Promise<boolean> {
+  const local = "p.ap_id IS NULL AND p.deleted_at IS NULL AND p.visibility IN ('public', 'unlisted')";
+  const sql = lemmy
+    ? `SELECT 1 AS x FROM posts p WHERE (p.id = ?1 OR p.root_id = ?1) AND ${local} LIMIT 1`
+    : `WITH RECURSIVE t(id, depth) AS (
+         SELECT ?1, 0
+         UNION ALL
+         SELECT x.id, t.depth + 1 FROM posts x JOIN t ON x.parent_id = t.id WHERE t.depth < 50
+       )
+       SELECT 1 AS x FROM t JOIN posts p ON p.id = t.id WHERE ${local} LIMIT 1`;
+  return (await db.prepare(sql).bind(rootId).first()) !== null;
+}
 
 // --- discovery: ActivityPub clients asking for a web URL get the object -----
 
@@ -304,6 +325,16 @@ async function postPage(c: C, id: number): Promise<Response> {
   if (!post || !isPublic(post)) return notFound(site(c), here(c));
   const viewer = null;
   const domain = c.env.domain.domain;
+  const lemmy = post.communityId !== null || post.rootId !== null;
+  const threadStatusRoot = lemmy ? null : ((await statusRootOf(db, post.id)) ?? post.id);
+
+  // Another server's post gets a page only if someone here is in its thread,
+  // or it's in one of palm's own communities; otherwise its own page is the one to see.
+  if (post.apId !== null) {
+    const threadRoot = lemmy ? (post.rootId ?? post.id) : threadStatusRoot!;
+    const inLocalCommunity = post.communityId !== null && (await communityById(db, post.communityId))?.apId === null;
+    if (!inLocalCommunity && !(await hasLocalEngagement(db, threadRoot, lemmy))) return c.redirect(post.url ?? post.apId, 302);
+  }
 
   // What sits under it: a Lemmy post's comments, a comment's replies, or the
   // replies threaded under a status.
@@ -315,7 +346,7 @@ async function postPage(c: C, id: number): Promise<Response> {
     root = await postByIdAny(db, post.rootId);
     comments = await listThreadComments(db, { domain, scope: "all", postId: post.rootId, parentId: post.id, sort: "top", viewerId: viewer, limit: 500, offset: 0 });
   } else {
-    const statusRoot = (await statusRootOf(db, post.id)) ?? post.id;
+    const statusRoot = threadStatusRoot!;
     if (statusRoot !== post.id) root = await postByIdAny(db, statusRoot);
     comments = await listStatusComments(db, statusRoot, { viewerId: viewer, sort: "old", ...(statusRoot !== post.id ? { parentId: post.id } : {}) });
   }
@@ -382,6 +413,8 @@ app.get("/c/:name", async (c) => {
   const [name, host] = c.req.param("name").split("@");
   const community = name ? await communityByName(db, host ?? c.env.domain.domain, name) : null;
   if (!community || (host && !community.apId) || (!host && community.apId)) return notFound(site(c), here(c));
+  // Another server's community: its own page is the one to see, as with people.
+  if (community.apId) return c.redirect(community.profileUrl ?? community.apId, 302);
   const pageNo = Math.max(Number(c.req.query("page")) || 1, 1);
   const posts = await listThreadPosts(db, {
     domain: c.env.domain.domain,
