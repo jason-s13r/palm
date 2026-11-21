@@ -52,6 +52,8 @@ const isPublic = (p: Post & { deleted?: boolean }) =>
 const points = (n: number) => `${n} ${Math.abs(n) === 1 ? "point" : "points"}`;
 /** palm's own picture, for previews of pages with none of their own. */
 const fallbackImage = (c: C) => `${origin(c)}/palm/avatar.png`;
+/** An account's picture, or the pattern palm draws for accounts without one. */
+const avatarOf = (c: C, a: Account) => a.avatarUrl ?? urls.avatar(new URL(origin(c)).host, a.apId ?? urls.user(a.domain, a.username));
 
 const handleOf = (a: Account) => `@${a.username}@${a.domain}`;
 const nameOf = (a: Account) => a.displayName || a.username;
@@ -279,7 +281,7 @@ async function profile(c: C, name: string): Promise<Response> {
       title: `${nameOf(account)} (${handleOf(account)})`,
       description: bio || `${nameOf(account)} on ${c.env.config.instance.name}`,
       type: "profile",
-      image: account.avatarUrl ?? fallbackImage(c),
+      image: avatarOf(c, account),
       url,
       activityPub: urls.user(account.domain, account.username),
     },
@@ -376,7 +378,7 @@ async function postPage(c: C, id: number): Promise<Response> {
       title,
       description: text || undefined,
       type: "article",
-      image: picture ?? author.avatarUrl ?? fallbackImage(c),
+      image: picture ?? avatarOf(c, author),
       largeImage: picture !== null,
       url: `${origin(c)}${postHref(post, author)}`,
       canonical: remote ? (post.url ?? post.apId) : null,

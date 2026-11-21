@@ -1,5 +1,5 @@
 import { sha256Hex } from "@palm/auth";
-import { htmlToText, type RequestContext } from "@palm/core";
+import { htmlToText, urls, type RequestContext } from "@palm/core";
 import {
   accountById,
   deletePushSubscription,
@@ -134,7 +134,7 @@ onNotification(async (db, n) => {
       preferred_locale: "en",
       notification_id: n.id,
       notification_type: type,
-      icon: from.avatarUrl ?? `https://${recipient.domain}/palm/avatar.png`,
+      icon: from.avatarUrl ?? urls.avatar(recipient.domain, from.apId ?? urls.user(from.domain, from.username)),
       title: (TITLE[type] ?? ((x: string) => x))(name),
       body,
     };

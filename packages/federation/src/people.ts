@@ -61,7 +61,7 @@ export async function personFor(ctx: Context<RequestContext>, account: Account):
     featuredTags: ctx.getFeaturedTagsUri(identifier),
     discoverable: true,
     icon: new Image({
-      url: new URL(account.avatarUrl ?? `https://${ctx.data.domain.domain}/palm/avatar.png`),
+      url: new URL(account.avatarUrl ?? urls.avatar(ctx.data.domain.domain, urls.user(account.domain, account.username))),
       mediaType: account.avatarUrl ? null : "image/png",
     }),
     ...(account.headerUrl ? { image: new Image({ url: new URL(account.headerUrl) }) } : {}),

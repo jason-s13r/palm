@@ -57,4 +57,15 @@ describe("routing", () => {
     const res = await worker.fetch("https://mastodon.palm.test/palm/avatar.png");
     expect(res.headers.get("content-type")).toBe("image/png");
   });
+
+  it("draws a pattern avatar for a seed, the same each time", async () => {
+    const a = await worker.fetch("https://palm.test/palm/avatar/1a2b3c4d.png");
+    expect(a.headers.get("content-type")).toBe("image/png");
+    const bytes = new Uint8Array(await a.arrayBuffer());
+    expect([...bytes.slice(1, 4)]).toEqual([0x50, 0x4e, 0x47]);
+    const again = new Uint8Array(await (await worker.fetch("https://palm.test/palm/avatar/1a2b3c4d.png")).arrayBuffer());
+    expect(again).toEqual(bytes);
+    const other = new Uint8Array(await (await worker.fetch("https://palm.test/palm/avatar/deadbeef.png")).arrayBuffer());
+    expect(other).not.toEqual(bytes);
+  });
 });

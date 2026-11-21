@@ -172,6 +172,13 @@ export type FederationTask =
  * ActivityPub IDs. These are permanent once another server has seen them, so
  * changing any of these is a breaking change (see dispat.yaml).
  */
+/** FNV-1a of an ActivityPub ID, as eight hex digits: the placeholder avatar's seed. */
+export function avatarSeed(apId: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < apId.length; i++) h = Math.imul(h ^ apId.charCodeAt(i), 0x01000193);
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+
 export const urls = {
   user: (domain: string, username: string) => `https://${domain}/users/${encodeURIComponent(username.toLowerCase())}`,
   object: (domain: string, id: string) => `https://${domain}/objects/${encodeURIComponent(id)}`,
@@ -190,6 +197,13 @@ export const urls = {
   /** Another server's picture or video, fetched and cached through palm. */
   proxy: (domain: string, url: string) => `https://${domain}/proxy/media?url=${encodeURIComponent(url)}`,
   inbox: (domain: string) => `https://${domain}/inbox`,
+  /**
+   * The picture an account without one of its own gets: a pattern drawn from
+   * its ActivityPub ID, so people look different from each other.
+   */
+  avatar: (domain: string, apId: string) => `https://${domain}/palm/avatar/${avatarSeed(apId)}.png`,
+  /** The plain header shown for accounts without one. */
+  header: (domain: string) => `https://${domain}/palm/header.png`,
   userInbox: (domain: string, username: string) => `${urls.user(domain, username)}/inbox`,
 };
 

@@ -18,7 +18,7 @@ const day = (seconds: number) => `${new Date(seconds * 1000).toISOString().slice
 const escapeHtml = (text: string) =>
   text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 
-/** The placeholder avatar and header every account has until uploads exist. */
+/** palm's own picture, for the instance and anything else without one. */
 export const avatarUrl = (host: string) => `https://${host}/palm/avatar.png`;
 
 /** Counts shown on a profile. Left out, they read as zero. */
@@ -40,8 +40,10 @@ export function account(ctx: RequestContext, a: Account, stats?: AccountStats, m
   const local = a.apId === null;
   // Other servers' pictures come through palm's media cache.
   const viaCache = (url: string | null) => (url && !local ? urls.proxy(ctx.domain.domain, url) : url);
-  const avatar = viaCache(a.avatarUrl) ?? avatarUrl(ctx.host);
-  const header = viaCache(a.headerUrl) ?? avatarUrl(ctx.host);
+  const uri = a.apId ?? urls.user(a.domain, a.username);
+  // Mastodon's API has no "no picture": accounts without one get a pattern of their own.
+  const avatar = viaCache(a.avatarUrl) ?? urls.avatar(ctx.host, uri);
+  const header = viaCache(a.headerUrl) ?? urls.header(ctx.host);
   return {
     id: String(a.id),
     username: a.username,
@@ -57,7 +59,7 @@ export function account(ctx: RequestContext, a: Account, stats?: AccountStats, m
     // Local bios are plain text; remote ones arrive as (sanitised) HTML.
     note: a.bio ? (local ? `<p>${escapeHtml(a.bio)}</p>` : a.bio) : "",
     url: local ? profileUrl(ctx, a.username) : (a.profileUrl ?? a.apId!),
-    uri: a.apId ?? urls.user(a.domain, a.username),
+    uri,
     avatar,
     avatar_static: avatar,
     header,

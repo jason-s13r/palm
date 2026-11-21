@@ -5,7 +5,7 @@ import { activitySink, handleFederation, processQueueMessage, serveStory, serveV
 import { contextScope, defineConfig, enterContext, LOCAL_POST_PATH, normaliseHost, resolveSurface, type DomainConfig, type PalmBindings, type PalmConfig, type RequestContext } from "@palm/core";
 import { claimFollowImports, deleteMedia, domainOf, mediaById, migrate, pendingDeletes, pendingMoves, prune, removeEndedStories } from "@palm/db";
 import { handleWeb } from "@palm/web";
-import { avatarResponse } from "./assets.ts";
+import { avatarResponse, headerResponse, identiconResponse } from "./assets.ts";
 import { servePublic, serveUpload } from "./public-cache.ts";
 import { VERSION } from "./version.ts";
 
@@ -177,6 +177,9 @@ export async function handle(
     });
   }
   if (url.pathname === "/palm/avatar.png") return avatarResponse();
+  const identicon = /^\/palm\/avatar\/([0-9a-f]{8})\.png$/.exec(url.pathname);
+  if (identicon) return identiconResponse(identicon[1]!);
+  if (url.pathname === "/palm/header.png") return headerResponse();
   if (url.pathname === "/favicon.ico") return avatarResponse();
   if (url.pathname === "/robots.txt") return robotsResponse();
 
