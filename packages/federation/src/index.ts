@@ -117,29 +117,37 @@ export async function handleFederation(
 const PUBLIC = "https://www.w3.org/ns/activitystreams#Public";
 const ADDRESSING = new Set(["to", "cc", "bto", "bcc", "audience"]);
 
-/** Spells out `as:Public` in addressing, as Fedify does for what it sends. */
-function expandPublic(value: unknown, key?: string): unknown {
+/**
+ * Spells out `as:Public` in addressing, and makes a lone `attachment` a list,
+ * as Fedify does for what it sends.
+ */
+function forLemmy(value: unknown, key?: string, listed = false): unknown {
   if (typeof value === "string") return key && ADDRESSING.has(key) && (value === "as:Public" || value === "Public") ? PUBLIC : value;
-  if (Array.isArray(value)) return value.map((v) => expandPublic(v, key));
+  if (Array.isArray(value)) return value.map((v) => forLemmy(v, key, true));
   if (value && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, k === "@context" ? v : expandPublic(v, k)]));
+    const out = Object.fromEntries(Object.entries(value).map(([k, v]) => [k, k === "@context" ? v : forLemmy(v, k)]));
+    return key === "attachment" && !listed ? [out] : out;
   }
   return value;
 }
 
 /**
- * Objects and collections palm serves, with `as:Public` spelled out. Lemmy
- * compares addressing as plain URLs, so it refuses a fetched post addressed
- * to `as:Public` as not public. Signed documents are left as they are.
+ * Objects and collections palm serves, readable by Lemmy 0.19: it compares
+ * addressing as plain URLs, so it refuses a fetched post addressed to
+ * `as:Public` as not public; and it reads `attachment` only as a list, so a
+ * link post with its link as a lone Link fails to parse at all, and every
+ * vote or comment on it sends the server to fetch it again. Fedify fixes both
+ * in what it sends, not in what it serves. Signed documents are left as they
+ * are.
  */
 async function publicAddressing(res: Response): Promise<Response> {
   const type = res.headers.get("content-type") ?? "";
   if (!res.ok || !/activity\+json|ld\+json/.test(type)) return res;
   const text = await res.text();
-  if (!text.includes("Public")) return new Response(text, res);
+  if (!text.includes("Public") && !/"attachment"\s*:\s*\{/.test(text)) return new Response(text, res);
   const doc = JSON.parse(text) as Record<string, unknown>;
   if ("proof" in doc || "signature" in doc) return new Response(text, res);
-  return new Response(JSON.stringify(expandPublic(doc)), res);
+  return new Response(JSON.stringify(forLemmy(doc)), res);
 }
 
 function parseJson(body: string): Record<string, unknown> | null {

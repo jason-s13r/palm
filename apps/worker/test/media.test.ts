@@ -49,8 +49,8 @@ describe("Media", () => {
     const status = await (await worker.fetch(`${MASTODON}/api/v1/statuses`, { ...req, headers: { ...req.headers, ...auth } })).json<{ uri: string; media_attachments: { id: string }[] }>();
     expect(status.media_attachments.map((m) => m.id)).toEqual([media.id]);
 
-    const note = await (await worker.fetch(status.uri, { headers: { accept: "application/activity+json" } })).json<{ attachment: { type: string; url: string; name: string } }>();
-    expect(note.attachment).toMatchObject({ type: "Document", url: media.url, name: "a dot" });
+    const note = await (await worker.fetch(status.uri, { headers: { accept: "application/activity+json" } })).json<{ attachment: { type: string; url: string; name: string }[] }>();
+    expect(note.attachment).toMatchObject([{ type: "Document", url: media.url, name: "a dot" }]);
 
     // Attached once is attached for good.
     const again = await worker.fetch(`${MASTODON}/api/v1/statuses`, { ...req, headers: { ...req.headers, ...auth } });

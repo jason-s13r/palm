@@ -173,7 +173,8 @@ describe("Communities on the network", () => {
       to: "https://www.w3.org/ns/activitystreams#Public",
       cc: "https://palm.test/c/pages",
       source: { content: "Some **markdown**", mediaType: "text/markdown" },
-      attachment: { type: "Link", href: "https://example.com/" },
+      // Lemmy 0.19 reads attachment only as a list.
+      attachment: [{ type: "Link", href: "https://example.com/" }],
     });
     const outbox = await (await worker.fetch(`${DOMAIN}/c/pages/outbox`, AP)).json<{ orderedItems: { type: string; object: { type: string } }[] }>();
     expect(outbox.orderedItems[0]).toMatchObject({ type: "Announce", object: { type: "Create" } });
