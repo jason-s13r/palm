@@ -98,6 +98,9 @@ describe("federation", () => {
     // Asked again as Voyager straight after: not palm's copy from the cache.
     for (const headers of [
       { "user-agent": "VoyagerApp/1.0" },
+      { "user-agent": "Dart/3.9 (dart:io)" },
+      { "user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Blorp" },
+      { "user-agent": "Mozilla/5.0 (X11; Linux x86_64) Firefox/160.0", origin: "https://blorp.lemmy.world" },
       { "user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 VoyagerApp/1.0" },
       { "user-agent": "Mozilla/5.0 (Macintosh) Safari/605.1.15", origin: "https://vger.app" },
     ]) {
@@ -106,6 +109,24 @@ describe("federation", () => {
       expect(lemmy.software.version).toMatch(/^0\.19\.9\+palm\.\d+\.\d+\.\d+$/);
     }
     expect((await nodeinfo({})).software.name).toBe("palm");
+  });
+
+  it("answers Mbin's nodeinfo path too, as Interstellar reads it", async () => {
+    const get = async (headers: Record<string, string>) =>
+      (await (await worker.fetch(`${DOMAIN}/nodeinfo/2.0.json`, { headers })).json<{ software: { name: string } }>()).software.name;
+    expect(await get({ "user-agent": "Interstellar/0.12.0" })).toBe("lemmy");
+    expect(await get({ "user-agent": "fedidb/1.0" })).toBe("palm");
+  });
+
+  it("lets web apps read nodeinfo from their own origins", async () => {
+    const origin = "https://vger.app";
+    const preflight = await worker.fetch(`${DOMAIN}/nodeinfo/2.1`, { method: "OPTIONS", headers: { origin, "access-control-request-headers": "content-type" } });
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get("access-control-allow-origin")).toBe("*");
+    for (const path of ["/.well-known/nodeinfo", "/nodeinfo/2.1"]) {
+      const res = await worker.fetch(`${DOMAIN}${path}`, { headers: { origin } });
+      expect(res.headers.get("access-control-allow-origin")).toBe("*");
+    }
   });
 
   it("refuses unsigned inbox deliveries", async () => {

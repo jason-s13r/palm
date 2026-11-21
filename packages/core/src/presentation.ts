@@ -25,25 +25,54 @@ export interface PresentationRule {
 }
 
 export const PRESENTATIONS: readonly PresentationRule[] = [
-  // Lemmy apps
+  // Lemmy apps that read nodeinfo to tell Lemmy from PieFed (or Mbin) before
+  // signing in. Taken from each app's source; apps that only speak Lemmy
+  // (Jerboa, Sync) or work it out from the API (Mlem) don't need a row.
   {
     client: "Voyager (iOS and Android)",
     userAgent: /\bVoyagerApp\//,
     as: "lemmy",
-    why: "Checks the handle's domain for Lemmy >= 0.19 before signing in.",
+    why: "Needs Lemmy >= 0.19 in the handle domain's nodeinfo before it signs in.",
   },
   {
     client: "Voyager (web, vger.app)",
     origin: /^https:\/\/(www\.)?vger\.app$/,
     as: "lemmy",
-    why: "Checks the handle's domain for Lemmy >= 0.19 before signing in.",
+    why: "As the apps; the browser sends its own User-Agent.",
+  },
+  {
+    client: "Thunder",
+    // Its nodeinfo check uses Dart's HTTP client as it comes, so it sends
+    // Dart's User-Agent rather than its own ("Thunder/x.y.z").
+    userAgent: /^Dart\/\d/,
+    as: "lemmy",
+    why: "Picks its Lemmy or PieFed API from nodeinfo's software name; anything else fails.",
+  },
+  {
+    client: "Interstellar",
+    userAgent: /^Interstellar\//,
+    as: "lemmy",
+    why: "Picks its Mbin, Lemmy or PieFed API from /nodeinfo/2.0.json's software name.",
+  },
+  {
+    client: "Blorp (iOS and Android)",
+    // Its app is a web view that adds "Blorp" to the system's User-Agent.
+    userAgent: /\bBlorp\b/,
+    as: "lemmy",
+    why: "Picks its Lemmy or PieFed API from /nodeinfo/2.1's software name.",
+  },
+  {
+    client: "Blorp (web, blorp.* hosts such as blorp.lemmy.world)",
+    origin: /^https:\/\/blorp\.[a-z0-9.-]+$/,
+    as: "lemmy",
+    why: "As the apps; the browser sends its own User-Agent.",
   },
   // Pixelfed servers
   {
     client: "Pixelfed servers",
     userAgent: /\bPixelfed\//,
     as: "pixelfed",
-    why: "Only send stories to servers whose nodeinfo says pixelfed.",
+    why: "Send stories to a server when its nodeinfo says pixelfed.",
   },
 ];
 

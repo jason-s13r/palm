@@ -165,6 +165,29 @@ export async function handle(
   executionCtx: Pick<ExecutionContext, "waitUntil">,
 ): Promise<Response> {
   const url = new URL(request.url);
+  if (!NODEINFO_PATH.test(url.pathname)) return handleRequest(config, request, env, executionCtx);
+  // Nodeinfo is read by web apps too (Voyager at vger.app, Blorp), from
+  // their own origins, so it answers any origin.
+  if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: NODEINFO_CORS });
+  // Mbin's nodeinfo path, which Interstellar reads to tell Mbin, Lemmy and
+  // PieFed apart: the same document as /nodeinfo/2.1.
+  const asked = url.pathname === "/nodeinfo/2.0.json" ? new Request(new URL("/nodeinfo/2.1", url), request) : request;
+  const response = await handleRequest(config, asked, env, executionCtx);
+  const open = new Response(response.body, response);
+  for (const [name, value] of Object.entries(NODEINFO_CORS)) open.headers.set(name, value);
+  return open;
+}
+
+const NODEINFO_PATH = /^\/(\.well-known\/nodeinfo|nodeinfo\/2\.[01](\.json)?)$/;
+const NODEINFO_CORS = { "access-control-allow-origin": "*", "access-control-allow-headers": "Content-Type", "access-control-max-age": "86400" };
+
+async function handleRequest(
+  config: PalmConfig,
+  request: Request,
+  env: PalmEnv,
+  executionCtx: Pick<ExecutionContext, "waitUntil">,
+): Promise<Response> {
+  const url = new URL(request.url);
   const surface = resolveSurface(config, url.host);
 
   // Answered on any host, including workers.dev, so a fresh deploy can be
