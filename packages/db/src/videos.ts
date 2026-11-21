@@ -269,7 +269,9 @@ export async function listVideos(db: D1Database, listing: VideoListing): Promise
   }
   // Only public videos show in lists; unlisted ones are found by their link.
   if (!listing.postIds && !listing.includeUnlisted) where.push("p.visibility = 'public'");
-  const from = `FROM posts p JOIN videos v ON v.post_id = p.id WHERE ${where.join(" AND ")}`;
+  // From videos (few) to their posts: joined the other way, the planner walks
+  // every public post through posts_public to find the handful with a video.
+  const from = `FROM videos v CROSS JOIN posts p ON p.id = v.post_id WHERE ${where.join(" AND ")}`;
   const order = SORTS[listing.sort ?? "-publishedAt"] ?? SORTS["-publishedAt"];
   const [count, rows] = await db.batch([
     db.prepare(`SELECT COUNT(*) AS n ${from}`).bind(...values),

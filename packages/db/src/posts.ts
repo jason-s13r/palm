@@ -351,8 +351,11 @@ export async function localPublicPosts(db: D1Database, domain: string, page: Pag
   const { sql, params } = pageClause(page);
   const { results } = await db
     .prepare(
-      `SELECT p.* FROM posts p JOIN accounts a ON a.id = p.account_id
-       WHERE a.domain = ? AND p.deleted_at IS NULL AND p.visibility = 'public' AND p.reblog_of IS NULL${sql.replaceAll("id ", "p.id ")}
+      // From the domain's own accounts (few) to their posts: joined the other
+      // way, the planner walks every public post through posts_public.
+      `SELECT p.* FROM posts p
+       WHERE p.account_id IN (SELECT id FROM accounts WHERE domain = ?)
+         AND p.deleted_at IS NULL AND +p.visibility = 'public' AND p.reblog_of IS NULL${sql.replaceAll("id ", "p.id ")}
        ORDER BY p.id DESC LIMIT ?`,
     )
     .bind(domain, ...params, page.limit)
@@ -432,11 +435,19 @@ export async function publicTimeline(db: D1Database, scope: { local: boolean; do
   const { sql, params } = pageClause(page);
   const { results } = await db
     .prepare(
-      `SELECT p.* FROM posts p JOIN accounts a ON a.id = p.account_id
-       WHERE p.deleted_at IS NULL AND p.visibility = 'public' AND p.root_id IS NULL AND p.reblog_of IS NULL
-         AND ${scope.local ? "a.ap_id IS NULL AND a.domain = ?" : "(a.ap_id IS NOT NULL OR a.domain = ?)"}
-         ${sql.replaceAll("id ", "p.id ")}
-       ORDER BY p.id DESC LIMIT ?`,
+      // The local timeline starts from the domain's own accounts (few), as in
+      // localPublicPosts; the federated one walks posts_public, newest first.
+      scope.local
+        ? `SELECT p.* FROM posts p
+           WHERE p.account_id IN (SELECT id FROM accounts WHERE ap_id IS NULL AND domain = ?)
+             AND p.deleted_at IS NULL AND +p.visibility = 'public' AND p.root_id IS NULL AND p.reblog_of IS NULL
+             ${sql.replaceAll("id ", "p.id ")}
+           ORDER BY p.id DESC LIMIT ?`
+        : `SELECT p.* FROM posts p JOIN accounts a ON a.id = p.account_id
+           WHERE p.deleted_at IS NULL AND p.visibility = 'public' AND p.root_id IS NULL AND p.reblog_of IS NULL
+             AND (a.ap_id IS NOT NULL OR a.domain = ?)
+             ${sql.replaceAll("id ", "p.id ")}
+           ORDER BY p.id DESC LIMIT ?`,
     )
     .bind(scope.domain, ...params, page.limit)
     .all<PostRow>();
