@@ -1,5 +1,34 @@
 # Changelog
 
+## worker@0.15.0 (2026-11-21)
+
+### Features
+
+- Thunder, Interstellar and Blorp see Lemmy in nodeinfo, which web apps can read
+
+- nodeinfo says palm, and Lemmy only to the Lemmy apps listed in PRESENTATIONS
+
+- per-account pattern avatars in place of the green dot
+
+- redirect remote communities and untouched remote posts to their origin
+
+### Fixes
+
+- serve attachment as a list, so Lemmy 0.19 can read fetched posts
+
+- local timelines and video lists start from the smaller table
+
+- prune in batches D1 can bind, through the 03:00 UTC hour
+
+### Dependencies
+
+- core: 1.7.0 -> 1.8.0
+- db: 0.11.0 -> 0.11.1
+- adapter-mastodon: 0.10.0 -> 0.11.0
+- federation: 0.9.0 -> 0.10.0
+- web: 0.4.0 -> 0.5.0
+
+
 ## worker@0.14.0 (2026-11-20)
 
 ### Features

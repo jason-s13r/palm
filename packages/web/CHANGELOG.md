@@ -1,5 +1,19 @@
 # Changelog
 
+## web@0.5.0 (2026-11-21)
+
+### Features
+
+- per-account pattern avatars in place of the green dot
+
+- redirect remote communities and untouched remote posts to their origin
+
+### Dependencies
+
+- core: 1.7.0 -> 1.8.0
+- db: 0.11.0 -> 0.11.1
+
+
 ## web@0.4.0 (2026-11-20)
 
 ### Features

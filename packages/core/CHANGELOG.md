@@ -1,5 +1,16 @@
 # Changelog
 
+## core@1.8.0 (2026-11-21)
+
+### Features
+
+- Thunder, Interstellar and Blorp see Lemmy in nodeinfo, which web apps can read
+
+- nodeinfo says palm, and Lemmy only to the Lemmy apps listed in PRESENTATIONS
+
+- per-account pattern avatars in place of the green dot
+
+
 ## core@1.7.0 (2026-11-20)
 
 ### Features

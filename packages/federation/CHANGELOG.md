@@ -1,5 +1,23 @@
 # Changelog
 
+## federation@0.10.0 (2026-11-21)
+
+### Features
+
+- nodeinfo says palm, and Lemmy only to the Lemmy apps listed in PRESENTATIONS
+
+- per-account pattern avatars in place of the green dot
+
+### Fixes
+
+- serve attachment as a list, so Lemmy 0.19 can read fetched posts
+
+### Dependencies
+
+- core: 1.7.0 -> 1.8.0
+- db: 0.11.0 -> 0.11.1
+
+
 ## federation@0.9.0 (2026-11-20)
 
 ### Features

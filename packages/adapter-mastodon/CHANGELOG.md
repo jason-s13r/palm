@@ -1,5 +1,17 @@
 # Changelog
 
+## adapter-mastodon@0.11.0 (2026-11-21)
+
+### Features
+
+- per-account pattern avatars in place of the green dot
+
+### Dependencies
+
+- core: 1.7.0 -> 1.8.0
+- db: 0.11.0 -> 0.11.1
+
+
 ## adapter-mastodon@0.10.0 (2026-11-20)
 
 ### Features

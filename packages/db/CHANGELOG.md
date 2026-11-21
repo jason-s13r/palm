@@ -1,5 +1,14 @@
 # Changelog
 
+## db@0.11.1 (2026-11-21)
+
+### Fixes
+
+- local timelines and video lists start from the smaller table
+
+- prune in batches D1 can bind, through the 03:00 UTC hour
+
+
 ## db@0.11.0 (2026-11-20)
 
 ### Features
