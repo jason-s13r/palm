@@ -1,5 +1,23 @@
 # Changelog
 
+## federation@0.10.1 (2026-11-23)
+
+### Fixes
+
+- queue received new posts, the costly deliveries, and log what each delivery is
+
+- import each signing key once per isolate
+
+- retry deliveries on a spread-out schedule, drop refused ones, hold dead servers a day
+
+- a redelivered Create of a post deleted here is handled, not a 500
+
+### Dependencies
+
+- core: 1.8.0 -> 1.8.1
+- db: 0.11.1 -> 0.11.2
+
+
 ## federation@0.10.0 (2026-11-21)
 
 ### Features

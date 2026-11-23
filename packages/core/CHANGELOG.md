@@ -1,5 +1,12 @@
 # Changelog
 
+## core@1.8.1 (2026-11-23)
+
+### Fixes
+
+- retry deliveries on a spread-out schedule, drop refused ones, hold dead servers a day
+
+
 ## core@1.8.0 (2026-11-21)
 
 ### Features

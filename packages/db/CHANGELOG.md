@@ -1,5 +1,12 @@
 # Changelog
 
+## db@0.11.2 (2026-11-23)
+
+### Fixes
+
+- comment/list with parent_id includes the parent, as Lemmy does
+
+
 ## db@0.11.1 (2026-11-21)
 
 ### Fixes

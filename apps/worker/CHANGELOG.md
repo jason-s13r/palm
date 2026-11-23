@@ -1,5 +1,28 @@
 # Changelog
 
+## worker@0.15.1 (2026-11-23)
+
+### Fixes
+
+- queue received new posts, the costly deliveries, and log what each delivery is
+
+- import each signing key once per isolate
+
+- serve public posts' ActivityPub objects from cache for 5 minutes
+
+- retry deliveries on a spread-out schedule, drop refused ones, hold dead servers a day
+
+- comment/list with parent_id includes the parent, as Lemmy does
+
+- a redelivered Create of a post deleted here is handled, not a 500
+
+### Dependencies
+
+- core: 1.8.0 -> 1.8.1
+- db: 0.11.1 -> 0.11.2
+- federation: 0.10.0 -> 0.10.1
+
+
 ## worker@0.15.0 (2026-11-21)
 
 ### Features
