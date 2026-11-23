@@ -7,7 +7,7 @@
   "compatibility_date": "2026-11-01",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
-  "observability": { "enabled": true },
+  "observability": { "enabled": true, "issues": { "enabled": true } },
   "version_metadata": { "binding": "CF_VERSION_METADATA" },
   // One D1 database, by name: the first wrangler deploy creates it (as it
   // does the bucket and queue below), so no ID is needed. palm creates and

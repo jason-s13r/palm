@@ -7,7 +7,7 @@
   "compatibility_date": "2026-11-01",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
-  "observability": { "enabled": true },
+  "observability": { "enabled": true, "issues": { "enabled": true } },
   "version_metadata": { "binding": "CF_VERSION_METADATA" },
   // palm creates and migrates its own tables on first request.
   "d1_databases": [{ "binding": "DB", "database_name": "palm-staging", "database_id": "a34ddc76-6aaf-4ece-bd52-8bedbc10b95c" }],
