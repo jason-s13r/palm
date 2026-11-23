@@ -374,11 +374,15 @@ export async function storeRemotePost(
     ...(object.published ? { createdAt: Math.floor(object.published.epochMilliseconds / 1000) } : {}),
     ...(object.updated ? { updatedAt: Math.floor(object.updated.epochMilliseconds / 1000) } : {}),
   }).catch(async (error: unknown) => {
-    // Two deliveries of the same post can race; the second finds the first's row.
-    const raced = await postByApId(db, object.id!.href);
-    if (raced) return raced;
+    // Two deliveries of the same post can race; the second finds the first's
+    // row. A post deleted here keeps its row (and ap_id), so a redelivered
+    // Create of it is already handled: it stays deleted.
+    const raced = await db.prepare("SELECT deleted_at FROM posts WHERE ap_id = ?").bind(object.id!.href).first<{ deleted_at: number | null }>();
+    if (raced?.deleted_at != null) return null;
+    if (raced) return postByApId(db, object.id!.href);
     throw error;
   });
+  if (!post) return null;
 
   if (videoJson) {
     const video = videoFromJson(videoJson, post.id, channel?.id ?? (post.communityId !== null && !post.parentId ? post.communityId : null));
