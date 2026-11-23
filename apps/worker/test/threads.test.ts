@@ -58,6 +58,10 @@ describe("Communities, posts and comments", () => {
     expect(tree.comments).toHaveLength(2);
     expect(tree.comments.find((c) => c.comment.id === top.comment_view.comment.id)?.counts.child_count).toBe(1);
 
+    // One comment's thread, as Voyager opens it from the inbox: the parent comes back with its replies.
+    const thread = await (await other.get(`/comment/list?post_id=${postId}&parent_id=${top.comment_view.comment.id}&max_depth=8&sort=Hot`)).json<{ comments: CommentView[] }>();
+    expect(thread.comments.map((c) => c.comment.id).sort()).toEqual([top.comment_view.comment.id, reply.comment_view.comment.id].sort());
+
     const liked = await (await other.post("/post/like", { post_id: postId, score: 1 })).json<{ post_view: PostView }>();
     expect(liked.post_view).toMatchObject({ counts: { score: 2, comments: 2 }, my_vote: 1 });
     const unliked = await (await other.post("/post/like", { post_id: postId, score: 0 })).json<{ post_view: PostView }>();

@@ -181,7 +181,9 @@ export async function listThreadComments(db: D1Database, listing: CommentListing
   if (listing.parentId !== undefined) {
     const parent = await db.prepare("SELECT path FROM posts WHERE id = ?").bind(listing.parentId).first<{ path: string | null }>();
     if (!parent?.path) return [];
-    bind("p.path LIKE ?", `${parent.path}.%`);
+    // As Lemmy does, the parent comes back too, with everything under it:
+    // apps opening one comment's thread show it above its replies.
+    bind("(p.path = ? OR p.path LIKE ?)", parent.path, `${parent.path}.%`);
     if (listing.maxDepth !== undefined) {
       bind(`${depth} <= ?`, parent.path.split(".").length - 1 + listing.maxDepth);
     }
@@ -409,7 +411,7 @@ export async function listStatusComments(
   if (options.parentId !== undefined) {
     const parent = rows.find((r) => r.id === options.parentId);
     if (!parent) return [];
-    rows = rows.filter((r) => r.tree_path.startsWith(`${parent.tree_path}.`));
+    rows = rows.filter((r) => r.tree_path === parent.tree_path || r.tree_path.startsWith(`${parent.tree_path}.`));
     if (options.maxDepth !== undefined) rows = rows.filter((r) => r.tree_depth <= parent.tree_depth + options.maxDepth!);
   } else if (options.maxDepth !== undefined) {
     rows = rows.filter((r) => r.tree_depth <= options.maxDepth!);
