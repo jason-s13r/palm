@@ -1,12 +1,20 @@
 import { handleLemmy } from "@palm/adapter-lemmy";
 import { handleMastodon, publishDueStatuses } from "@palm/adapter-mastodon";
 import { backfillRunnerJobs, handlePeerTube, queueAttachmentTranscodes, isPeerTubePath, runnerSocket, videoMaintenance } from "@palm/adapter-peertube";
-import { activitySink, handleFederation, processQueueMessage, serveStory, serveVideoObject, type QueueBody } from "@palm/federation";
+import {
+  activitySink,
+  handleFederation,
+  processQueueMessage,
+  serveStory,
+  serveVideoObject,
+  type QueueBody,
+} from "@palm/federation";
 import { contextScope, defineConfig, enterContext, LOCAL_POST_PATH, normaliseHost, presentationFor, resolveSurface, type DomainConfig, type PalmBindings, type PalmConfig, type RequestContext } from "@palm/core";
 import { claimFollowImports, deleteMedia, domainOf, mediaById, migrate, pendingDeletes, pendingMoves, prune, removeEndedStories } from "@palm/db";
 import { handleWeb } from "@palm/web";
 import { avatarResponse, headerResponse, identiconResponse } from "./assets.ts";
 import { servePublic, serveUpload } from "./public-cache.ts";
+import { retryDelay } from "./retry.ts";
 import { VERSION } from "./version.ts";
 
 export { ConfigError, defineConfig } from "@palm/core";
@@ -133,7 +141,8 @@ function requestContext(
 
 /**
  * Runs a batch from palm's queue, one message at a time. A message that
- * throws is retried by the queue; Fedify's own messages retry themselves.
+ * throws is retried by the queue (see retryDelay); Fedify's own messages
+ * retry themselves.
  */
 export async function consume(
   config: PalmConfig,
@@ -151,8 +160,10 @@ export async function consume(
       await processQueueMessage(message.body, contextFor);
       message.ack();
     } catch (error) {
-      console.error(JSON.stringify({ palm: "queue_failed", body: message.body.palm, attempts: message.attempts, error: String(error) }));
-      message.retry({ delaySeconds: Math.min(60 * 2 ** message.attempts, 3600) });
+      const delay = retryDelay(message.body, message.attempts, error);
+      console.error(JSON.stringify({ palm: "queue_failed", body: message.body.palm, attempts: message.attempts, retrying: delay !== null, error: String(error) }));
+      if (delay === null) message.ack();
+      else message.retry({ delaySeconds: delay });
     }
   }
 }

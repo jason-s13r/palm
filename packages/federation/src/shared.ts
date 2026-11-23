@@ -8,7 +8,8 @@ import {
   type SenderKeyPair,
 } from "@fedify/fedify";
 import type { Activity, Recipient } from "@fedify/fedify/vocab";
-import { type RequestContext } from "@palm/core";
+import { PERMANENT_FAILURE_STATUS_CODES, RETRY_DELAYS_SECONDS, type RequestContext } from "@palm/core";
+import { Temporal } from "temporal-polyfill";
 import { communityKeys, type Account, type Community } from "@palm/db";
 import { D1KvStore } from "./kv.ts";
 import { signRefusedFetches } from "./signed-fetch.ts";
@@ -37,6 +38,11 @@ export interface Federations {
 const built = new WeakMap<D1Database, Federations>();
 const builtTrusted = new WeakMap<D1Database, Federations>();
 
+const outboxRetryPolicy = ({ attempts }: { attempts: number }) => {
+  const seconds = RETRY_DELAYS_SECONDS[attempts - 1];
+  return seconds === undefined ? null : Temporal.Duration.from({ seconds });
+};
+
 /**
  * The two federations for a database. `trusted` builds a pair that skips
  * signature checks, for deliveries palm has already authenticated itself
@@ -60,6 +66,13 @@ export async function federationsFor(bindings: RequestContext["bindings"], trust
           return { queue: { outbox: queue, fanout: queue }, manuallyStartQueue: true };
         })()
       : {}),
+    outboxRetryPolicy,
+    permanentFailureStatusCodes: PERMANENT_FAILURE_STATUS_CODES,
+    // A server that keeps failing has its deliveries held rather than
+    // retried one by one. Each hold puts the delivery back on the queue, so
+    // holds are checked every two hours and given up after a day, not
+    // Fedify's 30 minutes and a week (about 336 queue messages each).
+    circuitBreaker: { recoveryDelay: { hours: 2 }, heldActivityTtl: { hours: 24 } },
   });
   const [people, communities] = await Promise.all([peopleBuilder.build(options("people")), communitiesBuilder.build(options("communities"))]);
   signRefusedFetches(people);

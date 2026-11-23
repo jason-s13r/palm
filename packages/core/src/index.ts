@@ -11,3 +11,4 @@ export { appName, userAgentClient } from "./user-agent.ts";
 export { PRESENTATIONS, presentationFor } from "./presentation.ts";
 export type { Presentation, PresentationRule } from "./presentation.ts";
 export type { UserAgentClient } from "./user-agent.ts";
+export { PERMANENT_FAILURE_STATUS_CODES, RETRY_DELAYS_SECONDS } from "./delivery-policy.ts";
