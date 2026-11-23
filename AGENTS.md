@@ -41,9 +41,14 @@ outside this repo (the Palm project's `palm-decisions.md`).
   (`CloudflareMessageQueue`). Outgoing delivery to several inboxes runs as queue
   jobs, which the same Worker consumes; a single recipient is sent at once, and
   anything the queue refuses (the daily quota is account-wide) is sent at once
-  too (`send` in `shared.ts`). Received activities are handled in the request, not
-  queued: a busy Lemmy community sends over a thousand an hour, and each queue
-  message costs three of the free plan's 10,000 daily operations. Votes and
+  too (`send` in `shared.ts`). Received activities are mostly handled in the request:
+  a busy Lemmy community sends over a thousand an hour, and each queue
+  message costs three of the free plan's 10,000 daily operations. New posts
+  (not replies) are the exception: storing one costs 40-150 ms of CPU, so
+  they're queued as they arrived and checked in the job (`defer.ts`). Each
+  delivery that reaches Fedify logs `{"palm":"inbox_received"}` with its type.
+  Failed deliveries retry on a spread-out schedule and refused ones (4xx) are
+  dropped (`delivery-policy.ts` in core). Votes and
   deletes about things palm doesn't hold are dropped before Fedify parses them
   (`prefilter.ts`). Deliveries are signed with the
   RSA key alone: the Ed25519 Object Integrity Proof costs several times the

@@ -7,6 +7,7 @@ import type { QueueBody } from "./queue.ts";
 import { triage } from "./prefilter.ts";
 import { verifySignature } from "./signature.ts";
 import { trustedDelivery } from "./inbox-auth.ts";
+import { DEFERRED_HEADER, deferDelivery, receivedOf, shouldDefer } from "./defer.ts";
 import { federationsFor } from "./shared.ts";
 import { isStoryActivity, receiveStoryActivity } from "./stories.ts";
 
@@ -19,13 +20,15 @@ const isInboxPath = (path: string) =>
  */
 export async function processQueueMessage(body: QueueBody, contextFor: (domain: string) => RequestContext | null): Promise<void> {
   if (body.palm !== "inbox") return processMessage(body, contextFor);
-  // Deliveries queued before inbox deferral was dropped.
+  // A delivery deferred to the queue (see defer.ts).
   const url = new URL(body.url);
   const ctx = contextFor(url.host);
   if (!ctx) return;
   // The delivery, as it arrived, now through Fedify's checks. A bad
   // signature answers 401 to nobody; it's logged and dropped.
-  const request = new Request(body.url, { method: "POST", headers: body.headers, body: body.body });
+  const headers = new Headers(body.headers);
+  headers.set(DEFERRED_HEADER, "1");
+  const request = new Request(body.url, { method: "POST", headers, body: body.body });
   const response = await handleFederation(request, ctx, () => new Response(null, { status: 404 }));
   if (response.status >= 400) {
     console.warn(JSON.stringify({ palm: "inbox_refused", url: body.url, status: response.status, waited: Date.now() - body.receivedAt }));
@@ -78,6 +81,11 @@ export async function handleFederation(
       return "fedify" as const;
     });
     if (outcome !== "fedify") return new Response(null, { status: 202 });
+    // A new post is costly to store, so it's handled in a queue job of its own.
+    const received = parsed ? receivedOf(parsed) : null;
+    const deferred = received !== null && shouldDefer(received) && (await deferDelivery(ctx.bindings.QUEUE, request, body));
+    if (received && !request.headers.has(DEFERRED_HEADER)) console.log(JSON.stringify({ palm: "inbox_received", ...received, deferred }));
+    if (deferred) return new Response(null, { status: 202 });
     // An activity whose HTTP signature is its own actor's: its LD signature
     // needn't be checked (see inbox-auth.ts).
     const trusted = parsed ? await trustedDelivery(db, request, body, parsed) : null;
