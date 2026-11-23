@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createAccount, giveKeys, MASTODON, mastodonToken, worker } from "./helpers.ts";
+import { createAccount, db, giveKeys, MASTODON, mastodonToken, worker } from "./helpers.ts";
 
 const AP = { accept: "application/activity+json" };
 
@@ -35,5 +35,25 @@ describe("Public document cache", () => {
     // Browsers get the web page, which isn't cached.
     const page = await worker.fetch("https://palm.test/users/pc_amy", { headers: { accept: "text/html" } });
     expect(page.headers.get("x-palm-cache")).toBeNull();
+  });
+
+  it("keeps public posts a few minutes, and never followers-only ones", async () => {
+    const author = await createAccount("pc_bo", "pw");
+    await giveKeys(author);
+    const insert = (visibility: string) =>
+      db
+        .prepare("INSERT INTO posts (account_id, content_source, content_html, visibility, created_at, lemmy_path) VALUES (?, 'x', '<p>x</p>', ?, ?, 1) RETURNING id")
+        .bind(author, visibility, Math.floor(Date.now() / 1000))
+        .first<{ id: number }>()
+        .then((r) => r!.id);
+    const fetchTwice = async (id: number) => {
+      await (await worker.fetch(`https://palm.test/post/${id}`, { headers: AP })).text();
+      await new Promise((r) => setTimeout(r, 50));
+      const second = await worker.fetch(`https://palm.test/post/${id}`, { headers: AP });
+      await second.text();
+      return second.headers.get("x-palm-cache");
+    };
+    expect(await fetchTwice(await insert("public"))).toBe("hit");
+    expect(await fetchTwice(await insert("private"))).toBeNull();
   });
 });

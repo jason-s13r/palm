@@ -24,12 +24,26 @@ interface Rule {
   ttl: number;
   /** The local person whose profile version the copy is kept under. */
   person: string | null;
+  /** Kept only when it's addressed to the public (posts can be followers-only). */
+  publicOnly?: boolean;
 }
 
 const PERSON = /^\/users\/([^/]+)$/;
 const COLLECTION = /^\/(users|c)\/[^/]+\/(followers|following|outbox|featured|collections\/tags)$/;
 const COMMUNITY = /^\/c\/[^/]+$/;
 const NODEINFO = /^\/(\.well-known\/nodeinfo|nodeinfo\/[0-9.]+)$/;
+/** A post or comment's ActivityPub object, under any of the paths it answers to. */
+const OBJECT = /^\/(objects|post|comment)\/\d+$/;
+/**
+ * A post here that spreads gets fetched by every server that sees it (one
+ * had about 1,200 fetches in four days, at 40-50 ms of CPU each). Public
+ * ones are the same for everyone, so they're kept a few minutes: an edit or
+ * a deletion shows that much later elsewhere.
+ */
+const OBJECT_SECONDS = 5 * 60;
+
+/** The public collection, as Fedify and others write it in `to` and `cc`. */
+const PUBLIC = ['"https://www.w3.org/ns/activitystreams#Public"', '"as:Public"', '"Public"'];
 
 const wantsActivityJson = (request: Request) => {
   const accept = request.headers.get("accept") ?? "";
@@ -62,6 +76,7 @@ function ruleFor(request: Request, url: URL, domain: string): Rule | null {
   const person = PERSON.exec(url.pathname)?.[1];
   if (person) return { ttl: DAY, person: decodeURIComponent(person) };
   if (COLLECTION.test(url.pathname) || COMMUNITY.test(url.pathname)) return { ttl: COLLECTION_SECONDS, person: null };
+  if (OBJECT.test(url.pathname)) return { ttl: OBJECT_SECONDS, person: null, publicOnly: true };
   return null;
 }
 
@@ -98,6 +113,10 @@ export async function servePublic(request: Request, ctx: RequestContext, serve: 
   const response = await serve();
   const type = response.headers.get("content-type") ?? "";
   if (response.status === 200 && type.includes("json")) {
+    if (rule.publicOnly) {
+      const body = await response.clone().text();
+      if (!PUBLIC.some((p) => body.includes(p))) return response;
+    }
     const copy = new Response(response.clone().body, response);
     copy.headers.set("cache-control", `public, max-age=${rule.ttl}`);
     copy.headers.delete("set-cookie");
