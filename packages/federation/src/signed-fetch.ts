@@ -1,6 +1,7 @@
-import { importJwk, type Federation } from "@fedify/fedify";
+import { type Federation } from "@fedify/fedify";
 import { currentContext, urls } from "@palm/core";
 import { actorKeys, admins } from "@palm/db";
+import { importJwkCached } from "./keys.ts";
 
 type Loader = (url: string, options?: { signal?: AbortSignal }) => Promise<unknown>;
 type Factory = (options?: unknown) => Loader;
@@ -24,7 +25,7 @@ async function signerFor(db: D1Database, domain: string): Promise<Signer | null>
   for (const admin of await admins(db, domain)) {
     const rsa = (await actorKeys(db, admin.id)).find((k) => k.algorithm === "RSASSA-PKCS1-v1_5");
     if (!rsa) continue;
-    const signer = { keyId: new URL(`${urls.user(domain, admin.username)}#main-key`), privateKey: await importJwk(rsa.privateJwk, "private") };
+    const signer = { keyId: new URL(`${urls.user(domain, admin.username)}#main-key`), privateKey: await importJwkCached(rsa.privateJwk, "private") };
     byDomain.set(domain, signer);
     return signer;
   }

@@ -1,6 +1,5 @@
 import {
   createFederationBuilder,
-  importJwk,
   type Context,
   type Federation,
   type FederationBuilder,
@@ -12,6 +11,7 @@ import { PERMANENT_FAILURE_STATUS_CODES, RETRY_DELAYS_SECONDS, type RequestConte
 import { Temporal } from "temporal-polyfill";
 import { communityKeys, type Account, type Community } from "@palm/db";
 import { D1KvStore } from "./kv.ts";
+import { importJwkCached } from "./keys.ts";
 import { signRefusedFetches } from "./signed-fetch.ts";
 import { CloudflareMessageQueue, type FederationName } from "./queue.ts";
 
@@ -124,7 +124,7 @@ export async function communityKeyPairs(db: D1Database, communityId: number): Pr
   const stored = await communityKeys(db, communityId);
   stored.sort((a, b) => (a.algorithm === b.algorithm ? 0 : a.algorithm === "RSASSA-PKCS1-v1_5" ? -1 : 1));
   return Promise.all(
-    stored.map(async (k) => ({ publicKey: await importJwk(k.publicJwk, "public"), privateKey: await importJwk(k.privateJwk, "private") })),
+    stored.map(async (k) => ({ publicKey: await importJwkCached(k.publicJwk, "public"), privateKey: await importJwkCached(k.privateJwk, "private") })),
   );
 }
 

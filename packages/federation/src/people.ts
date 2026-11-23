@@ -1,4 +1,4 @@
-import { importJwk, type Context } from "@fedify/fedify";
+import { type Context } from "@fedify/fedify";
 import { Endpoints, Hashtag, Image, Object as APObject, Person, QuoteAuthorization, Tombstone } from "@fedify/fedify/vocab";
 import { nodeinfoVersion, presentationFor, urls, type RequestContext } from "@palm/core";
 import {
@@ -18,6 +18,7 @@ import {
 } from "@palm/db";
 import { registerInbox } from "./inbox.ts";
 import { actorUri, createFor, objectFor, postParts, postUri, quoteAuthorizationUri } from "./objects.ts";
+import { importJwkCached } from "./keys.ts";
 import { peopleBuilder as builder, identifierOf, recipient } from "./shared.ts";
 
 /**
@@ -85,8 +86,8 @@ builder
     stored.sort((a, b) => (a.algorithm === "RSASSA-PKCS1-v1_5" ? -1 : b.algorithm === "RSASSA-PKCS1-v1_5" ? 1 : 0));
     return Promise.all(
       stored.map(async (k) => ({
-        privateKey: await importJwk(k.privateJwk, "private"),
-        publicKey: await importJwk(k.publicJwk, "public"),
+        privateKey: await importJwkCached(k.privateJwk, "private"),
+        publicKey: await importJwkCached(k.publicJwk, "public"),
       })),
     );
   });
