@@ -20,13 +20,22 @@ export async function registerRunner(db: D1Database, runner: { name: string; des
   return { id: row!.id, runnerToken };
 }
 
+/** How often a runner's last contact is written: it polls every few seconds. */
+const CONTACT_EVERY = 5 * 60;
+
 export async function runnerByToken(db: D1Database, runnerToken: string): Promise<Runner | null> {
   if (!runnerToken) return null;
   const row = await db
-    .prepare("UPDATE runners SET last_contact = ? WHERE token_hash = ? RETURNING id, name, description, last_contact, created_at")
-    .bind(now(), await sha256Hex(runnerToken))
+    .prepare("SELECT id, name, description, last_contact, created_at FROM runners WHERE token_hash = ?")
+    .bind(await sha256Hex(runnerToken))
     .first<{ id: number; name: string; description: string | null; last_contact: number | null; created_at: number }>();
-  return row ? { id: row.id, name: row.name, description: row.description, lastContact: row.last_contact, createdAt: row.created_at } : null;
+  if (!row) return null;
+  const at = now();
+  if (row.last_contact === null || row.last_contact < at - CONTACT_EVERY) {
+    await db.prepare("UPDATE runners SET last_contact = ? WHERE id = ?").bind(at, row.id).run();
+    row.last_contact = at;
+  }
+  return { id: row.id, name: row.name, description: row.description, lastContact: row.last_contact, createdAt: row.created_at };
 }
 
 export async function unregisterRunner(db: D1Database, id: number): Promise<void> {
