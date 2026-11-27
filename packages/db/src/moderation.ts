@@ -69,9 +69,12 @@ export async function setBlockedDomains(db: D1Database, domains: string[]): Prom
   await db.batch(statements);
 }
 
-/** Servers palm has met, for Lemmy's federated instances list (worked out at most hourly). */
+/**
+ * Servers palm has met, for Lemmy's federated instances list (worked out at
+ * most daily: it reads every remote account and community).
+ */
 export async function knownDomains(db: D1Database, limit = 500): Promise<string[]> {
-  return memoized(db, `known_domains:${limit}`, 60 * 60, async () => {
+  return memoized(db, `known_domains:${limit}`, 24 * 60 * 60, async () => {
     const { results } = await db
       .prepare("SELECT DISTINCT domain FROM accounts WHERE ap_id IS NOT NULL UNION SELECT DISTINCT domain FROM communities WHERE ap_id IS NOT NULL LIMIT ?")
       .bind(limit)
@@ -149,10 +152,13 @@ export const PRUNE_BATCH = 100;
  */
 export async function prune(db: D1Database, days = 30, batch = PRUNE_BATCH): Promise<number> {
   const cutoff = now() - days * 24 * 60 * 60;
-  // Old boosts by people elsewhere go first: they only point at posts.
+  // Old boosts by people elsewhere go first: they only point at posts. Found
+  // through posts_reblog_of: by account, SQLite reads every remote post.
   await db
     .prepare(
-      "DELETE FROM posts WHERE reblog_of IS NOT NULL AND created_at < ? AND account_id IN (SELECT id FROM accounts WHERE ap_id IS NOT NULL)",
+      `DELETE FROM posts WHERE id IN (
+         SELECT p.id FROM posts p JOIN accounts a ON a.id = p.account_id
+         WHERE p.reblog_of IS NOT NULL AND p.created_at < ? AND a.ap_id IS NOT NULL)`,
     )
     .bind(cutoff)
     .run();
