@@ -249,7 +249,8 @@ export async function vote(db: D1Database, postId: number, accountId: number, sc
 /**
  * Sets a vote by someone on another server on a post from another server:
  * 1, -1, or 0 to take it back. Kept by the voter's ActivityPub ID, with no
- * account, since it only moves a score.
+ * account, since it only moves a score. A vote that's already held writes
+ * nothing: Lemmy sends the same vote again on edits and retries.
  */
 export async function remoteVote(db: D1Database, postId: number, actor: string, score: number): Promise<void> {
   if (score === 0) {
@@ -259,7 +260,7 @@ export async function remoteVote(db: D1Database, postId: number, actor: string, 
   await db
     .prepare(
       `INSERT INTO remote_votes (post_id, actor, score, created_at) VALUES (?, ?, ?, ?)
-       ON CONFLICT (post_id, actor) DO UPDATE SET score = excluded.score`,
+       ON CONFLICT (post_id, actor) DO UPDATE SET score = excluded.score WHERE remote_votes.score IS NOT excluded.score`,
     )
     .bind(postId, actor, score > 0 ? 1 : -1, now())
     .run();
