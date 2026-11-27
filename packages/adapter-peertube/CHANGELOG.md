@@ -1,5 +1,12 @@
 # Changelog
 
+## adapter-peertube@0.4.1 (2026-11-27)
+
+### Fixes
+
+- keep the runner socket open with pings, telling the runner about new jobs
+
+
 ## adapter-peertube@0.4.0 (2026-11-20)
 
 ### Features

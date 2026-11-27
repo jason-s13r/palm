@@ -1,5 +1,23 @@
 # Changelog
 
+## worker@0.15.2 (2026-11-27)
+
+### Fixes
+
+- keep the runner socket open with pings, telling the runner about new jobs
+
+- find old remote boosts through posts_reblog_of, work out known domains daily
+
+- skip remote vote upserts that change nothing
+
+- write a runner's last contact at most every five minutes
+
+### Dependencies
+
+- core: 1.8.1 -> 1.8.2
+- db: 0.11.2 -> 0.11.3
+
+
 ## worker@0.15.1 (2026-11-23)
 
 ### Fixes

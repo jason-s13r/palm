@@ -1,5 +1,12 @@
 # Changelog
 
+## core@1.8.2 (2026-11-27)
+
+### Fixes
+
+- keep the runner socket open with pings, telling the runner about new jobs
+
+
 ## core@1.8.1 (2026-11-23)
 
 ### Fixes

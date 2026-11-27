@@ -1,5 +1,16 @@
 # Changelog
 
+## db@0.11.3 (2026-11-27)
+
+### Fixes
+
+- find old remote boosts through posts_reblog_of, work out known domains daily
+
+- skip remote vote upserts that change nothing
+
+- write a runner's last contact at most every five minutes
+
+
 ## db@0.11.2 (2026-11-23)
 
 ### Fixes
