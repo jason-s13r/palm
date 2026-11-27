@@ -34,6 +34,11 @@ export interface PalmBindings {
    * video's renditions with ffmpeg, for free. A secret.
    */
   PEERTUBE_RUNNER_TOKEN?: string;
+  /**
+   * Seconds between palm's pings to a runner's socket, each a look for new
+   * jobs (60 if unset; at most 90, under Cloudflare's idle cut-off).
+   */
+  PEERTUBE_RUNNER_PING_SECONDS?: string;
   /** Each person's video quota, in megabytes (2048 if unset). */
   PALM_VIDEO_QUOTA_MB?: string;
 }

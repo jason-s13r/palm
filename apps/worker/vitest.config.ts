@@ -18,6 +18,8 @@ export default defineConfig({
           STAGING_BROWSER_REDIRECT: "https://site.example",
           // PeerTube's remote runners, on for the runner tests.
           PEERTUBE_RUNNER_TOKEN: "test-runner-registration-token",
+          // Pings (and looks for jobs) every second, so the socket test is quick.
+          PEERTUBE_RUNNER_PING_SECONDS: "1",
         },
       },
     }),

@@ -5,7 +5,6 @@ import {
   addRunnerJobs,
   availableRunnerJobs,
   finishRunnerJob,
-  hasAvailableRunnerJobs,
   heldRunnerJob,
   registerMedia,
   registerRunner,
@@ -355,19 +354,59 @@ export async function queueAttachmentTranscodes(ctx: RequestContext): Promise<vo
   }
 }
 
+/** A runner told about jobs it hasn't taken is told again after this long (seconds). */
+const RENOTIFY = 10 * 60;
+
+/** Seconds between pings, from `PEERTUBE_RUNNER_PING_SECONDS` (60 by default, 1-90). */
+function pingSeconds(ctx: RequestContext): number {
+  const set = Number(ctx.bindings.PEERTUBE_RUNNER_PING_SECONDS);
+  return Number.isFinite(set) && set >= 1 ? Math.min(set, 90) : 60;
+}
+
 /**
  * The runner's socket.io connection, enough of it to tell runners there's
  * work: palm speaks Engine.IO 4 over a WebSocket, answers the /runners
- * namespace's connect, and says "available-jobs" when there are some. It
- * sends no pings, so the runner reconnects every 45 seconds or so, and each
- * reconnect is a fresh look at the queue: polling, without a Durable Object.
+ * namespace's connect, and says "available-jobs" when there are some.
+ *
+ * peertube-runner has no polling timer: it asks for jobs when its socket
+ * connects and when told there are some. So palm keeps the socket open,
+ * pinging every minute and looking at the queue each time, and tells the
+ * runner about jobs it hasn't been told about (or again after ten minutes,
+ * if it hasn't taken them). A connection costs one request however long it
+ * lasts. If the Worker drops it, the advertised ping window (95 seconds)
+ * has the runner reconnect, and the reconnect looks at the queue too.
  */
 export async function runnerSocket(request: Request, ctx: RequestContext): Promise<Response> {
   if (!enabled(ctx) || request.headers.get("upgrade")?.toLowerCase() !== "websocket") return new Response("Not found", { status: 404 });
   const pair = new WebSocketPair();
   const [client, server] = Object.values(pair) as [WebSocket, WebSocket];
   server.accept();
-  server.send(`0${JSON.stringify({ sid: randomToken(10), upgrades: [], pingInterval: 25000, pingTimeout: 20000, maxPayload: 1000000 })}`);
+  server.send(`0${JSON.stringify({ sid: randomToken(10), upgrades: [], pingInterval: 85000, pingTimeout: 10000, maxPayload: 1000000 })}`);
+
+  const db = ctx.bindings.DB;
+  let told = new Set<string>();
+  let toldAt = 0;
+  let timer: ReturnType<typeof setInterval> | undefined;
+  const stop = () => {
+    if (timer !== undefined) clearInterval(timer);
+    timer = undefined;
+  };
+  // On connect the runner asks for jobs itself, so those count as told.
+  const look = async (connecting = false) => {
+    const jobs = await availableRunnerJobs(db, 20);
+    if (!jobs.length) {
+      told = new Set();
+      return;
+    }
+    const at = Math.floor(Date.now() / 1000);
+    if (!jobs.some((j) => !told.has(j.uuid)) && at - toldAt < RENOTIFY) return;
+    if (!connecting) server.send(`42/runners,${JSON.stringify(["available-jobs"])}`);
+    told = new Set(jobs.map((j) => j.uuid));
+    toldAt = at;
+  };
+  server.addEventListener("close", stop);
+  server.addEventListener("error", stop);
+
   server.addEventListener("message", (event) => {
     const data = typeof event.data === "string" ? event.data : "";
     if (data === "2") return server.send("3");
@@ -375,7 +414,7 @@ export async function runnerSocket(request: Request, ctx: RequestContext): Promi
     const other = /^40(\/[^,]*)?,?/.exec(data);
     if (other && other[1] !== "/runners") return server.send(`44${other[1] ?? ""},${JSON.stringify({ message: "Not supported" })}`);
     const connect = /^40\/runners,(.*)$/.exec(data);
-    if (!connect) return;
+    if (!connect || timer !== undefined) return;
     ctx.waitUntil(
       (async () => {
         let token = "";
@@ -384,13 +423,22 @@ export async function runnerSocket(request: Request, ctx: RequestContext): Promi
         } catch {
           // No token: refused below.
         }
-        const runner = await runnerByToken(ctx.bindings.DB, token);
+        const runner = await runnerByToken(db, token);
         if (!runner) {
           server.send(`44/runners,${JSON.stringify({ message: "Not authorized" })}`);
           return;
         }
         server.send(`40/runners,${JSON.stringify({ sid: randomToken(10) })}`);
-        if (await hasAvailableRunnerJobs(ctx.bindings.DB)) server.send(`42/runners,${JSON.stringify(["available-jobs"])}`);
+        await look(true);
+        timer = setInterval(() => {
+          try {
+            server.send("2");
+          } catch {
+            stop();
+            return;
+          }
+          look().catch(() => undefined);
+        }, pingSeconds(ctx) * 1000);
       })().catch(() => undefined),
     );
   });
